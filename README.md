@@ -78,6 +78,8 @@ This project is open source and available under the AGPL-3.0 License.
 
 ## Support
 
-Please report bugs and feature requests via GitHub or on Nostr npub135w572zryhrhu406v73fzwvg56t7sps03nzna58l23qfkpnnr3pq65nne8
+Donate to: 82fygu3Su91dR4H5fsu7jBcFHMcjHdt4nDvgQtwH6Y5NNxVHTHJ4fqQL5SkzBLt4VK5BUQcirNsLRgejurb5krsP3e3W4pW
+
+Follow on Nostr: npub135w572zryhrhu406v73fzwvg56t7sps03nzna58l23qfkpnnr3pq65nne8
 
 ---
