@@ -89,7 +89,7 @@ export function escapeHtml(text) {
 }
 
 // Parse and format post content: links, images, mentions, and embedded notes
-export function parseContent(content) {
+export function parseContent(content, skipEmbeddedNotes = false) {
     // First escape HTML to prevent XSS
     let parsed = escapeHtml(content);
     
@@ -123,25 +123,30 @@ export function parseContent(content) {
         }
     });
     
-    // Parse nostr note mentions - embed them like nevents
-    const noteRegex = /(nostr:)?(note1[a-z0-9]{58})/gi;
-    parsed = parsed.replace(noteRegex, (match, prefix, noteId) => {
-        // Convert note1 to nevent format for embedding
-        try {
-            const { nip19 } = window.NostrTools;
-            const decoded = nip19.decode(noteId);
-            const eventId = decoded.data;
-            return `<div class="embedded-note" data-noteid="${eventId}">Loading note...</div>`;
-        } catch (e) {
-            return `<span class="mention">note:${noteId.slice(0, 12)}...</span>`;
-        }
-    });
-    
-    // Parse nostr nevent mentions - embed them
-    const neventRegex = /(nostr:)?(nevent1[a-z0-9]+)/gi;
-    parsed = parsed.replace(neventRegex, (match, prefix, nevent) => {
-        return `<div class="embedded-note" data-nevent="${nevent}">Loading event...</div>`;
-    });
+    // Skip embedded note processing if requested or if content already contains processed embedded notes
+    const hasProcessedNotes = parsed.includes('class="embedded-note') && parsed.includes('loaded');
+
+    if (!skipEmbeddedNotes && !hasProcessedNotes) {
+        // Parse nostr note mentions - embed them like nevents
+        const noteRegex = /(nostr:)?(note1[a-z0-9]{58})/gi;
+        parsed = parsed.replace(noteRegex, (match, prefix, noteId) => {
+            // Convert note1 to nevent format for embedding
+            try {
+                const { nip19 } = window.NostrTools;
+                const decoded = nip19.decode(noteId);
+                const eventId = decoded.data;
+                return `<div class="embedded-note" data-noteid="${eventId}">Loading note...</div>`;
+            } catch (e) {
+                return `<span class="mention">note:${noteId.slice(0, 12)}...</span>`;
+            }
+        });
+
+        // Parse nostr nevent mentions - embed them
+        const neventRegex = /(nostr:)?(nevent1[a-z0-9]+)/gi;
+        parsed = parsed.replace(neventRegex, (match, prefix, nevent) => {
+            return `<div class="embedded-note" data-nevent="${nevent}">Loading event...</div>`;
+        });
+    }
     
     // Parse nostr nprofile mentions - show as user names
     const nprofileRegex = /(nostr:)?(nprofile1[a-z0-9]+)/gi;
@@ -232,7 +237,7 @@ export async function processEmbeddedNotes(containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    const embeddedNotes = container.querySelectorAll('.embedded-note[data-nevent], .embedded-note[data-noteid]');
+    const embeddedNotes = container.querySelectorAll('.embedded-note[data-nevent]:not(.loaded), .embedded-note[data-noteid]:not(.loaded)');
 
     for (const noteDiv of embeddedNotes) {
         const nevent = noteDiv.dataset.nevent;
@@ -337,7 +342,7 @@ function renderEmbeddedNote(event) {
                 <span class="embedded-note-author">${author}</span>
                 <span class="embedded-note-time">${timeAgo}</span>
             </div>
-            <div class="embedded-note-text">${parseContent(content)}</div>
+            <div class="embedded-note-text">${parseContent(content, true)}</div>
         </div>
     `;
 }

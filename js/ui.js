@@ -719,7 +719,15 @@ export async function openThreadView(eventId) {
         }
         
         threadContent.innerHTML = threadHtml || '<div style="text-align: center; padding: 40px; color: #999;">No notes found in thread</div>';
-        
+
+        // Process any embedded notes in the thread content
+        try {
+            const Utils = await import('./utils.js');
+            await Utils.processEmbeddedNotes('threadContent');
+        } catch (error) {
+            console.error('Error processing embedded notes in thread:', error);
+        }
+
     } catch (error) {
         console.error('Error opening thread view:', error);
         const threadContent = document.getElementById('threadContent');
