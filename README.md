@@ -1,6 +1,6 @@
 # Nosmero - Monero Nostr Client
 
-![Nosmero](src/assets/icons/logo_nosmero.svg)
+![Nosmero](/assets/nosmero-logo-new.png)
 
 Nostr client with integrated Monero and bitcoin lightning zap functionality. Developer is GrahaM O'Nero who can be found at npub1xhfclgh0klylfvdlyzjd9n0dwvd32tkcwxs24jwhydrjvhymgtvql23s4p
 
