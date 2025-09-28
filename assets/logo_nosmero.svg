@@ -1,0 +1,11 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+ <!-- Clean "N" lettermark -->
+ <text x="18" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="url(#textGradient)">N</text>
+ 
+ <defs>
+   <linearGradient id="textGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+     <stop offset="0%" stop-color="#FF6600"/>
+     <stop offset="100%" stop-color="#8B5CF6"/>
+   </linearGradient>
+ </defs>
+</svg>
