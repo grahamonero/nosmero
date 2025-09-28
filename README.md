@@ -14,7 +14,7 @@ Nostr client with integrated Monero and bitcoin lightning zap functionality. Dev
 ### For Developers
 ```bash
 # Clone the repository
-git clone https://github.com/gls-scott/nosmero.git
+git clone https://github.com/grahamonero/nosmero.git
 cd nosmero-nostr-client
 
 # Serve locally (any HTTP server works)
