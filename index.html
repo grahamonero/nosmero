@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nosmero - Nostr + Monero</title>
+    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Mobile menu toggle button -->
+    <button class="mobile-menu-toggle" onclick="toggleMobileMenu()" aria-label="Toggle menu">
+        📚
+    </button>
+    
+    <!-- Mobile overlay -->
+    <div class="mobile-overlay" onclick="closeMobileMenu()"></div>
+    
+    <div class="sidebar">
+        <div class="logo">
+            <img src="nosmero-logo-new.png" alt="nosmero" style="width: 120px; height: auto;">
+        </div>
+        
+        <div class="nav-item active" data-tab="home" onclick="handleNavItemClick('home')">
+            <span>🏠</span>
+            <span>Home</span>
+        </div>
+        
+        <div class="nav-item" data-tab="settings" onclick="handleNavItemClick('settings')">
+            <span>⚙️</span>
+            <span>Settings</span>
+        </div>
+        
+        <div class="nav-item" data-tab="search" onclick="handleNavItemClick('search')">
+            <span>🔍</span>
+            <span>Search</span>
+        </div>
+        
+        <div class="nav-item" data-tab="messages" onclick="handleNavItemClick('messages')">
+            <span>✉️</span>
+            <span>Messages</span>
+        </div>
+        
+        <div class="nav-item" data-tab="notifications" onclick="handleNavItemClick('notifications')" style="position: relative;">
+            <span>🔔</span>
+            <span>Notifications</span>
+            <span class="notification-indicator" style="position: absolute; top: 8px; right: 8px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: white; border-radius: 50%; width: 12px; height: 12px; font-size: 8px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
+        </div>
+        
+        <div class="nav-item" data-tab="profile" onclick="handleNavItemClick('profile')">
+            <span>👤</span>
+            <span>Profile</span>
+        </div>
+        
+        <!-- Login/Create Account Options (shown when not logged in) -->
+        <div id="authOptions" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
+            <button class="login-option-btn" onclick="showCreateAccount()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: white; border-radius: 8px; cursor: pointer;">
+                🆕 Create Account
+            </button>
+            <button class="login-option-btn" onclick="showLoginWithNsec()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
+                🔑 Login with nsec
+            </button>
+            <button class="login-option-btn" onclick="loginWithExtension()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
+                🔌 Use Extension
+            </button>
+        </div>
+        
+        <!-- Logout Option (shown when logged in) -->
+        <div id="logoutOption" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
+            <button onclick="logout()" style="width: 100%; padding: 10px; background: #333; border: none; color: #ff6b6b; border-radius: 8px; cursor: pointer;">
+                🚪 Logout
+            </button>
+        </div>
+        
+        <button class="post-button" onclick="toggleCompose()">✏️ Create Note</button>
+        
+        <div class="nav-item" onclick="showZapQueue()" style="position: relative; margin-top: 10px;">
+            <span>💰</span>
+            <span>XMR Queue</span>
+            <span class="zap-queue-indicator" style="position: absolute; top: -5px; right: -5px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; font-weight: bold; display: none; justify-content: center; align-items: center;">0</span>
+        </div>
+        
+        <div class="nav-item" onclick="logout()" style="margin-top: 10px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border-radius: 12px; color: #fff;">
+            <span>🚪</span>
+            <span style="color: #fff; font-weight: bold;">Logout</span>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="header">
+            <div class="tab-bar">
+                <button class="tab active" data-feed="home">Home</button>
+                <button class="tab" data-feed="trending">Trend</button>
+            </div>
+        </div>
+
+        <div id="compose" class="compose-area" style="display: none;">
+            <textarea class="compose-textarea" placeholder="What's happening?" maxlength="4000" style="min-height: 120px; resize: vertical;" oninput="updateCharacterCount(this, 'mainCharCount')"></textarea>
+            <div style="text-align: right; color: #666; font-size: 12px; margin-bottom: 8px;">
+                <span id="mainCharCount">0/4000</span>
+            </div>
+            <div class="compose-actions">
+                <input type="text" class="xmr-address-input" placeholder="Your Monero address (optional)" id="composeMoneroAddress">
+                <div class="media-upload-section">
+                    <input type="file" id="composeMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'compose')">
+                    <div id="composeMediaPreview" class="media-preview" style="display: none;"></div>
+                </div>
+                <div class="compose-buttons">
+                    <button class="media-btn" onclick="document.getElementById('composeMediaInput').click()" title="Add Image/Video">
+                        📎 Media
+                    </button>
+                    <button class="cancel-btn" onclick="cancelCompose()">Cancel</button>
+                    <button class="send-btn" onclick="sendPost()">Publish</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="feed" id="feed">
+            <div class="loading">Loading nostr-tools...</div>
+        </div>
+        
+        <!-- Messages page (hidden by default) -->
+        <div id="messagesPage" class="messages-page" style="display: none;">
+            <div class="messages-container">
+                <div class="conversations-list">
+                    <div class="conversations-header">
+                        <h2>Messages</h2>
+                        <button class="new-message-btn" onclick="startNewMessage()">
+                            <span>✉️ New</span>
+                        </button>
+                    </div>
+                    <div id="conversationsList" class="conversations">
+                        <!-- Conversations will be listed here -->
+                    </div>
+                </div>
+                <div class="message-thread">
+                    <div id="messageHeader" class="message-header">
+                        <span>Select a conversation</span>
+                    </div>
+                    <div id="messageThread" class="messages-display">
+                        <!-- Messages will appear here -->
+                    </div>
+                    <div id="messageComposer" class="message-composer" style="display: none;">
+                        <textarea id="messageInput" placeholder="Type your message..." rows="3"></textarea>
+                        <button onclick="sendMessage()" class="send-message-btn">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Thread page (hidden by default) -->
+        <div id="threadPage" class="thread-page" style="display: none;">
+            <div class="thread-header">
+                <button onclick="goBackFromThread()" style="background: none; border: none; color: #fff; cursor: pointer; font-size: 18px; margin-right: 12px;">←</button>
+                <h2>Thread</h2>
+            </div>
+            <div id="threadPageContent" class="thread-content">
+                <!-- Thread will be displayed here -->
+            </div>
+        </div>
+
+        <div id="profilePage" class="profile-page" style="display: none;">
+            <!-- User profile will be displayed here -->
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div class="modal" id="loginModal">
+        <div class="modal-content">
+            <div class="modal-header">Welcome to nosmero</div>
+            <div style="margin-bottom: 20px; color: #ccc; text-align: left;">
+                Choose how you want to get started:
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+                <button class="login-option-btn" onclick="showCreateAccount()">
+                    🆕 Create New Account
+                </button>
+                <button class="login-option-btn" onclick="showLoginWithNsec()">
+                    🔑 Login with Private Key (nsec)
+                </button>
+                <button class="login-option-btn" onclick="loginWithExtension()">
+                    🔌 Login with Browser Extension
+                </button>
+            </div>
+
+            <!-- Create Account Section -->
+            <div id="createAccountSection" style="display: none;">
+                <div style="margin-bottom: 16px; color: #ccc; font-size: 14px;">
+                    We'll generate a new private key for you. Make sure to save it!
+                </div>
+                <button class="send-btn" onclick="createNewAccount()">Generate New Keys</button>
+                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+            </div>
+
+            <!-- Login with nsec Section -->
+            <div id="loginWithNsecSection" style="display: none;">
+                <div style="margin-bottom: 16px;">
+                    <input type="password" id="nsecInput" placeholder="Enter your nsec..." 
+                           style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
+                </div>
+                <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
+                    Your private key starts with "nsec1..."
+                </div>
+                <button class="send-btn" onclick="loginWithNsec()">Login</button>
+                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+            </div>
+
+            <!-- Key Display Section -->
+            <div id="keyDisplaySection" style="display: none;">
+                <div style="margin-bottom: 20px;">
+                    <div style="margin-bottom: 12px; color: #ccc;">Your Private Key (SAVE THIS!):</div>
+                    <div id="privateKeyDisplay" style="padding: 12px; background: #1a1a1a; border-radius: 8px; font-family: monospace; font-size: 12px; word-break: break-all; margin-bottom: 12px; color: #FF6600;"></div>
+                    
+                    <div style="margin-bottom: 12px; color: #ccc;">Your Public Key:</div>
+                    <div id="publicKeyDisplay" style="padding: 12px; background: #1a1a1a; border-radius: 8px; font-family: monospace; font-size: 12px; word-break: break-all; color: #8B5CF6;"></div>
+                </div>
+                
+                <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.2), rgba(139, 92, 246, 0.2)); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">⚠️ IMPORTANT:</div>
+                    <div style="color: #ccc; font-size: 14px;">
+                        Save your private key (nsec) somewhere safe! You'll need it to login again. Never share it with anyone!
+                    </div>
+                </div>
+                
+                <button class="send-btn" onclick="proceedToApp()">I've Saved My Keys - Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Post Modal -->
+    <div class="modal" id="newPostModal">
+        <div class="modal-content">
+            <div class="modal-header">Create Note</div>
+            <textarea id="newPostContent" placeholder="What's happening?" maxlength="4000" style="width: 100%; min-height: 150px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;" oninput="updateCharacterCount(this, 'modalCharCount')"></textarea>
+            <div style="text-align: right; color: #666; font-size: 12px; margin-top: 4px;">
+                <span id="modalCharCount">0/4000</span>
+            </div>
+            <input type="text" id="modalMoneroAddress" placeholder="Your Monero address (optional)" style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-top: 12px;">
+            <div class="media-upload-section">
+                <input type="file" id="modalMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'modal')">
+                <div id="modalMediaPreview" class="media-preview" style="display: none;"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="media-btn" onclick="document.getElementById('modalMediaInput').click()" title="Add Image/Video">
+                    📎 Media
+                </button>
+                <button class="close-btn" onclick="closeNewPostModal()">Cancel</button>
+                <button class="send-btn" onclick="publishNewPost()">Publish</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Reply Modal -->
+    <div class="modal" id="replyModal">
+        <div class="modal-content">
+            <div class="modal-header">Reply to Post</div>
+            <div id="replyingTo" style="padding: 12px; background: #1a1a1a; border-radius: 8px; margin-bottom: 16px; font-size: 14px; color: #999;"></div>
+            <textarea id="replyContent" placeholder="Write your reply..." maxlength="1000" style="width: 100%; min-height: 120px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
+            
+            <!-- Media Upload Section for Replies -->
+            <div class="media-upload-section">
+                <input type="file" id="replyMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'reply')">
+                <div id="replyMediaPreview" class="media-preview" style="display: none;"></div>
+            </div>
+            
+            <div class="modal-actions">
+                <button type="button" class="media-btn" onclick="document.getElementById('replyMediaInput').click()" title="Add Image/Video">
+                    📎 Media
+                </button>
+                <button class="close-btn" onclick="closeReplyModal()">Cancel</button>
+                <button class="send-btn" onclick="sendReply()">Reply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Repost Modal -->
+    <div class="modal" id="repostModal">
+        <div class="modal-content">
+            <div class="modal-header">Repost</div>
+            <div id="repostingTo" style="padding: 12px; background: #1a1a1a; border-radius: 8px; margin-bottom: 16px; font-size: 14px; color: #999;"></div>
+
+            <!-- Repost Type Toggle -->
+            <div style="margin-bottom: 16px;">
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <button id="quickRepostBtn" onclick="setRepostType('quick')" style="flex: 1; padding: 8px 16px; border: 1px solid #FF6600; border-radius: 6px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold; cursor: pointer;">Quick Repost</button>
+                    <button id="addCommentBtn" onclick="setRepostType('comment')" style="flex: 1; padding: 8px 16px; border: 1px solid #333; border-radius: 6px; background: transparent; color: #fff; cursor: pointer;">Add Comment</button>
+                </div>
+                <div id="quickRepostDesc" style="color: #666; font-size: 14px;">Share this note to your followers without adding commentary</div>
+                <div id="addCommentDesc" style="color: #666; font-size: 14px; display: none;">Quote this note and add your own commentary</div>
+            </div>
+
+            <!-- Comment Section (hidden by default) -->
+            <div id="repostCommentSection" style="display: none; margin-bottom: 16px;">
+                <textarea id="repostComment" placeholder="Add your thoughts..." maxlength="1000" style="width: 100%; min-height: 100px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeRepostModal()">Cancel</button>
+                <button id="repostBtn" class="send-btn" onclick="sendRepost()">Repost</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">Settings</div>
+            
+            <div class="settings-section">
+                <h3>Theme</h3>
+                <select id="themeSelect" onchange="changeTheme(this.value)" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                </select>
+            </div>
+            
+            <div class="settings-section">
+                <h3>Default Monero Address</h3>
+                <input type="text" id="defaultMoneroAddress" placeholder="Your default XMR address" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+            </div>
+            
+            <div class="settings-section">
+                <h3>Relay Configuration (NIP-65)</h3>
+                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Configure which relays you read from and write to</p>
+                
+                <div style="display: flex; gap: 20px;">
+                    <div style="flex: 1;">
+                        <h4 style="color: #FF6600; margin-bottom: 8px;">Read Relays</h4>
+                        <div id="readRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
+                        <input type="text" id="newReadRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
+                        <button onclick="addReadRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Read Relay</button>
+                    </div>
+                    
+                    <div style="flex: 1;">
+                        <h4 style="color: #8B5CF6; margin-bottom: 8px;">Write Relays</h4>
+                        <div id="writeRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
+                        <input type="text" id="newWriteRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
+                        <button onclick="addWriteRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #8B5CF6, #FF6600); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Write Relay</button>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 12px; padding: 8px; background: #111; border-radius: 8px;">
+                    <button onclick="resetToDefaultRelays()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer; margin-right: 8px;">Reset to Defaults</button>
+                    <button onclick="importRelayList()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer;">Import from Profile</button>
+                </div>
+            </div>
+            
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeSettingsModal()">Close</button>
+                <button class="send-btn" onclick="saveSettings()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Modal -->
+    <div class="modal" id="profileModal">
+        <div class="modal-content">
+            <div class="modal-header">Profile</div>
+            <div id="profileContent"></div>
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeProfileModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Profile Modal -->
+    <div class="modal" id="userProfileModal">
+        <div class="modal-content">
+            <div id="userProfileContent"></div>
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeUserProfileModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Thread View Modal -->
+    <div class="modal" id="threadModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">Thread</div>
+            <div id="threadContent" style="max-height: 70vh; overflow-y: auto;"></div>
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeThreadModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Zap Modal -->
+    <div class="modal" id="zapModal">
+        <div class="modal-content">
+            <div class="modal-header">Send Monero Zap</div>
+            <div id="zapDetails"></div>
+            <div class="qr-container">
+                <div id="qrCode"></div>
+            </div>
+            <div class="modal-footer">
+                <div style="font-size: 12px; color: #666; margin-bottom: 16px;">
+                    Scan with your Monero wallet
+                </div>
+                <button class="close-btn" onclick="closeZapModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Zap Queue Modal -->
+    <div class="modal" id="zapQueueModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">XMR Zap Queue</div>
+            <div id="zapQueueContent">
+                <!-- Queue content will be dynamically populated -->
+            </div>
+            <div class="modal-footer">
+                <button class="send-btn" onclick="showBatchQrCodes()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Process Queue</button>
+                <button class="close-btn" onclick="closeZapQueueModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Post Menu -->
+    <div id="postMenu" class="post-menu" style="display: none;">
+        <button onclick="copyPostLink()">Copy Link</button>
+        <button onclick="copyPostId()">Copy Note ID</button>
+        <button onclick="copyPostJson()">Copy JSON</button>
+        <button onclick="viewPostSource()">View Source</button>
+        <button onclick="requestDeletion()" style="color: #ff6b6b;">Request Deletion</button>
+        <button onclick="muteUser()">Mute User</button>
+        <button onclick="reportPost()">Report</button>
+    </div>
+
+    <!-- Generated Key Modal -->
+    <div class="modal" id="keyModal">
+        <!-- Content will be generated by JavaScript -->
+    </div>
+
+    <!-- Security: DOMPurify for XSS protection -->
+    <script src="lib/purify.min.js"></script>
+    
+    <!-- Load nostr-tools from local copy -->
+    <script src="lib/nostr-tools.bundle.js"></script>
+    <script>
+        // Verify NostrTools is loaded and debug its contents
+        console.log('Checking NostrTools after load...');
+        console.log('window.NostrTools exists:', !!window.NostrTools);
+        if (window.NostrTools) {
+            console.log('NostrTools loaded successfully');
+            console.log('Available functions:', Object.keys(window.NostrTools).slice(0, 20));
+            console.log('Has generateSecretKey:', !!window.NostrTools.generateSecretKey);
+            console.log('Has getPublicKey:', !!window.NostrTools.getPublicKey);
+            console.log('Has SimplePool:', !!window.NostrTools.SimplePool);
+            console.log('Has nip19:', !!window.NostrTools.nip19);
+        } else {
+            console.error('NostrTools failed to load - it is undefined');
+        }
+    </script>
+    
+    <!-- Load the modular v2 application -->
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>
