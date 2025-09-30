@@ -141,28 +141,45 @@ export async function fetchUserRelayList(pubkey) {
 
 // Parse NIP-65 relay list event
 export function parseRelayList(event) {
+    console.log('🔍 Parsing NIP-65 relay list event:', event);
+
     const relayList = {
         read: [],
         write: []
     };
-    
+
     event.tags.forEach(tag => {
         if (tag[0] === 'r') {
             const url = tag[1];
             const permissions = tag[2];
-            
-            if (!permissions || permissions === 'read') {
+
+            console.log(`📡 Processing relay: ${url}, permissions: "${permissions}" (type: ${typeof permissions})`);
+
+            // According to NIP-65:
+            // - No permission specified = both read and write
+            // - "read" = read only
+            // - "write" = write only
+            if (!permissions || permissions === '' || permissions === undefined) {
+                // No specific permission = both read and write
+                console.log(`  ✅ Adding ${url} to BOTH read and write (no permission specified)`);
+                relayList.read.push(url);
+                relayList.write.push(url);
+            } else if (permissions === 'read') {
+                console.log(`  📖 Adding ${url} to read only`);
                 relayList.read.push(url);
             } else if (permissions === 'write') {
+                console.log(`  ✏️ Adding ${url} to write only`);
                 relayList.write.push(url);
             } else {
-                // No specific permission = both read and write
+                // Unknown permission - treat as both for safety
+                console.log(`  ⚠️ Unknown permission "${permissions}" for ${url}, treating as both read/write`);
                 relayList.read.push(url);
                 relayList.write.push(url);
             }
         }
     });
-    
+
+    console.log('📊 Final parsed relay list:', relayList);
     return relayList;
 }
 

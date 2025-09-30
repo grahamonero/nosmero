@@ -2976,6 +2976,9 @@ async function populateSettingsForm() {
             console.log('🎨 Set theme to:', currentTheme);
         }
 
+        // Populate relay lists
+        await populateRelayLists();
+
         console.log('✅ Settings form populated successfully');
 
     } catch (error) {
@@ -3111,11 +3114,145 @@ function changeTheme(theme) {
     Utils.showNotification(`Theme changed to ${theme}`, 'success');
 }
 
+// ==================== RELAY MANAGEMENT FOR SETTINGS MODAL ====================
+
+// Populate relay lists in Settings modal
+async function populateRelayLists() {
+    console.log('📡 Populating relay lists in Settings modal...');
+
+    const readRelays = Relays.getReadRelays();
+    const writeRelays = Relays.getWriteRelays();
+
+    console.log('Read relays:', readRelays);
+    console.log('Write relays:', writeRelays);
+
+    // Populate read relays list
+    const readRelaysList = document.getElementById('readRelaysList');
+    if (readRelaysList) {
+        readRelaysList.innerHTML = readRelays.map(relay => `
+            <div style="display: flex; align-items: center; justify-content: between; padding: 8px; background: rgba(255, 102, 0, 0.1); border-radius: 6px; margin-bottom: 6px;">
+                <span style="color: #fff; font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${relay}</span>
+                <button onclick="removeReadRelayFromModal('${relay}')"
+                        style="background: #ff4444; border: none; border-radius: 4px; color: white; padding: 4px 8px; font-size: 12px; cursor: pointer; margin-left: 8px;">
+                    Remove
+                </button>
+            </div>
+        `).join('');
+    }
+
+    // Populate write relays list
+    const writeRelaysList = document.getElementById('writeRelaysList');
+    if (writeRelaysList) {
+        writeRelaysList.innerHTML = writeRelays.map(relay => `
+            <div style="display: flex; align-items: center; justify-content: between; padding: 8px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; margin-bottom: 6px;">
+                <span style="color: #fff; font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${relay}</span>
+                <button onclick="removeWriteRelayFromModal('${relay}')"
+                        style="background: #ff4444; border: none; border-radius: 4px; color: white; padding: 4px 8px; font-size: 12px; cursor: pointer; margin-left: 8px;">
+                    Remove
+                </button>
+            </div>
+        `).join('');
+    }
+
+    console.log('✅ Relay lists populated');
+}
+
+// Add read relay from Settings modal
+async function addReadRelay() {
+    const input = document.getElementById('newReadRelayUrl');
+    if (!input) return;
+
+    const relayUrl = input.value.trim();
+    if (!relayUrl) {
+        Utils.showNotification('Please enter a relay URL', 'error');
+        return;
+    }
+
+    try {
+        const success = Relays.addReadRelay(relayUrl);
+        if (success) {
+            Utils.showNotification('Read relay added successfully!', 'success');
+            input.value = '';
+            await populateRelayLists(); // Refresh the lists
+        } else {
+            Utils.showNotification('Relay already exists in read list', 'warning');
+        }
+    } catch (error) {
+        console.error('Error adding read relay:', error);
+        Utils.showNotification(`Failed to add relay: ${error.message}`, 'error');
+    }
+}
+
+// Add write relay from Settings modal
+async function addWriteRelay() {
+    const input = document.getElementById('newWriteRelayUrl');
+    if (!input) return;
+
+    const relayUrl = input.value.trim();
+    if (!relayUrl) {
+        Utils.showNotification('Please enter a relay URL', 'error');
+        return;
+    }
+
+    try {
+        const success = Relays.addWriteRelay(relayUrl);
+        if (success) {
+            Utils.showNotification('Write relay added successfully!', 'success');
+            input.value = '';
+            await populateRelayLists(); // Refresh the lists
+        } else {
+            Utils.showNotification('Relay already exists in write list', 'warning');
+        }
+    } catch (error) {
+        console.error('Error adding write relay:', error);
+        Utils.showNotification(`Failed to add relay: ${error.message}`, 'error');
+    }
+}
+
+// Remove read relay from Settings modal
+async function removeReadRelayFromModal(relayUrl) {
+    try {
+        const success = Relays.removeReadRelay(relayUrl);
+        if (success) {
+            Utils.showNotification('Read relay removed successfully!', 'success');
+            await populateRelayLists(); // Refresh the lists
+        } else {
+            Utils.showNotification('Failed to remove relay', 'error');
+        }
+    } catch (error) {
+        console.error('Error removing read relay:', error);
+        Utils.showNotification(`Failed to remove relay: ${error.message}`, 'error');
+    }
+}
+
+// Remove write relay from Settings modal
+async function removeWriteRelayFromModal(relayUrl) {
+    try {
+        const success = Relays.removeWriteRelay(relayUrl);
+        if (success) {
+            Utils.showNotification('Write relay removed successfully!', 'success');
+            await populateRelayLists(); // Refresh the lists
+        } else {
+            Utils.showNotification('Failed to remove relay', 'error');
+        }
+    } catch (error) {
+        console.error('Error removing write relay:', error);
+        Utils.showNotification(`Failed to remove relay: ${error.message}`, 'error');
+    }
+}
+
 // Override loadSettings to use modal approach
 window.loadSettings = openSettingsModal;
 window.saveSettings = saveSettings;
 window.closeSettingsModal = closeSettingsModal;
 window.changeTheme = changeTheme;
+
+// Make relay management functions available globally
+window.addReadRelay = addReadRelay;
+window.addWriteRelay = addWriteRelay;
+window.removeReadRelayFromModal = removeReadRelayFromModal;
+window.removeWriteRelayFromModal = removeWriteRelayFromModal;
+window.populateRelayLists = populateRelayLists;
 
 // Make edit profile functions available globally
 window.showEditProfileModal = showEditProfileModal;
