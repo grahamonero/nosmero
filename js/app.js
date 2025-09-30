@@ -213,7 +213,7 @@ async function handleNavigation(event) {
             await loadUserProfile();
             break;
         case 'settings':
-            await loadSettings();
+            await window.loadSettings();
             break;
         default:
             console.warn('Unknown navigation tab:', tab);
@@ -896,8 +896,8 @@ function escapeHtml(unsafe) {
         .replace(/'/g, "&#039;");
 }
 
-// Load settings page
-async function loadSettings() {
+// Load settings page (DISABLED - using modal version instead)
+async function loadSettings_OLD_DISABLED() {
     // Check if user is logged in first
     if (!State.publicKey) {
         showAuthUI();
@@ -2371,8 +2371,8 @@ function getUserLightningAddress(pubkey = null) {
         
         // Fall back to profile cache
         const profile = State.profileCache[State.publicKey];
-        if (profile && profile.lud16) {
-            return profile.lud16;
+        if (profile && (profile.lud16 || profile.lud06)) {
+            return profile.lud16 || profile.lud06;
         }
         
         return null;
@@ -2380,8 +2380,8 @@ function getUserLightningAddress(pubkey = null) {
     
     // For other users, check their profile cache
     const profile = State.profileCache[pubkey];
-    if (profile && profile.lud16) {
-        return profile.lud16;
+    if (profile && (profile.lud16 || profile.lud06)) {
+        return profile.lud16 || profile.lud06;
     }
     
     return null;
@@ -2594,11 +2594,18 @@ function showEditProfileModal() {
                     
                     <div style="margin-bottom: 16px;">
                         <label style="color: #ccc; display: block; margin-bottom: 8px; font-size: 14px;">Profile Picture URL</label>
-                        <input type="url" id="editProfilePicture" value="${Utils.escapeHtml(currentProfile.picture || '')}" 
-                               style="width: 100%; padding: 12px; background: #000; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px;" 
+                        <input type="url" id="editProfilePicture" value="${Utils.escapeHtml(currentProfile.picture || '')}"
+                               style="width: 100%; padding: 12px; background: #000; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px;"
                                placeholder="https://example.com/your-avatar.jpg">
                     </div>
-                    
+
+                    <div style="margin-bottom: 16px;">
+                        <label style="color: #ccc; display: block; margin-bottom: 8px; font-size: 14px;">Banner Image URL</label>
+                        <input type="url" id="editProfileBanner" value="${Utils.escapeHtml(currentProfile.banner || '')}"
+                               style="width: 100%; padding: 12px; background: #000; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px;"
+                               placeholder="https://example.com/your-banner.jpg">
+                    </div>
+
                     <div style="margin-bottom: 16px;">
                         <label style="color: #ccc; display: block; margin-bottom: 8px; font-size: 14px;">Website</label>
                         <input type="url" id="editProfileWebsite" value="${Utils.escapeHtml(currentProfile.website || '')}" 
@@ -2652,6 +2659,7 @@ async function saveProfile(event) {
     const name = document.getElementById('editProfileName').value.trim();
     const about = document.getElementById('editProfileAbout').value.trim();
     const picture = document.getElementById('editProfilePicture').value.trim();
+    const banner = document.getElementById('editProfileBanner').value.trim();
     const website = document.getElementById('editProfileWebsite').value.trim();
     const nip05 = document.getElementById('editProfileNip05').value.trim();
     
@@ -2682,6 +2690,7 @@ async function saveProfile(event) {
             name: name || undefined,
             about: about || undefined,
             picture: picture || undefined,
+            banner: banner || undefined,
             website: website || undefined,
             nip05: nip05 || undefined
         };
@@ -2798,6 +2807,320 @@ async function ensureUserProfile() {
         console.error('Error fetching user profile:', error);
     }
 }
+
+// ==================== SETTINGS FUNCTIONALITY ====================
+
+// Force fresh profile fetch from relays (for modal settings)
+async function forceFreshProfileFetch() {
+    return new Promise((resolve) => {
+        console.log('🔍 Fetching fresh profile for:', State.publicKey);
+
+        const readRelays = Relays.getReadRelays();
+        const timeoutDuration = 5000;
+        let profileFound = false;
+        let profileEvents = [];
+
+        const subscription = State.pool.subscribeMany(readRelays, [
+            {
+                kinds: [0],
+                authors: [State.publicKey],
+                limit: 5
+            }
+        ], {
+            onevent: (event) => {
+                try {
+                    console.log('📄 Received fresh profile event:', event);
+                    const profileData = JSON.parse(event.content);
+                    profileEvents.push({ event, profile: profileData, timestamp: event.created_at });
+                    console.log('📊 RAW profile data from NIP-01:', profileData);
+                    console.log('⚡ Lightning address found:', profileData.lud16 || profileData.lud06 || 'None');
+                    console.log('🖼️ Banner found:', profileData.banner || 'None');
+                } catch (error) {
+                    console.error('❌ Error parsing profile event:', error);
+                }
+            },
+            oneose: () => {
+                console.log('✓ Profile fetch complete');
+                subscription.close();
+
+                // Process collected profile events to find the best one
+                if (profileEvents.length > 0) {
+                    console.log('Processing', profileEvents.length, 'profile events');
+
+                    // Find the most complete profile (most fields) or the most recent
+                    let bestProfile = null;
+                    let bestScore = -1;
+
+                    for (const { event, profile, timestamp } of profileEvents) {
+                        // Score based on completeness (number of non-empty fields)
+                        const score = Object.keys(profile).filter(key =>
+                            profile[key] && profile[key] !== '' &&
+                            !['monero_address'].includes(key) // Don't count monero_address for completeness
+                        ).length;
+
+                        // Prefer more complete profiles, or more recent if same completeness
+                        if (score > bestScore || (score === bestScore && timestamp > (bestProfile?.timestamp || 0))) {
+                            bestProfile = { event, profile, timestamp };
+                            bestScore = score;
+                        }
+                    }
+
+                    if (bestProfile) {
+                        const { event, profile } = bestProfile;
+                        console.log('Selected best profile with score', bestScore, ':', profile);
+
+                        // Merge with existing cached profile to preserve existing data
+                        const existingProfile = State.profileCache[State.publicKey] || {};
+
+                        const userProfile = {
+                            ...existingProfile,
+                            ...profile,
+                            pubkey: event.pubkey,
+                            // Only use fallbacks if both existing and new profile don't have the field
+                            name: profile.name || profile.display_name || existingProfile.name || `User ${State.publicKey.substring(0, 8)}`,
+                            picture: profile.picture || existingProfile.picture || null,
+                            about: profile.about || existingProfile.about || 'No bio available',
+                            nip05: profile.nip05 || existingProfile.nip05 || null,
+                            website: profile.website || existingProfile.website || null,
+                            banner: profile.banner || existingProfile.banner || null,
+                            monero_address: profile.monero_address || existingProfile.monero_address || null,
+                            lud16: profile.lud16 || existingProfile.lud16 || null,
+                            lud06: profile.lud06 || existingProfile.lud06 || null
+                        };
+
+                        State.profileCache[State.publicKey] = userProfile;
+                        profileFound = true;
+                        console.log('✅ Profile cache updated:', userProfile);
+                    }
+                }
+
+                resolve();
+            }
+        });
+
+        setTimeout(() => {
+            console.log('⏰ Profile fetch timeout, using cached data');
+            subscription.close();
+            resolve();
+        }, timeoutDuration);
+    });
+}
+
+// Open modal settings (separate from page-based loadSettings)
+async function openSettingsModal() {
+    console.log('🔧 Opening Settings modal...');
+    if (!State.publicKey) {
+        showAuthUI();
+        return;
+    }
+
+    const settingsModal = document.getElementById('settingsModal');
+    if (!settingsModal) return;
+    settingsModal.style.display = 'flex';
+
+    const lightningField = document.getElementById('defaultLightningAddress');
+    const moneroField = document.getElementById('defaultMoneroAddress');
+    if (lightningField) lightningField.value = 'Loading...';
+    if (moneroField) moneroField.value = 'Loading...';
+
+    console.log('🔄 Settings: Fetching fresh profile from relays...');
+    await forceFreshProfileFetch();
+    await populateSettingsForm();
+}
+
+// Populate settings form with current user data
+async function populateSettingsForm() {
+    try {
+        const currentProfile = State.profileCache[State.publicKey] || {};
+        console.log('📋 Populating settings form with profile:', currentProfile);
+
+        // Populate Lightning address field using existing function
+        const lightningField = document.getElementById('defaultLightningAddress');
+        if (lightningField) {
+            const fromFunction = getUserLightningAddress(State.publicKey);
+            const fromProfile = currentProfile.lud16 || currentProfile.lud06;
+            const lightningAddress = fromFunction || fromProfile || '';
+
+            console.log('🔍 Lightning address sources:');
+            console.log('  - From getUserLightningAddress():', fromFunction);
+            console.log('  - From profile.lud16:', currentProfile.lud16);
+            console.log('  - From profile.lud06:', currentProfile.lud06);
+            console.log('  - Final value used:', lightningAddress);
+
+            lightningField.value = lightningAddress;
+            console.log('⚡ Set Lightning field to:', lightningAddress);
+        }
+
+        // Populate Banner image field
+        const bannerField = document.getElementById('defaultBannerImage');
+        if (bannerField) {
+            const bannerImage = currentProfile.banner || '';
+            console.log('🔍 Banner image source:');
+            console.log('  - From profile.banner:', currentProfile.banner);
+            console.log('  - Final value used:', bannerImage);
+            bannerField.value = bannerImage;
+            console.log('🖼️ Set Banner field to:', bannerImage);
+        }
+
+        const moneroField = document.getElementById('defaultMoneroAddress');
+        if (moneroField) {
+            const moneroAddress = await getUserMoneroAddress(State.publicKey);
+            moneroField.value = moneroAddress || '';
+            console.log('💰 Set Monero field to:', moneroAddress);
+        }
+
+        const themeSelect = document.getElementById('themeSelect');
+        if (themeSelect) {
+            const currentTheme = localStorage.getItem('theme') || 'dark';
+            themeSelect.value = currentTheme;
+            console.log('🎨 Set theme to:', currentTheme);
+        }
+
+        console.log('✅ Settings form populated successfully');
+
+    } catch (error) {
+        console.error('❌ Error populating settings form:', error);
+        Utils.showNotification('Failed to load some settings', 'error');
+    }
+}
+
+// Save settings from the modal
+async function saveSettings() {
+    if (!State.publicKey || !State.privateKey) {
+        Utils.showNotification('Please log in to save settings', 'error');
+        return;
+    }
+
+    try {
+        const currentProfile = State.profileCache[State.publicKey] || {};
+        console.log('💾 Saving settings with current profile:', currentProfile);
+
+        const lightningAddress = document.getElementById('defaultLightningAddress').value.trim();
+        const bannerImage = document.getElementById('defaultBannerImage').value.trim();
+        const moneroAddress = document.getElementById('defaultMoneroAddress').value.trim();
+        const theme = document.getElementById('themeSelect').value;
+
+        localStorage.setItem('theme', theme);
+
+        // PRESERVE ALL EXISTING PROFILE FIELDS
+        const profileData = {
+            ...currentProfile
+        };
+
+        delete profileData.pubkey;
+        delete profileData.created_at;
+
+        console.log('🔍 Original Lightning address:', currentProfile.lud16 || currentProfile.lud06 || 'None');
+        console.log('🔍 New Lightning address from form:', lightningAddress || 'Empty');
+        console.log('🔍 Original Banner:', currentProfile.banner || 'None');
+        console.log('🔍 New Banner from form:', bannerImage || 'Empty');
+
+        // Only update Lightning address if user actually changed it
+        const originalLightningAddress = currentProfile.lud16 || currentProfile.lud06 || '';
+        if (lightningAddress !== originalLightningAddress) {
+            console.log('⚡ Lightning address changed, updating...');
+            if (lightningAddress) {
+                profileData.lud16 = lightningAddress;
+                delete profileData.lud06;
+            } else {
+                delete profileData.lud16;
+                delete profileData.lud06;
+            }
+        } else {
+            console.log('⚡ Lightning address unchanged, preserving existing value');
+        }
+
+        // Only update Banner image if user actually changed it
+        const originalBanner = currentProfile.banner || '';
+        if (bannerImage !== originalBanner) {
+            console.log('🖼️ Banner image changed, updating...');
+            if (bannerImage) {
+                profileData.banner = bannerImage;
+            } else {
+                delete profileData.banner;
+            }
+        } else {
+            console.log('🖼️ Banner image unchanged, preserving existing value');
+        }
+
+        console.log('📤 Profile data to save:', profileData);
+
+        const profileEvent = {
+            kind: 0,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [],
+            content: JSON.stringify(profileData)
+        };
+
+        let signedProfileEvent;
+        if (State.privateKey === 'extension') {
+            if (!window.nostr) {
+                throw new Error('Nostr extension not available');
+            }
+            signedProfileEvent = await window.nostr.signEvent(profileEvent);
+        } else {
+            const { finalizeEvent } = window.NostrTools;
+            if (finalizeEvent) {
+                signedProfileEvent = finalizeEvent(profileEvent, State.privateKey);
+            } else {
+                throw new Error('No signing function available');
+            }
+        }
+
+        const relays = await Relays.getWriteRelays();
+        await State.pool.publish(relays, signedProfileEvent);
+        console.log('📡 Profile event published to relays');
+
+        State.profileCache[State.publicKey] = {
+            ...profileData,
+            pubkey: State.publicKey,
+            created_at: signedProfileEvent.created_at
+        };
+
+        if (moneroAddress) {
+            await saveMoneroAddressToRelays(moneroAddress);
+        }
+
+        closeSettingsModal();
+        Utils.showNotification('Settings saved successfully!', 'success');
+
+        if (State.currentPage === 'profile') {
+            await loadUserProfile();
+        }
+
+        console.log('✅ Settings saved successfully');
+
+    } catch (error) {
+        console.error('❌ Error saving settings:', error);
+        Utils.showNotification(`Failed to save settings: ${error.message}`, 'error');
+    }
+}
+
+// Close settings modal
+function closeSettingsModal() {
+    const settingsModal = document.getElementById('settingsModal');
+    if (settingsModal) {
+        settingsModal.style.display = 'none';
+    }
+}
+
+// Change theme immediately when selected
+function changeTheme(theme) {
+    localStorage.setItem('theme', theme);
+    console.log('🎨 Theme changed to:', theme);
+    Utils.showNotification(`Theme changed to ${theme}`, 'success');
+}
+
+// Override loadSettings to use modal approach
+window.loadSettings = openSettingsModal;
+window.saveSettings = saveSettings;
+window.closeSettingsModal = closeSettingsModal;
+window.changeTheme = changeTheme;
+
+// Make edit profile functions available globally
+window.showEditProfileModal = showEditProfileModal;
+window.closeEditProfileModal = closeEditProfileModal;
+window.saveProfile = saveProfile;
 
 // ==================== APP STARTUP ====================
 
