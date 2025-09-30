@@ -51,7 +51,13 @@
             <span>👤</span>
             <span>Profile</span>
         </div>
-        
+
+        <!-- Theme Toggle -->
+        <div class="nav-item" onclick="toggleTheme()" style="cursor: pointer;">
+            <span id="themeIcon">🌙</span>
+            <span id="themeLabel">Dark</span>
+        </div>
+
         <!-- Login/Create Account Options (shown when not logged in) -->
         <div id="authOptions" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
             <button class="login-option-btn" onclick="showCreateAccount()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: white; border-radius: 8px; cursor: pointer;">
@@ -307,14 +313,6 @@
         <div class="modal-content">
             <div class="modal-header">Settings</div>
             
-            <div class="settings-section">
-                <h3>Theme</h3>
-                <select id="themeSelect" onchange="changeTheme(this.value)" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                </select>
-            </div>
-
             <div class="settings-section">
                 <h3>Lightning Address</h3>
                 <input type="text" id="defaultLightningAddress" placeholder="Your Lightning address (e.g., user@domain.com)" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
