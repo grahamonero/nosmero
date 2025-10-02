@@ -215,6 +215,7 @@ export async function loadStreamingHomeFeed() {
         currentHomeFeedResults = [];
         currentHomeFeedSortMode = 'stream';
         displayedPostCount = 0;
+        oldestPostTimestamp = null; // Reset timestamp for fresh load
 
         // Clear any existing following state to force fresh load
         State.setFollowingUsers(new Set());
@@ -229,8 +230,9 @@ export async function loadStreamingHomeFeed() {
         // Step 1: Always fetch fresh following list
         await loadFreshFollowingList();
 
-        // Step 2: Prepare user profiles for better display (non-blocking)
-        prepareProfiles().catch(error => console.error('Profile fetch error (non-blocking):', error));
+        // Step 2: Prepare user profiles AND Monero addresses (must complete before rendering posts)
+        updateHomeFeedStatus('Loading user profiles and addresses...');
+        await prepareProfiles();
 
         // Step 3: Stream posts directly from relays (no cache)
         updateHomeFeedStatus('Loading posts from relays...');
@@ -267,6 +269,12 @@ export async function loadStreamingHomeFeed() {
             }
         } else {
             updateHomeFeedStatus(`Timeline loaded - ${currentHomeFeedResults.length} posts from ${currentFollowingList.size} users`);
+
+            // Show "Load More" button after initial load
+            const loadMoreContainer = document.getElementById('loadMoreContainer');
+            if (loadMoreContainer && currentHomeFeedResults.length > 0) {
+                loadMoreContainer.style.display = 'block';
+            }
         }
 
     } catch (error) {
@@ -387,6 +395,20 @@ async function prepareProfiles() {
     const followingArray = Array.from(currentFollowingList);
     // Fetch profiles for all followed users to improve display
     await fetchProfiles(followingArray);
+
+    // Also fetch Monero addresses for all followed users (NIP-78)
+    if (window.getUserMoneroAddress) {
+        for (const pubkey of followingArray) {
+            try {
+                const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                if (moneroAddr && State.profileCache[pubkey]) {
+                    State.profileCache[pubkey].monero_address = moneroAddr;
+                }
+            } catch (error) {
+                console.error(`Failed to load Monero address for ${pubkey.slice(0, 8)}:`, error);
+            }
+        }
+    }
 }
 
 // Stream posts from relays
@@ -397,24 +419,40 @@ async function streamRelayPosts() {
 
     const followingArray = Array.from(currentFollowingList);
     const readRelays = Relays.getUserDataRelays();
+    const INITIAL_LIMIT = 35;
+    let postsReceived = 0;
 
     try {
         const feedSub = State.pool.subscribeMany(readRelays, [
             {
                 kinds: [1], // Text notes
                 authors: followingArray,
-                limit: 100
+                limit: 35
             }
         ], {
             onevent(event) {
-                addHomeFeedResult(event);
+                // Stop accepting new posts after limit reached
+                if (postsReceived >= INITIAL_LIMIT) {
+                    return;
+                }
+
+                // Check if this would be a duplicate
+                if (!currentHomeFeedResults.find(r => r.id === event.id)) {
+                    postsReceived++;
+                    addHomeFeedResult(event);
+
+                    // Close subscription once we hit the limit
+                    if (postsReceived >= INITIAL_LIMIT) {
+                        feedSub.close();
+                    }
+                }
             },
             oneose() {
                 feedSub.close();
             }
         });
 
-        // Let subscription run for 5 seconds
+        // Let subscription run for 5 seconds or until limit reached
         await new Promise(resolve => setTimeout(resolve, 5000));
         feedSub.close();
 
@@ -446,6 +484,11 @@ export function initializeHomeFeedResults() {
             <div style="color: #666; font-size: 14px;" id="homeFeedStatus">Initializing...</div>
         </div>
         <div id="homeFeedList"></div>
+        <div id="loadMoreContainer" style="display: none; text-align: center; margin: 20px 0; padding: 20px;">
+            <button onclick="NostrPosts.loadMorePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 32px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                Load More Notes
+            </button>
+        </div>
     `;
 }
 
@@ -679,11 +722,11 @@ export async function renderFeed(loadMore = false) {
                     </button>
                     <button class="action-btn" onclick="sharePost('${post.id}')">📤</button>
                     ${lightningAddress ?
-                        `<button class="action-btn btc-zap" onclick="openLightningZapModal('${post.id}', '${author.name}', '${lightningAddress}')" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
+                        `<button class="action-btn btc-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-lightning-address="${lightningAddress.replace(/"/g, '&quot;')}" onclick="openLightningZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.lightningAddress)" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
                         '<button class="action-btn btc-zap" style="opacity: 0.3;" title="No Lightning address">⚡BTC</button>'
                     }
                     ${moneroAddress ?
-                        `<button class="action-btn xmr-zap" onclick="openZapModal('${post.id}', '${author.name}', '${moneroAddress}')" title="Zap with Monero">⚡XMR</button>` :
+                        `<button class="action-btn xmr-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-monero-address="${moneroAddress.replace(/"/g, '&quot;')}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress)" title="Zap with Monero">⚡XMR</button>` :
                         '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">⚡XMR</button>'
                     }
                     <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>
@@ -735,11 +778,95 @@ export async function renderFeed(loadMore = false) {
 }
 
 // Load more posts (real-time approach - extends current relay subscription)
-export function loadMorePosts() {
-    // In real-time approach, posts are streamed continuously
-    // This function can be used to extend the time window for older posts
-    console.log('Loading more posts from extended time range...');
-    // Implementation would extend the relay query time window
+let oldestPostTimestamp = null;
+
+export async function loadMorePosts() {
+    console.log('🔄 Loading more posts...');
+
+    if (currentFollowingList.size === 0) {
+        console.log('No following list available');
+        return;
+    }
+
+    // Show loading state
+    const loadMoreContainer = document.getElementById('loadMoreContainer');
+    if (loadMoreContainer) {
+        loadMoreContainer.innerHTML = `
+            <div style="color: #666;">Loading older posts...</div>
+        `;
+    }
+
+    // Find oldest timestamp from current posts
+    if (!oldestPostTimestamp && currentHomeFeedResults.length > 0) {
+        oldestPostTimestamp = Math.min(...currentHomeFeedResults.map(p => p.created_at));
+    }
+
+    const followingArray = Array.from(currentFollowingList);
+    const readRelays = Relays.getUserDataRelays();
+    const LOAD_MORE_LIMIT = 35;
+    let postsReceived = 0;
+
+    try {
+        const feedSub = State.pool.subscribeMany(readRelays, [
+            {
+                kinds: [1],
+                authors: followingArray,
+                until: oldestPostTimestamp || Math.floor(Date.now() / 1000),
+                limit: 35
+            }
+        ], {
+            onevent(event) {
+                // Stop accepting new posts after limit reached
+                if (postsReceived >= LOAD_MORE_LIMIT) {
+                    return;
+                }
+
+                // Check if this would be a duplicate
+                if (!currentHomeFeedResults.find(r => r.id === event.id)) {
+                    postsReceived++;
+                    addHomeFeedResult(event);
+
+                    // Update oldest timestamp
+                    if (!oldestPostTimestamp || event.created_at < oldestPostTimestamp) {
+                        oldestPostTimestamp = event.created_at;
+                    }
+
+                    // Close subscription once we hit the limit
+                    if (postsReceived >= LOAD_MORE_LIMIT) {
+                        feedSub.close();
+                    }
+                }
+            },
+            oneose() {
+                feedSub.close();
+            }
+        });
+
+        // Let subscription run for 5 seconds or until limit reached
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        feedSub.close();
+
+        // Restore button
+        if (loadMoreContainer) {
+            loadMoreContainer.innerHTML = `
+                <button onclick="NostrPosts.loadMorePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 32px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                    Load More Notes
+                </button>
+            `;
+        }
+
+        console.log(`✅ Loaded more posts. Total: ${currentHomeFeedResults.length}, Oldest: ${new Date(oldestPostTimestamp * 1000).toLocaleString()}`);
+
+    } catch (error) {
+        console.error('Error loading more posts:', error);
+        if (loadMoreContainer) {
+            loadMoreContainer.innerHTML = `
+                <button onclick="NostrPosts.loadMorePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 32px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                    Load More Notes
+                </button>
+            `;
+        }
+    }
 }
 
 // ==================== POST UTILITIES ====================
@@ -800,12 +927,8 @@ export function getLightningAddress(post) {
     const profile = State.profileCache[post.pubkey];
     if (profile) {
         // Prefer lud16 (Lightning Address) over lud06 (LNURL)
-        if (profile.lud16) {
-            return profile.lud16;
-        }
-        if (profile.lud06) {
-            return profile.lud06;
-        }
+        if (profile.lud16) return profile.lud16;
+        if (profile.lud06) return profile.lud06;
     }
 
     return null;
@@ -1407,13 +1530,45 @@ export async function fetchProfiles(pubkeys) {
                 onevent(event) {
                     try {
                         const profile = JSON.parse(event.content);
-                        State.profileCache[event.pubkey] = {
-                            ...profile,
-                            pubkey: event.pubkey,
-                            created_at: event.created_at
-                        };
+
+                        // Only update if this profile is newer OR if same timestamp but has more data
+                        const existing = State.profileCache[event.pubkey];
+                        const hasLightning = profile.lud16 || profile.lud06;
+                        const existingHasLightning = existing && (existing.lud16 || existing.lud06);
+
+                        if (!existing) {
+                            // No existing profile, save this one
+                            State.profileCache[event.pubkey] = {
+                                ...profile,
+                                pubkey: event.pubkey,
+                                created_at: event.created_at
+                            };
+                            console.log(`Profile received for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at}, hasLightning: ${!!hasLightning})`);
+                        } else if (existingHasLightning && !hasLightning) {
+                            // DON'T overwrite existing profile that has Lightning with one that doesn't
+                            console.log(`⚠️ Keeping existing profile with Lightning for ${event.pubkey} (ignoring newer profile without Lightning)`);
+                        } else if (event.created_at > existing.created_at) {
+                            // Newer profile, update (only if we didn't skip above)
+                            State.profileCache[event.pubkey] = {
+                                ...profile,
+                                pubkey: event.pubkey,
+                                created_at: event.created_at
+                            };
+                            console.log(`Profile updated (newer) for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at}, hasLightning: ${!!hasLightning})`);
+                        } else if (event.created_at === existing.created_at && hasLightning && !existingHasLightning) {
+                            // Same timestamp but this one has Lightning address
+                            State.profileCache[event.pubkey] = {
+                                ...profile,
+                                pubkey: event.pubkey,
+                                created_at: event.created_at
+                            };
+                            console.log(`Profile updated (same timestamp but has Lightning) for ${event.pubkey}: ${profile.name || 'Anonymous'}`);
+                        } else {
+                            console.log(`Skipping profile for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at} vs cached: ${existing.created_at}, hasLightning: ${!!hasLightning} vs ${!!existingHasLightning})`);
+                        }
+
                         profilesReceived++;
-                        console.log(`Profile received for ${event.pubkey}: ${profile.name || 'Anonymous'} (${profilesReceived}/${unknownPubkeys.length})`);
+                        console.log(`Profiles received: ${profilesReceived}/${unknownPubkeys.length}`);
                         
                         // If we've received all profiles, resolve early
                         if (profilesReceived >= unknownPubkeys.length) {
@@ -1466,13 +1621,42 @@ export async function fetchProfiles(pubkeys) {
                     onevent(event) {
                         try {
                             const profile = JSON.parse(event.content);
-                            State.profileCache[event.pubkey] = {
-                                ...profile,
-                                pubkey: event.pubkey,
-                                created_at: event.created_at
-                            };
+
+                            // Only update if this profile is newer OR if same timestamp but has more data
+                            const existing = State.profileCache[event.pubkey];
+                            const hasLightning = profile.lud16 || profile.lud06;
+                            const existingHasLightning = existing && (existing.lud16 || existing.lud06);
+
+                            if (!existing) {
+                                State.profileCache[event.pubkey] = {
+                                    ...profile,
+                                    pubkey: event.pubkey,
+                                    created_at: event.created_at
+                                };
+                                console.log(`Fallback profile received for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at}, hasLightning: ${!!hasLightning})`);
+                            } else if (existingHasLightning && !hasLightning) {
+                                // DON'T overwrite existing profile that has Lightning with one that doesn't
+                                console.log(`⚠️ Keeping existing profile with Lightning for ${event.pubkey} (ignoring newer fallback profile without Lightning)`);
+                            } else if (event.created_at > existing.created_at) {
+                                State.profileCache[event.pubkey] = {
+                                    ...profile,
+                                    pubkey: event.pubkey,
+                                    created_at: event.created_at
+                                };
+                                console.log(`Fallback profile updated (newer) for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at}, hasLightning: ${!!hasLightning})`);
+                            } else if (event.created_at === existing.created_at && hasLightning && !existingHasLightning) {
+                                State.profileCache[event.pubkey] = {
+                                    ...profile,
+                                    pubkey: event.pubkey,
+                                    created_at: event.created_at
+                                };
+                                console.log(`Fallback profile updated (same timestamp but has Lightning) for ${event.pubkey}: ${profile.name || 'Anonymous'}`);
+                            } else {
+                                console.log(`Skipping fallback profile for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at} vs cached: ${existing.created_at}, hasLightning: ${!!hasLightning} vs ${!!existingHasLightning})`);
+                            }
+
                             fallbackProfilesReceived++;
-                            console.log(`Fallback profile received for ${event.pubkey}: ${profile.name || 'Anonymous'} (${fallbackProfilesReceived}/${stillMissing.length})`);
+                            console.log(`Fallback profiles received: ${fallbackProfilesReceived}/${stillMissing.length}`);
                             
                             // If we've received all missing profiles, resolve early
                             if (fallbackProfilesReceived >= stillMissing.length) {
@@ -1583,11 +1767,11 @@ export async function renderSinglePost(post, context = 'feed') {
                     </button>
                     <button class="action-btn" onclick="sharePost('${post.id}')">📤</button>
                     ${lightningAddress ?
-                        `<button class="action-btn btc-zap" onclick="openLightningZapModal('${post.id}', '${author.name}', '${lightningAddress}')" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
+                        `<button class="action-btn btc-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-lightning-address="${lightningAddress.replace(/"/g, '&quot;')}" onclick="openLightningZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.lightningAddress)" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
                         '<button class="action-btn btc-zap" style="opacity: 0.3;" title="No Lightning address">⚡BTC</button>'
                     }
                     ${moneroAddress ?
-                        `<button class="action-btn xmr-zap" onclick="openZapModal('${post.id}', '${author.name}', '${moneroAddress}')" title="Zap with Monero">⚡XMR</button>` :
+                        `<button class="action-btn xmr-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-monero-address="${moneroAddress.replace(/"/g, '&quot;')}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress)" title="Zap with Monero">⚡XMR</button>` :
                         '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">⚡XMR</button>'
                     }
                     <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>

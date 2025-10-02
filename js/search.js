@@ -1157,6 +1157,10 @@ export async function addSearchResult(post) {
 
     currentSearchResults.push(post);
 
+    // ALSO add to global event cache so repost/reply can find it
+    const State = await import('./state.js');
+    State.eventCache[post.id] = post;
+
     // Fetch profile if needed
     if (!profileCache[post.pubkey]) {
         const Posts = await import('./posts.js');

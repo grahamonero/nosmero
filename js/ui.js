@@ -826,12 +826,14 @@ async function fetchUserPosts(pubkey) {
             async onevent(event) {
                 hasReceivedPosts = true;
                 clearTimeout(timeout);
-                
+
                 // Add new event to user posts
                 if (!userPosts.find(p => p.id === event.id)) {
                     userPosts.push(event);
+                    // ALSO add to global event cache so repost/reply can find it
+                    StateModule.eventCache[event.id] = event;
                 }
-                
+
                 // Sort by creation time (newest first)
                 userPosts.sort((a, b) => b.created_at - a.created_at);
                 
