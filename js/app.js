@@ -180,25 +180,35 @@ function setupNavigation() {
 async function handleNavigation(event) {
     const tab = event.currentTarget.dataset.tab;
     if (!tab) return;
-    
+
     // Update active navigation item
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.remove('active');
     });
     event.currentTarget.classList.add('active');
-    
-    // Hide messages page if visible
+
+    // Hide ALL page containers to prevent content stacking
     const messagesPage = document.getElementById('messagesPage');
     if (messagesPage) {
         messagesPage.style.display = 'none';
     }
-    
+
+    const threadPage = document.getElementById('threadPage');
+    if (threadPage) {
+        threadPage.style.display = 'none';
+    }
+
+    const profilePage = document.getElementById('profilePage');
+    if (profilePage) {
+        profilePage.style.display = 'none';
+    }
+
     // Show main feed container
     const feed = document.getElementById('feed');
     if (feed) {
         feed.style.display = 'block';
     }
-    
+
     // Navigate to requested page
     switch (tab) {
         case 'home':
@@ -773,6 +783,26 @@ function displayUserPosts(posts) {
     (async () => {
         try {
             const Posts = await import('./posts.js');
+
+            // Fetch Monero addresses for all post authors
+            if (window.getUserMoneroAddress) {
+                const allAuthors = [...new Set(posts.map(post => post.pubkey))];
+                console.log('💰 Fetching Monero addresses for profile posts, authors:', allAuthors.length);
+                await Promise.all(
+                    allAuthors.map(async (pubkey) => {
+                        try {
+                            const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                            console.log('💰 Profile post author', pubkey.slice(0, 8), 'Monero address:', moneroAddr ? moneroAddr.slice(0, 10) + '...' : 'none');
+                            if (State.profileCache[pubkey]) {
+                                State.profileCache[pubkey].monero_address = moneroAddr || null;
+                            }
+                        } catch (error) {
+                            console.warn('Error fetching Monero address for profile post author:', error);
+                        }
+                    })
+                );
+            }
+
             const renderedPosts = await Promise.all(posts.map(async post => {
                 try {
                     return await Posts.renderSinglePost(post, 'feed');
@@ -1864,6 +1894,8 @@ async function loadMoneroAddressFromRelays(targetPubkey) {
 
 // Get Monero address for any user (with NIP-78 support for all users)
 async function getUserMoneroAddress(pubkey) {
+    console.log('🔍 getUserMoneroAddress called for:', pubkey.slice(0, 8), 'isCurrentUser:', pubkey === State.publicKey);
+
     // For current user, check NIP-78 first, then fallback to localStorage
     if (pubkey === State.publicKey) {
         try {
@@ -1899,6 +1931,49 @@ async function getUserMoneroAddress(pubkey) {
         console.warn('Could not load Monero address from relays for user', pubkey, ':', error);
     }
 
+    console.log('🔍 REACHED AFTER TRY/CATCH - about to check fallback for pubkey:', pubkey.slice(0, 8));
+
+    // Fallback: Check if Monero address is in profile "about" field
+    console.log('🔍 Fallback check - profile exists:', !!profile, 'has about:', !!(profile && profile.about));
+    if (profile && profile.about) {
+        console.log('🔍 About field content:', profile.about.slice(0, 100));
+        const xmrAddress = extractMoneroAddressFromText(profile.about);
+        if (xmrAddress) {
+            console.log('💰 Found Monero address in profile about field:', xmrAddress.slice(0, 10) + '...');
+            // Cache it
+            if (State.profileCache[pubkey]) {
+                State.profileCache[pubkey].monero_address = xmrAddress;
+            }
+            return xmrAddress;
+        }
+    } else {
+        console.log('🔍 Cannot scan about field - profile:', !!profile, 'profileCache entry:', !!State.profileCache[pubkey]);
+    }
+
+    return null;
+}
+
+// Extract Monero address from text using regex pattern matching
+function extractMoneroAddressFromText(text) {
+    if (!text) return null;
+
+    console.log('🔍 Scanning text for Monero address, length:', text.length);
+
+    // Monero address regex patterns:
+    // - Standard addresses start with 4 (95 chars)
+    // - Subaddresses start with 8 (95 chars)
+    // - Integrated addresses start with 4 (106 chars)
+    const moneroRegex = /\b[48][0-9AB][1-9A-HJ-NP-Za-km-z]{93,105}\b/g;
+
+    const matches = text.match(moneroRegex);
+    console.log('🔍 Monero address regex matches:', matches ? matches.length : 0);
+    if (matches && matches.length > 0) {
+        console.log('✅ Found Monero address:', matches[0].slice(0, 10) + '...');
+        // Return first match
+        return matches[0];
+    }
+
+    console.log('❌ No Monero address found in text');
     return null;
 }
 

@@ -888,7 +888,8 @@ async function fetchUserPosts(pubkey) {
         
         const userPosts = [];
         let hasReceivedPosts = false;
-        
+        let moneroAddressesFetched = false; // Track if we already fetched Monero addresses
+
         // Create timeout for loading
         const timeout = setTimeout(() => {
             if (!hasReceivedPosts) {
@@ -900,11 +901,11 @@ async function fetchUserPosts(pubkey) {
                 `;
             }
         }, 8000); // 8 second timeout
-        
+
         if (!StateModule.pool) {
             throw new Error('Relay pool not initialized');
         }
-        
+
         const sub = StateModule.pool.subscribeMany(RelaysModule.getActiveRelays(), [
             {
                 kinds: [1], // Text notes
@@ -912,7 +913,7 @@ async function fetchUserPosts(pubkey) {
                 limit: 50 // Get user's last 50 posts
             }
         ], {
-            async onevent(event) {
+            onevent(event) {
                 hasReceivedPosts = true;
                 clearTimeout(timeout);
 
@@ -925,20 +926,14 @@ async function fetchUserPosts(pubkey) {
 
                 // Sort by creation time (newest first)
                 userPosts.sort((a, b) => b.created_at - a.created_at);
-                
-                // Fetch profiles for all posts before rendering
-                const PostsModule = await import('./posts.js');
-                const allAuthors = [...new Set(userPosts.map(post => post.pubkey))];
-                await PostsModule.fetchProfiles(allAuthors);
-                
-                // Render posts immediately as they come in
-                await renderUserPosts(userPosts.slice(0, 20)); // Show first 20 posts
+
+                // Just collect events - don't render until oneose
             },
             async oneose() {
                 clearTimeout(timeout);
                 console.log(`Fetched ${userPosts.length} posts for user`);
                 sub.close();
-                
+
                 if (userPosts.length === 0) {
                     userPostsContainer.innerHTML = `
                         <div style="text-align: center; color: #666; padding: 40px;">
@@ -947,12 +942,13 @@ async function fetchUserPosts(pubkey) {
                         </div>
                     `;
                 } else {
-                    // Fetch profiles for final render too
+                    // Fetch profiles for final render
                     const PostsModule = await import('./posts.js');
                     const allAuthors = [...new Set(userPosts.map(post => post.pubkey))];
                     await PostsModule.fetchProfiles(allAuthors);
-                    
-                    await renderUserPosts(userPosts.slice(0, 20)); // Show first 20 posts
+
+                    // Now fetch Monero addresses ONCE and render final posts
+                    await renderUserPosts(userPosts.slice(0, 20), true); // true = fetch Monero addresses
                 }
             }
         });
@@ -971,18 +967,37 @@ async function fetchUserPosts(pubkey) {
     }
 }
 
-async function renderUserPosts(posts) {
+async function renderUserPosts(posts, fetchMoneroAddresses = false) {
     const userPostsContainer = document.getElementById('userPostsContainer');
     if (!userPostsContainer || !posts.length) return;
-    
+
     try {
         // Import Posts module to use proper rendering
         const PostsModule = await import('./posts.js');
-        
+
         // Fetch profiles for posts and any parent posts they might reference
         const allAuthors = [...new Set(posts.map(post => post.pubkey))];
         await PostsModule.fetchProfiles(allAuthors);
-        
+
+        // Fetch Monero addresses for all post authors (only once, after all posts loaded)
+        if (fetchMoneroAddresses && window.getUserMoneroAddress) {
+            const StateModule = await import('./state.js');
+            console.log('💰 Fetching Monero addresses for profile page posts, authors:', allAuthors.length);
+            await Promise.all(
+                allAuthors.map(async (pubkey) => {
+                    try {
+                        const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                        console.log('💰 Profile page author', pubkey.slice(0, 8), 'Monero address:', moneroAddr ? moneroAddr.slice(0, 10) + '...' : 'none');
+                        if (StateModule.profileCache[pubkey]) {
+                            StateModule.profileCache[pubkey].monero_address = moneroAddr || null;
+                        }
+                    } catch (error) {
+                        console.warn('Error fetching Monero address for profile post author:', error);
+                    }
+                })
+            );
+        }
+
         // Also fetch parent posts and their authors for replies
         const parentPostsMap = await PostsModule.fetchParentPosts(posts);
         const parentAuthors = Object.values(parentPostsMap)
@@ -1180,14 +1195,9 @@ async function loadAndDisplayMoneroAddress(pubkey, userProfile) {
     `;
 
     try {
-        // Import the app module to access getUserMoneroAddress
-        const AppModule = await import('./app.js');
-
         // Use the getUserMoneroAddress function that works for any user
         let moneroAddress = null;
-        if (AppModule.getUserMoneroAddress) {
-            moneroAddress = await AppModule.getUserMoneroAddress(pubkey);
-        } else if (window.getUserMoneroAddress) {
+        if (window.getUserMoneroAddress) {
             moneroAddress = await window.getUserMoneroAddress(pubkey);
         }
 

@@ -1156,6 +1156,13 @@ export function setRepostType(type) {
         // Show comment section
         commentSection.style.display = 'block';
 
+        // Add smart paste listener to quote repost textarea
+        const quoteTextarea = document.getElementById('repostComment');
+        if (quoteTextarea) {
+            quoteTextarea.removeEventListener('paste', handleSmartPaste); // Remove if exists
+            quoteTextarea.addEventListener('paste', handleSmartPaste);
+        }
+
         // Update button text
         repostBtn.textContent = 'Quote Repost';
 
@@ -1263,12 +1270,12 @@ export function replyToPost(postId) {
         alert('Post not found');
         return;
     }
-    
+
     const author = getAuthorInfo(post);
-    const truncatedContent = post.content.length > 100 
-        ? post.content.substring(0, 100) + '...' 
+    const truncatedContent = post.content.length > 100
+        ? post.content.substring(0, 100) + '...'
         : post.content;
-    
+
     document.getElementById('replyingTo').innerHTML = `
         <strong>Replying to @${author.name}:</strong>
         <div style="margin-top: 8px; padding: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 4px; font-style: italic;">
@@ -1276,7 +1283,14 @@ export function replyToPost(postId) {
         </div>
     `;
     document.getElementById('replyModal').style.display = 'block';
-    document.getElementById('replyContent').focus();
+
+    const replyTextarea = document.getElementById('replyContent');
+    if (replyTextarea) {
+        // Add smart paste listener to reply textarea
+        replyTextarea.removeEventListener('paste', handleSmartPaste); // Remove if exists
+        replyTextarea.addEventListener('paste', handleSmartPaste);
+        replyTextarea.focus();
+    }
     
     // Store the post ID for the reply
     window.currentReplyToId = postId;
@@ -1850,6 +1864,90 @@ export async function renderSinglePost(post, context = 'feed') {
 
 // ==================== POST COMPOSITION ====================
 
+// Smart paste handler for npub and note IDs
+export async function handleSmartPaste(event) {
+    const textarea = event.target;
+    const pastedText = (event.clipboardData || window.clipboardData).getData('text');
+
+    // Check if pasted text contains npub, note1, nevent1, or naddr1
+    const npubMatch = pastedText.match(/\b(npub1[a-z0-9]{58})\b/);
+    const noteMatch = pastedText.match(/\b(note1[a-z0-9]{58})\b/);
+    const neventMatch = pastedText.match(/\b(nevent1[a-z0-9]+)\b/);
+    const naddrMatch = pastedText.match(/\b(naddr1[a-z0-9]+)\b/);
+
+    if (npubMatch) {
+        event.preventDefault();
+        const npub = npubMatch[1];
+
+        try {
+            // Decode npub to get pubkey
+            const { nip19 } = window.NostrTools;
+            const decoded = nip19.decode(npub);
+            const pubkey = decoded.data;
+
+            // Fetch profile to get name
+            await fetchProfiles([pubkey]);
+            const profile = State.profileCache[pubkey];
+            const name = profile?.name || profile?.display_name || npub.slice(0, 12) + '...';
+
+            // Insert @mention format
+            const cursorPos = textarea.selectionStart;
+            const textBefore = textarea.value.substring(0, cursorPos);
+            const textAfter = textarea.value.substring(textarea.selectionEnd);
+
+            // Insert as nostr:npub format (will be converted to @name on display)
+            const mentionText = `nostr:${npub}`;
+            textarea.value = textBefore + mentionText + textAfter;
+
+            // Update cursor position
+            const newPos = cursorPos + mentionText.length;
+            textarea.setSelectionRange(newPos, newPos);
+
+            // Update character count
+            updateCharacterCount(textarea, 'mainCharCount');
+
+            Utils.showNotification(`Added mention: @${name}`, 'success');
+        } catch (error) {
+            console.error('Error processing npub paste:', error);
+            // Fallback to plain paste
+            const cursorPos = textarea.selectionStart;
+            const textBefore = textarea.value.substring(0, cursorPos);
+            const textAfter = textarea.value.substring(textarea.selectionEnd);
+            textarea.value = textBefore + pastedText + textAfter;
+        }
+    } else if (noteMatch || neventMatch || naddrMatch) {
+        event.preventDefault();
+        const noteId = noteMatch?.[1] || neventMatch?.[1] || naddrMatch?.[1];
+
+        try {
+            // Insert as nostr: format (will be embedded on display)
+            const cursorPos = textarea.selectionStart;
+            const textBefore = textarea.value.substring(0, cursorPos);
+            const textAfter = textarea.value.substring(textarea.selectionEnd);
+
+            const embedText = `nostr:${noteId}`;
+            textarea.value = textBefore + embedText + textAfter;
+
+            // Update cursor position
+            const newPos = cursorPos + embedText.length;
+            textarea.setSelectionRange(newPos, newPos);
+
+            // Update character count
+            updateCharacterCount(textarea, 'mainCharCount');
+
+            Utils.showNotification('Added note reference (will be embedded)', 'success');
+        } catch (error) {
+            console.error('Error processing note paste:', error);
+            // Fallback to plain paste
+            const cursorPos = textarea.selectionStart;
+            const textBefore = textarea.value.substring(0, cursorPos);
+            const textAfter = textarea.value.substring(textarea.selectionEnd);
+            textarea.value = textBefore + pastedText + textAfter;
+        }
+    }
+    // If no special format detected, let normal paste happen
+}
+
 // Toggle the visibility of the new post composition area
 export function toggleCompose() {
     // Check if user is logged in first
@@ -1860,15 +1958,19 @@ export function toggleCompose() {
         }
         return;
     }
-    
+
     const compose = document.getElementById('compose');
     if (compose) {
         compose.style.display = compose.style.display === 'none' ? 'block' : 'none';
-        
+
         // Focus on textarea when opening compose
         if (compose.style.display === 'block') {
             const textarea = compose.querySelector('.compose-textarea');
             if (textarea) {
+                // Add smart paste listener
+                textarea.removeEventListener('paste', handleSmartPaste); // Remove if exists
+                textarea.addEventListener('paste', handleSmartPaste);
+
                 // Delay focus to ensure proper rendering
                 setTimeout(() => {
                     textarea.focus();

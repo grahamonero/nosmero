@@ -1,0 +1,18 @@
+{
+  "names": {
+    "info": "8d1d4f284325c77e55fa67a2913988a697e8060f8cc53ed0ff54409b06731c42",
+    "grahamonero": "35d38fa2efb7c9f4b1bf20a4d2cded731b152ed871a0aac9d72347265c9b42d8"
+  },
+  "relays": {
+    "8d1d4f284325c77e55fa67a2913988a697e8060f8cc53ed0ff54409b06731c42": [
+      "wss://nos.lol",
+      "wss://relay.damus.io", 
+      "wss://relay.nostr.band"
+    ],
+    "35d38fa2efb7c9f4b1bf20a4d2cded731b152ed871a0aac9d72347265c9b42d8": [
+      "wss://nos.lol",
+      "wss://relay.damus.io", 
+      "wss://relay.nostr.band"
+    ]
+  }
+}
