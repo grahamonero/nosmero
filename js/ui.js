@@ -723,7 +723,7 @@ export async function openThreadView(eventId) {
         // Process any embedded notes in the thread content
         try {
             const Utils = await import('./utils.js');
-            await Utils.processEmbeddedNotes('threadContent');
+            await Utils.processEmbeddedNotes('threadPageContent');
         } catch (error) {
             console.error('Error processing embedded notes in thread:', error);
         }
@@ -917,9 +917,17 @@ async function renderUserPosts(posts) {
                 `;
             }
         }));
-        
+
         userPostsContainer.innerHTML = renderedPosts.join('');
-        
+
+        // Process any embedded notes after rendering
+        try {
+            const Utils = await import('./utils.js');
+            await Utils.processEmbeddedNotes('userPostsContainer');
+        } catch (error) {
+            console.error('Error processing embedded notes in profile posts:', error);
+        }
+
     } catch (error) {
         console.error('Error rendering user posts:', error);
         userPostsContainer.innerHTML = `

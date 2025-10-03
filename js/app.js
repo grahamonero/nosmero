@@ -825,6 +825,16 @@ function displayUserPosts(posts) {
                 }
             }));
             profileContent.innerHTML = renderedPosts.join('');
+
+            // Process any embedded notes after rendering
+            (async () => {
+                try {
+                    const Utils = await import('./utils.js');
+                    await Utils.processEmbeddedNotes('profileContent');
+                } catch (error) {
+                    console.error('Error processing embedded notes in profile:', error);
+                }
+            })();
         } catch (error) {
             console.error('Error setting up profile rendering:', error);
             profileContent.innerHTML = '<div style="color: #f56565; text-align: center; padding: 40px;">Error rendering profile notes</div>';

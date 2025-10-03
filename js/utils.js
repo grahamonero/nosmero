@@ -117,7 +117,7 @@ export function parseContent(content, skipEmbeddedNotes = false) {
             const pubkey = decoded.data;
             const profile = profileCache[pubkey];
             const name = profile?.name || profile?.display_name || npub.slice(0, 12) + '...';
-            return `<a href="#" class="mention" onclick="showUserProfile('${pubkey}'); return false;">@${name}</a>`;
+            return `<span class="mention" onclick="viewUserProfilePage('${pubkey}'); event.stopPropagation();" style="cursor: pointer; color: #FF6600;">@${name}</span>`;
         } catch (e) {
             return `<span class="mention">@${npub.slice(0, 12)}...</span>`;
         }
@@ -159,7 +159,7 @@ export function parseContent(content, skipEmbeddedNotes = false) {
                 const pubkey = decoded.data.pubkey;
                 const profile = profileCache[pubkey];
                 const name = profile?.name || profile?.display_name || nprofile.slice(0, 12) + '...';
-                return `<a href="#" class="mention" onclick="showUserProfile('${pubkey}'); return false;">@${name}</a>`;
+                return `<span class="mention" onclick="viewUserProfilePage('${pubkey}'); event.stopPropagation();" style="cursor: pointer; color: #FF6600;">@${name}</span>`;
             } else {
                 return `<span class="mention">@${nprofile.slice(0, 12)}...</span>`;
             }
@@ -177,9 +177,9 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     if (typeof DOMPurify !== 'undefined') {
         parsed = DOMPurify.sanitize(parsed, {
             ALLOWED_TAGS: ['a', 'img', 'video', 'source', 'span', 'div', 'br', 'p'],
-            ALLOWED_ATTR: ['href', 'src', 'target', 'rel', 'class', 'data-nevent', 'data-noteid', 'data-note1', 'alt', 'controls', 'style'],
+            ALLOWED_ATTR: ['href', 'src', 'target', 'rel', 'class', 'data-nevent', 'data-noteid', 'data-note1', 'alt', 'controls', 'style', 'onclick'],
             ALLOW_DATA_ATTR: true,
-            ADD_ATTR: ['target']
+            ADD_ATTR: ['target', 'onclick']
         });
     }
     
@@ -235,13 +235,18 @@ export function getFeedAuthors() {
 // Process embedded notes after content is rendered
 export async function processEmbeddedNotes(containerId) {
     const container = document.getElementById(containerId);
-    if (!container) return;
+    if (!container) {
+        console.warn('🚫 processEmbeddedNotes: Container not found:', containerId);
+        return;
+    }
 
     const embeddedNotes = container.querySelectorAll('.embedded-note[data-nevent]:not(.loaded), .embedded-note[data-noteid]:not(.loaded)');
+    console.log(`🔍 processEmbeddedNotes: Found ${embeddedNotes.length} embedded notes in ${containerId}`);
 
     for (const noteDiv of embeddedNotes) {
         const nevent = noteDiv.dataset.nevent;
         const noteid = noteDiv.dataset.noteid;
+        console.log('📝 Processing embedded note:', { nevent, noteid });
 
         try {
             let eventId;
@@ -254,23 +259,33 @@ export async function processEmbeddedNotes(containerId) {
                 eventId = noteid;
             }
 
-            if (!eventId) continue;
+            if (!eventId) {
+                console.warn('⚠️ No eventId found for embedded note');
+                continue;
+            }
+
+            console.log('🔎 Looking for event:', eventId.slice(0, 8));
 
             // Try to find the event in existing caches first
             const State = await import('./state.js');
             let event = State.eventCache[eventId] || State.posts.find(p => p.id === eventId);
 
             if (!event) {
+                console.log('📡 Event not in cache, fetching from relays...');
                 // Try to fetch from relays
                 event = await fetchEventById(eventId);
+            } else {
+                console.log('✅ Event found in cache');
             }
 
             if (event) {
                 // Replace placeholder with actual note content
+                console.log('✅ Rendering embedded note');
                 noteDiv.innerHTML = renderEmbeddedNote(event);
                 noteDiv.classList.add('loaded');
             } else {
                 // Fallback: show minimal info instead of "Loading event..."
+                console.warn('⚠️ Event not found, showing unavailable message');
                 noteDiv.innerHTML = `<div class="embedded-note-unavailable">
                     <span class="embedded-note-label">Referenced note</span>
                     <span class="embedded-note-id">${eventId.slice(0, 8)}...</span>
