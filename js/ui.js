@@ -1231,30 +1231,43 @@ export async function toggleFollow(pubkey) {
             import('./state.js'),
             import('./relays.js')
         ]);
-        
+
         if (!StateModule.publicKey || !StateModule.privateKey) {
             alert('Please log in to follow users');
             return;
         }
-        
-        const isCurrentlyFollowing = followingList.has(pubkey);
-        
-        // Update local following list
+
+        // Use the GLOBAL state, not local followingList
+        const currentFollowing = new Set(StateModule.followingUsers || []);
+        const isCurrentlyFollowing = currentFollowing.has(pubkey);
+
+        console.log(`🔄 Toggle follow for ${pubkey.slice(0, 8)}: currently following ${currentFollowing.size} users`);
+
+        // Update following set
         if (isCurrentlyFollowing) {
-            followingList.delete(pubkey);
+            currentFollowing.delete(pubkey);
+            console.log(`➖ Unfollowing ${pubkey.slice(0, 8)} - now following ${currentFollowing.size} users`);
         } else {
-            followingList.add(pubkey);
+            currentFollowing.add(pubkey);
+            console.log(`➕ Following ${pubkey.slice(0, 8)} - now following ${currentFollowing.size} users`);
         }
-        
+
+        // Update global state immediately
+        StateModule.setFollowingUsers(currentFollowing);
+
+        // Update local tracking variable
+        followingList = new Set(currentFollowing);
+
         // Save to localStorage with timestamp
-        localStorage.setItem('following-list', JSON.stringify([...followingList]));
+        localStorage.setItem('following-list', JSON.stringify([...currentFollowing]));
         localStorage.setItem('following-list-timestamp', Date.now().toString());
 
         // Update button immediately
         updateFollowButton(pubkey);
-        
-        // Create contact list event (kind 3)
-        const tags = [...followingList].map(pk => ['p', pk]);
+
+        // Create contact list event (kind 3) with COMPLETE list
+        const tags = [...currentFollowing].map(pk => ['p', pk]);
+        console.log(`📝 Publishing contact list with ${tags.length} follows`);
         
         const event = {
             kind: 3,

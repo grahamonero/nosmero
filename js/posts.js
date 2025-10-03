@@ -9,10 +9,6 @@ import * as Relays from './relays.js';
 export const POSTS_PER_PAGE = 10;
 export const MAX_CONTENT_LENGTH = 4000;
 
-// Post display and pagination tracking
-export let displayedPostCount = 0;
-export function setDisplayedPostCount(count) { displayedPostCount = count; }
-
 // Current media file for uploads
 let currentMediaFile = null;
 let currentMediaUrl = null;
@@ -21,6 +17,12 @@ let currentMediaUrl = null;
 let currentHomeFeedResults = [];
 let currentHomeFeedSortMode = 'stream'; // 'stream', 'date', 'engagement'
 let currentFollowingList = new Set();
+
+// Smart caching system
+let cachedHomeFeedPosts = []; // All posts fetched from relays
+let displayedPostCount = 0;    // How many posts are currently shown
+let isBackgroundFetching = false;
+let oldestCachedTimestamp = null;
 
 // ==================== FEED LOADING ====================
 
@@ -212,14 +214,18 @@ export async function loadStreamingHomeFeed() {
 
     try {
         State.setCurrentPage('home');
+
+        // Reset caching system for fresh load
+        cachedHomeFeedPosts = [];
         currentHomeFeedResults = [];
         currentHomeFeedSortMode = 'stream';
         displayedPostCount = 0;
-        oldestPostTimestamp = null; // Reset timestamp for fresh load
+        oldestCachedTimestamp = null;
+        isBackgroundFetching = false;
 
         // Clear any existing following state to force fresh load
         State.setFollowingUsers(new Set());
-        console.log('🧹 Cleared existing following state for fresh reload');
+        console.log('🧹 Cleared existing following state and cache for fresh reload');
 
         const feed = document.getElementById('feed');
 
@@ -268,13 +274,7 @@ export async function loadStreamingHomeFeed() {
                 }
             }
         } else {
-            updateHomeFeedStatus(`Timeline loaded - ${currentHomeFeedResults.length} posts from ${currentFollowingList.size} users`);
-
-            // Show "Load More" button after initial load
-            const loadMoreContainer = document.getElementById('loadMoreContainer');
-            if (loadMoreContainer && currentHomeFeedResults.length > 0) {
-                loadMoreContainer.style.display = 'block';
-            }
+            updateHomeFeedStatus(`Timeline loaded - ${displayedPostCount} shown, ${cachedHomeFeedPosts.length} cached from ${currentFollowingList.size} users`);
         }
 
     } catch (error) {
@@ -411,7 +411,7 @@ async function prepareProfiles() {
     }
 }
 
-// Stream posts from relays
+// Fetch initial batch of posts (200 posts with generous limit)
 async function streamRelayPosts() {
     if (currentFollowingList.size === 0) {
         return;
@@ -419,31 +419,26 @@ async function streamRelayPosts() {
 
     const followingArray = Array.from(currentFollowingList);
     const readRelays = Relays.getUserDataRelays();
-    const INITIAL_LIMIT = 35;
-    let postsReceived = 0;
+    const INITIAL_LIMIT = 200; // Generous limit to catch multiple users
+
+    console.log(`📡 Loading initial ${INITIAL_LIMIT} posts from ${followingArray.length} followed users...`);
 
     try {
         const feedSub = State.pool.subscribeMany(readRelays, [
             {
                 kinds: [1], // Text notes
                 authors: followingArray,
-                limit: 35
+                limit: INITIAL_LIMIT
             }
         ], {
             onevent(event) {
-                // Stop accepting new posts after limit reached
-                if (postsReceived >= INITIAL_LIMIT) {
-                    return;
-                }
+                // Add to cache, avoiding duplicates
+                if (!cachedHomeFeedPosts.find(p => p.id === event.id)) {
+                    cachedHomeFeedPosts.push(event);
 
-                // Check if this would be a duplicate
-                if (!currentHomeFeedResults.find(r => r.id === event.id)) {
-                    postsReceived++;
-                    addHomeFeedResult(event);
-
-                    // Close subscription once we hit the limit
-                    if (postsReceived >= INITIAL_LIMIT) {
-                        feedSub.close();
+                    // Track oldest timestamp for pagination
+                    if (!oldestCachedTimestamp || event.created_at < oldestCachedTimestamp) {
+                        oldestCachedTimestamp = event.created_at;
                     }
                 }
             },
@@ -452,9 +447,17 @@ async function streamRelayPosts() {
             }
         });
 
-        // Let subscription run for 5 seconds or until limit reached
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Let subscription run for 6 seconds to collect posts
+        await new Promise(resolve => setTimeout(resolve, 6000));
         feedSub.close();
+
+        // Sort cache chronologically (newest first)
+        cachedHomeFeedPosts.sort((a, b) => b.created_at - a.created_at);
+
+        console.log(`✅ Cached ${cachedHomeFeedPosts.length} posts. Displaying first batch...`);
+
+        // Display first 30 posts
+        await displayPostsFromCache(30);
 
     } catch (error) {
         console.error('Error streaming relay posts:', error);
@@ -492,25 +495,66 @@ export function initializeHomeFeedResults() {
     `;
 }
 
-// Add a single result to the streaming home feed display
-async function addHomeFeedResult(post) {
-    // Avoid duplicates
-    if (currentHomeFeedResults.find(r => r.id === post.id)) {
-        return;
+// Display posts from cache (instant, no network delay)
+async function displayPostsFromCache(count) {
+    const postsToDisplay = cachedHomeFeedPosts.slice(displayedPostCount, displayedPostCount + count);
+
+    console.log(`📺 Displaying ${postsToDisplay.length} posts from cache (${displayedPostCount} -> ${displayedPostCount + postsToDisplay.length})`);
+
+    // Fetch profiles for these posts if needed
+    const pubkeysToFetch = postsToDisplay
+        .map(p => p.pubkey)
+        .filter(pk => !State.profileCache[pk]);
+
+    if (pubkeysToFetch.length > 0) {
+        await fetchProfiles(pubkeysToFetch);
     }
 
-    currentHomeFeedResults.push(post);
-    console.log(`📝 Added post ${post.id.slice(0, 8)} - total: ${currentHomeFeedResults.length}`);
+    // Fetch Monero addresses for post authors (deduplicated and parallel)
+    if (window.getUserMoneroAddress) {
+        // Get unique pubkeys that don't already have Monero address cached or checked
+        const uniquePubkeys = [...new Set(postsToDisplay.map(p => p.pubkey))];
+        const pubkeysNeedingMoneroCheck = uniquePubkeys.filter(pk => {
+            const profile = State.profileCache[pk];
+            // Skip if we already have address or already checked (has the field set to null/undefined)
+            return profile && !profile.hasOwnProperty('monero_address');
+        });
 
-    // Fetch profile if needed
-    if (!State.profileCache[post.pubkey]) {
-        await fetchProfiles([post.pubkey]);
+        if (pubkeysNeedingMoneroCheck.length > 0) {
+            console.log(`🔍 Checking Monero addresses for ${pubkeysNeedingMoneroCheck.length} unique users`);
+
+            // Fetch all in parallel
+            await Promise.all(
+                pubkeysNeedingMoneroCheck.map(async (pubkey) => {
+                    try {
+                        const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                        if (State.profileCache[pubkey]) {
+                            State.profileCache[pubkey].monero_address = moneroAddr || null;
+                        }
+                    } catch (error) {
+                        // Mark as checked (null) so we don't retry
+                        if (State.profileCache[pubkey]) {
+                            State.profileCache[pubkey].monero_address = null;
+                        }
+                    }
+                })
+            );
+        }
     }
 
-    // Update count
+    // Add to displayed results
+    for (const post of postsToDisplay) {
+        if (!currentHomeFeedResults.find(r => r.id === post.id)) {
+            currentHomeFeedResults.push(post);
+        }
+    }
+
+    displayedPostCount += postsToDisplay.length;
+
+    // Update count display
     updateHomeFeedResultsCount();
 
-    // Show sort controls after first few results
+    // Show sort controls if we have enough results
     if (currentHomeFeedResults.length >= 5) {
         const sortControls = document.getElementById('homeFeedSortControls');
         if (sortControls) {
@@ -518,8 +562,31 @@ async function addHomeFeedResult(post) {
         }
     }
 
-    // Render results based on current sort mode
+    // Render all current results
     await renderHomeFeedResults();
+
+    // Show/hide Load More button
+    updateLoadMoreButton();
+}
+
+// Update Load More button visibility and state
+function updateLoadMoreButton() {
+    const loadMoreContainer = document.getElementById('loadMoreContainer');
+    if (!loadMoreContainer) return;
+
+    const hasMoreInCache = displayedPostCount < cachedHomeFeedPosts.length;
+    const cacheRemainingCount = cachedHomeFeedPosts.length - displayedPostCount;
+
+    if (hasMoreInCache || cachedHomeFeedPosts.length > 0) {
+        loadMoreContainer.style.display = 'block';
+        loadMoreContainer.innerHTML = `
+            <button onclick="NostrPosts.loadMorePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 32px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                Load More Notes ${hasMoreInCache ? `(${cacheRemainingCount} cached)` : ''}
+            </button>
+        `;
+    } else {
+        loadMoreContainer.style.display = 'none';
+    }
 }
 
 // Update the results count display
@@ -777,63 +844,63 @@ export async function renderFeed(loadMore = false) {
     }
 }
 
-// Load more posts (real-time approach - extends current relay subscription)
-let oldestPostTimestamp = null;
-
+// Load more posts - instant display from cache + background fetch
 export async function loadMorePosts() {
-    console.log('🔄 Loading more posts...');
+    console.log('🔄 Load More clicked...');
 
     if (currentFollowingList.size === 0) {
         console.log('No following list available');
         return;
     }
 
-    // Show loading state
-    const loadMoreContainer = document.getElementById('loadMoreContainer');
-    if (loadMoreContainer) {
-        loadMoreContainer.innerHTML = `
-            <div style="color: #666;">Loading older posts...</div>
-        `;
+    // 1. INSTANT: Display next 30 posts from cache if available
+    const hasMoreInCache = displayedPostCount < cachedHomeFeedPosts.length;
+
+    if (hasMoreInCache) {
+        await displayPostsFromCache(30);
+    } else {
+        console.log('⚠️ Cache exhausted, showing loading state...');
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        if (loadMoreContainer) {
+            loadMoreContainer.innerHTML = `<div style="color: #666;">Loading older posts...</div>`;
+        }
     }
 
-    // Find oldest timestamp from current posts
-    if (!oldestPostTimestamp && currentHomeFeedResults.length > 0) {
-        oldestPostTimestamp = Math.min(...currentHomeFeedResults.map(p => p.created_at));
+    // 2. BACKGROUND: Fetch more posts from relays (non-blocking)
+    fetchMorePostsInBackground();
+}
+
+// Background fetch - runs without blocking UI
+async function fetchMorePostsInBackground() {
+    if (isBackgroundFetching) {
+        console.log('⏳ Background fetch already in progress, skipping...');
+        return;
     }
+
+    isBackgroundFetching = true;
+    console.log('🔄 Starting background fetch for more posts...');
 
     const followingArray = Array.from(currentFollowingList);
     const readRelays = Relays.getUserDataRelays();
-    const LOAD_MORE_LIMIT = 35;
-    let postsReceived = 0;
+    const FETCH_LIMIT = 200;
 
     try {
         const feedSub = State.pool.subscribeMany(readRelays, [
             {
                 kinds: [1],
                 authors: followingArray,
-                until: oldestPostTimestamp || Math.floor(Date.now() / 1000),
-                limit: 35
+                until: oldestCachedTimestamp, // Older than what we have
+                limit: FETCH_LIMIT
             }
         ], {
             onevent(event) {
-                // Stop accepting new posts after limit reached
-                if (postsReceived >= LOAD_MORE_LIMIT) {
-                    return;
-                }
-
-                // Check if this would be a duplicate
-                if (!currentHomeFeedResults.find(r => r.id === event.id)) {
-                    postsReceived++;
-                    addHomeFeedResult(event);
+                // Add to cache, avoiding duplicates
+                if (!cachedHomeFeedPosts.find(p => p.id === event.id)) {
+                    cachedHomeFeedPosts.push(event);
 
                     // Update oldest timestamp
-                    if (!oldestPostTimestamp || event.created_at < oldestPostTimestamp) {
-                        oldestPostTimestamp = event.created_at;
-                    }
-
-                    // Close subscription once we hit the limit
-                    if (postsReceived >= LOAD_MORE_LIMIT) {
-                        feedSub.close();
+                    if (!oldestCachedTimestamp || event.created_at < oldestCachedTimestamp) {
+                        oldestCachedTimestamp = event.created_at;
                     }
                 }
             },
@@ -842,30 +909,27 @@ export async function loadMorePosts() {
             }
         });
 
-        // Let subscription run for 5 seconds or until limit reached
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Let subscription run for 6 seconds
+        await new Promise(resolve => setTimeout(resolve, 6000));
         feedSub.close();
 
-        // Restore button
-        if (loadMoreContainer) {
-            loadMoreContainer.innerHTML = `
-                <button onclick="NostrPosts.loadMorePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 32px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
-                    Load More Notes
-                </button>
-            `;
-        }
+        // Re-sort cache with new posts
+        cachedHomeFeedPosts.sort((a, b) => b.created_at - a.created_at);
 
-        console.log(`✅ Loaded more posts. Total: ${currentHomeFeedResults.length}, Oldest: ${new Date(oldestPostTimestamp * 1000).toLocaleString()}`);
+        console.log(`✅ Background fetch complete. Cache now has ${cachedHomeFeedPosts.length} posts total.`);
+
+        // Update Load More button to reflect new cache size
+        updateLoadMoreButton();
+
+        // If we were showing "loading" state and now have posts, display them
+        if (displayedPostCount >= cachedHomeFeedPosts.length - FETCH_LIMIT && displayedPostCount < cachedHomeFeedPosts.length) {
+            await displayPostsFromCache(30);
+        }
 
     } catch (error) {
-        console.error('Error loading more posts:', error);
-        if (loadMoreContainer) {
-            loadMoreContainer.innerHTML = `
-                <button onclick="NostrPosts.loadMorePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 32px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
-                    Load More Notes
-                </button>
-            `;
-        }
+        console.error('Error in background fetch:', error);
+    } finally {
+        isBackgroundFetching = false;
     }
 }
 
