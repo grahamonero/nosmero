@@ -374,11 +374,100 @@ function createLightningZapModal() {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
-// Send Lightning zap (placeholder - would integrate with Lightning wallet)
-export function sendLightningZap(postId, authorName, lightningAddress) {
-    // This would integrate with Lightning wallet extensions like Alby
-    alert('Lightning zap functionality would be implemented here. This requires integration with Lightning wallet extensions like Alby or nos2x.');
-    closeLightningZapModal();
+// Send Lightning zap using NIP-57 and WebLN
+export async function sendLightningZap(postId, authorName, lightningAddress) {
+    try {
+        const amountInput = document.getElementById('lightningZapAmount');
+        const amount = parseInt(amountInput?.value || '1000');
+
+        if (isNaN(amount) || amount <= 0) {
+            showNotification('Please enter a valid zap amount', 'error');
+            return;
+        }
+
+        // Check if WebLN is available
+        if (typeof window.webln === 'undefined') {
+            showNotification('Please install a Lightning wallet extension like Alby', 'error');
+            return;
+        }
+
+        // Enable WebLN
+        await window.webln.enable();
+
+        // Get the Lightning address endpoint
+        const [username, domain] = lightningAddress.split('@');
+        if (!username || !domain) {
+            showNotification('Invalid Lightning address format', 'error');
+            return;
+        }
+
+        // Fetch LNURL pay endpoint
+        const lnurlResponse = await fetch(`https://${domain}/.well-known/lnurlp/${username}`);
+        if (!lnurlResponse.ok) {
+            showNotification('Failed to fetch Lightning address info', 'error');
+            return;
+        }
+
+        const lnurlData = await lnurlResponse.json();
+
+        // Check if amount is within allowed range
+        const millisats = amount * 1000; // Convert sats to millisats
+        if (millisats < lnurlData.minSendable || millisats > lnurlData.maxSendable) {
+            showNotification(`Amount must be between ${lnurlData.minSendable/1000} and ${lnurlData.maxSendable/1000} sats`, 'error');
+            return;
+        }
+
+        // Create zap request event (NIP-57)
+        const State = await import('./state.js');
+        const zapRequest = {
+            kind: 9734,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ['relays', ...State.defaultRelays.slice(0, 3)],
+                ['amount', millisats.toString()],
+                ['lnurl', lnurlData.callback],
+                ['p', State.publicKey],
+                ['e', postId]
+            ],
+            content: '',
+            pubkey: State.publicKey
+        };
+
+        // Sign the zap request
+        if (window.nostr) {
+            const signedZapRequest = await window.nostr.signEvent(zapRequest);
+
+            // Get invoice from callback
+            const callbackUrl = new URL(lnurlData.callback);
+            callbackUrl.searchParams.set('amount', millisats.toString());
+            callbackUrl.searchParams.set('nostr', JSON.stringify(signedZapRequest));
+
+            const invoiceResponse = await fetch(callbackUrl.toString());
+            if (!invoiceResponse.ok) {
+                showNotification('Failed to get Lightning invoice', 'error');
+                return;
+            }
+
+            const invoiceData = await invoiceResponse.json();
+            const invoice = invoiceData.pr;
+
+            // Pay invoice using WebLN
+            showNotification(`Sending ${amount} sats to ${authorName}...`, 'info');
+            const result = await window.webln.sendPayment(invoice);
+
+            if (result.preimage) {
+                showNotification(`⚡ Zapped ${amount} sats to ${authorName}!`, 'success');
+                closeLightningZapModal();
+            } else {
+                showNotification('Payment failed', 'error');
+            }
+        } else {
+            showNotification('Please install a Nostr extension like nos2x or Alby', 'error');
+        }
+    } catch (error) {
+        console.error('Lightning zap error:', error);
+        showNotification(`Zap failed: ${error.message}`, 'error');
+    }
 }
 
 export function closeLightningZapModal() {

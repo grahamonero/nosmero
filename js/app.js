@@ -2985,6 +2985,21 @@ async function populateSettingsForm() {
             console.log('💰 Set Monero field to:', moneroAddress);
         }
 
+        // Populate default zap amounts
+        const btcZapField = document.getElementById('defaultBtcZapAmount');
+        if (btcZapField) {
+            const btcAmount = localStorage.getItem('default-btc-zap-amount') || '1000';
+            btcZapField.value = btcAmount;
+            console.log('⚡ Set BTC zap amount to:', btcAmount);
+        }
+
+        const xmrZapField = document.getElementById('defaultXmrZapAmount');
+        if (xmrZapField) {
+            const xmrAmount = localStorage.getItem('default-zap-amount') || '0.001';
+            xmrZapField.value = xmrAmount;
+            console.log('⚡ Set XMR zap amount to:', xmrAmount);
+        }
+
         // Populate relay lists
         await populateRelayLists();
 
@@ -3088,6 +3103,19 @@ async function saveSettings() {
 
         if (moneroAddress) {
             await saveMoneroAddressToRelays(moneroAddress);
+        }
+
+        // Save default zap amounts to localStorage
+        const btcZapAmount = document.getElementById('defaultBtcZapAmount')?.value.trim();
+        if (btcZapAmount && !isNaN(parseInt(btcZapAmount))) {
+            localStorage.setItem('default-btc-zap-amount', btcZapAmount);
+            console.log('⚡ Saved BTC zap amount:', btcZapAmount);
+        }
+
+        const xmrZapAmount = document.getElementById('defaultXmrZapAmount')?.value.trim();
+        if (xmrZapAmount) {
+            localStorage.setItem('default-zap-amount', xmrZapAmount);
+            console.log('⚡ Saved XMR zap amount:', xmrZapAmount);
         }
 
         closeSettingsModal();
