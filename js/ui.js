@@ -504,6 +504,17 @@ export function closeReplyModal() {
     const modal = document.getElementById('replyModal');
     if (modal) {
         modal.classList.remove('show');
+        // Clear the reply content
+        const replyContent = document.getElementById('replyContent');
+        if (replyContent) {
+            replyContent.value = '';
+        }
+        // Clear media preview
+        const mediaPreview = document.getElementById('replyMediaPreview');
+        if (mediaPreview) {
+            mediaPreview.style.display = 'none';
+            mediaPreview.innerHTML = '';
+        }
     }
 }
 

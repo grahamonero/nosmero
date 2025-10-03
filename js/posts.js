@@ -542,10 +542,14 @@ async function displayPostsFromCache(count) {
         }
     }
 
-    // Add to displayed results
+    // Add to displayed results and event cache
     for (const post of postsToDisplay) {
         if (!currentHomeFeedResults.find(r => r.id === post.id)) {
             currentHomeFeedResults.push(post);
+        }
+        // Add to event cache so reply/repost can find it
+        if (!State.eventCache[post.id]) {
+            State.eventCache[post.id] = post;
         }
     }
 
@@ -1282,7 +1286,12 @@ export function replyToPost(postId) {
             ${Utils.parseContent(truncatedContent)}
         </div>
     `;
-    document.getElementById('replyModal').style.display = 'block';
+
+    // Use the modal class system properly
+    const modal = document.getElementById('replyModal');
+    if (modal) {
+        modal.classList.add('show');
+    }
 
     const replyTextarea = document.getElementById('replyContent');
     if (replyTextarea) {
@@ -1291,7 +1300,7 @@ export function replyToPost(postId) {
         replyTextarea.addEventListener('paste', handleSmartPaste);
         replyTextarea.focus();
     }
-    
+
     // Store the post ID for the reply
     window.currentReplyToId = postId;
 }
