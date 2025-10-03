@@ -2020,19 +2020,21 @@ async function getFollowersCount(pubkey) {
 }
 
 // Show following list page
-async function showFollowingList() {
-    const pubkey = State.publicKey;
-    if (!pubkey) return;
+async function showFollowingList(pubkey = null) {
+    // Use provided pubkey or fall back to logged-in user
+    const targetPubkey = pubkey || State.publicKey;
+    if (!targetPubkey) return;
 
-    await loadFollowersPage('following', pubkey);
+    await loadFollowersPage('following', targetPubkey);
 }
 
 // Show followers list page
-async function showFollowersList() {
-    const pubkey = State.publicKey;
-    if (!pubkey) return;
+async function showFollowersList(pubkey = null) {
+    // Use provided pubkey or fall back to logged-in user
+    const targetPubkey = pubkey || State.publicKey;
+    if (!targetPubkey) return;
 
-    await loadFollowersPage('followers', pubkey);
+    await loadFollowersPage('followers', targetPubkey);
 }
 
 // Load followers/following page
