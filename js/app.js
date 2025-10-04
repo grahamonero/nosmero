@@ -27,6 +27,17 @@ window.NostrSearch = Search;
 
 console.log('🚀 Starting Nosmero v0.95 - Modular Architecture');
 
+// ==================== NIP-78 RELAY CONFIGURATION ====================
+// Nosmero relay for NIP-78 Monero address storage
+// Write policy enforced at relay level - only accepts NIP-78 Monero address events
+const NIP78_STORAGE_RELAYS = [
+    window.location.port === '8080'
+        ? 'ws://nosmero.com:8080/nip78-relay'  // Dev
+        : 'wss://nosmero.com/nip78-relay'       // Production
+];
+
+console.log('📡 NIP-78 relay configured:', NIP78_STORAGE_RELAYS);
+
 // ==================== APPLICATION INITIALIZATION ====================
 
 async function initializeApp() {
@@ -1809,12 +1820,11 @@ async function saveMoneroAddressToRelays(moneroAddress) {
     }
     
     console.log('Signed event:', signedEvent);
-    
-    // Publish to relays
-    const relays = Relays.getActiveRelays();
-    console.log('Publishing to relays:', relays);
-    
-    const publishResults = await State.pool.publish(relays, signedEvent);
+
+    // Publish to private NIP-78 relay only
+    console.log('Publishing to private NIP-78 relay:', NIP78_STORAGE_RELAYS);
+
+    const publishResults = await State.pool.publish(NIP78_STORAGE_RELAYS, signedEvent);
     console.log('Publish results:', publishResults);
 
     // Update local profile cache with new Monero address
@@ -1842,8 +1852,8 @@ async function loadMoneroAddressFromRelays(targetPubkey) {
     console.log('Loading Monero address from relays using NIP-78 for pubkey:', pubkey);
 
     try {
-        const relays = Relays.getActiveRelays();
-        console.log('Querying relays:', relays);
+        // Query private NIP-78 relay only
+        console.log('Querying private NIP-78 relay:', NIP78_STORAGE_RELAYS);
 
         const filter = {
             kinds: [30078],
@@ -1855,7 +1865,7 @@ async function loadMoneroAddressFromRelays(targetPubkey) {
 
         const events = await new Promise((resolve) => {
             const foundEvents = [];
-            const sub = State.pool.subscribeMany(relays, [filter], {
+            const sub = State.pool.subscribeMany(NIP78_STORAGE_RELAYS, [filter], {
                 onevent(event) {
                     console.log('Received NIP-78 event for', pubkey, ':', event);
                     foundEvents.push(event);
@@ -1894,6 +1904,8 @@ async function loadMoneroAddressFromRelays(targetPubkey) {
     }
 }
 
+// Note: Migration function removed - no longer querying old public relays
+// Users must re-enter their Monero address in Settings if they want it on nosmero relay
 
 // Get Monero address for any user (with NIP-78 support for all users)
 async function getUserMoneroAddress(pubkey) {
