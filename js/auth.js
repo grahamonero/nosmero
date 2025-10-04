@@ -145,7 +145,12 @@ export async function createNewAccount() {
         const nsec = nip19.nsecEncode(secretKey instanceof Uint8Array ? secretKey : privateKey);
         
         showNotification(`Account created! Private key: ${nsec.substring(0, 20)}...`, 'success');
-        
+
+        // Clear all home feed state to prevent anonymous posts from persisting
+        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
+            window.NostrPosts.clearHomeFeedState();
+        }
+
         // Start the application with the new session
         if (window.startApplication) {
             await window.startApplication();
@@ -257,6 +262,21 @@ export async function loginWithNsec() {
             console.error('Error loading NIP-65 relay list:', error);
         }
 
+        // Clear the anonymous feed display before starting authenticated session
+        const feed = document.getElementById('feed');
+        const homeFeedList = document.getElementById('homeFeedList');
+        if (feed) {
+            feed.innerHTML = '<div class="loading">Loading your feed...</div>';
+        }
+        if (homeFeedList) {
+            homeFeedList.innerHTML = '';
+        }
+
+        // Clear all home feed state to prevent anonymous posts from persisting
+        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
+            window.NostrPosts.clearHomeFeedState();
+        }
+
         // Start the application with the new session
         if (window.startApplication) {
             await window.startApplication();
@@ -264,7 +284,7 @@ export async function loginWithNsec() {
             // Fallback: reload the page
             window.location.reload();
         }
-        
+
     } catch (error) {
         console.error('Login error:', error);
         alert('Failed to login: ' + error.message);
@@ -304,6 +324,11 @@ export async function loginWithExtension() {
             }
         } catch (error) {
             console.error('Error loading NIP-65 relay list:', error);
+        }
+
+        // Clear all home feed state to prevent anonymous posts from persisting
+        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
+            window.NostrPosts.clearHomeFeedState();
         }
 
         // Start the application with the new session

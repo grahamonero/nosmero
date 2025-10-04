@@ -24,6 +24,18 @@ let displayedPostCount = 0;    // How many posts are currently shown
 let isBackgroundFetching = false;
 let oldestCachedTimestamp = null;
 
+// Clear all home feed state (used when switching users)
+export function clearHomeFeedState() {
+    console.log('🧹 Clearing home feed state');
+    currentHomeFeedResults = [];
+    currentHomeFeedSortMode = 'stream';
+    currentFollowingList = new Set();
+    cachedHomeFeedPosts = [];
+    displayedPostCount = 0;
+    isBackgroundFetching = false;
+    oldestCachedTimestamp = null;
+}
+
 // ==================== FEED LOADING ====================
 
 // Get authors for feed - logged in users see followed users, anonymous users see curated authors
@@ -790,8 +802,27 @@ async function updateParentPosts(parentPostsMap) {
         const replyContextEl = postEl.querySelector('.reply-context');
         if (!replyContextEl) continue;
 
-        // Render the parent post
-        const parentHtml = await renderSinglePost(parentPost, 'reply-context');
+        // Render the parent post preview (not full post)
+        const parentAuthor = getAuthorInfo(parentPost);
+        const textColor = '#ccc';
+
+        const parentHtml = `
+            <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px; opacity: 0.8;">
+                <div class="post-header" style="font-size: 14px;">
+                    ${parentAuthor.picture ?
+                        `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
+                        `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
+                    }
+                    <div class="post-info">
+                        <span class="username" style="font-size: 14px;">${parentAuthor.name}</span>
+                        <span class="timestamp" style="font-size: 12px;">${Utils.formatTime(parentPost.created_at)}</span>
+                    </div>
+                </div>
+                <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis; color: ${textColor};">${Utils.parseContent(parentPost.content)}</div>
+            </div>
+            <div style="color: #666; font-size: 12px; margin-bottom: 8px;">↳</div>
+        `;
+
         replyContextEl.innerHTML = parentHtml;
     }
     console.log(`✅ Updated ${Object.keys(parentPostsMap).length} parent posts`);
@@ -879,7 +910,7 @@ export async function renderFeed(loadMore = false) {
             const borderColor = '#444';
             
             parentHtml = `
-                <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; border-left: 2px solid ${borderColor}; padding-left: 12px; margin-bottom: 8px; opacity: 0.8;">
+                <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px; opacity: 0.8;">
                     <div class="post-header" style="font-size: 14px;">
                         ${parentAuthor.picture ? 
                             `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` : 
@@ -899,6 +930,7 @@ export async function renderFeed(loadMore = false) {
         return `
             <div class="post">
                 ${parentHtml}
+                <div ${parentHtml ? 'style="border-left: 2px solid #444; padding-left: 12px;"' : ''}>
                 <div class="post-header">
                     ${author.picture ? 
                         `<img class="avatar" src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` : ''
@@ -931,6 +963,7 @@ export async function renderFeed(loadMore = false) {
                         '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">⚡XMR</button>'
                     }
                     <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>
+                </div>
                 </div>
             </div>
         `;
@@ -1958,7 +1991,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                 const borderColor = '#444';
                 
                 parentHtml = `
-                    <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; border-left: 2px solid ${borderColor}; padding-left: 12px; margin-bottom: 8px; opacity: 0.8;">
+                    <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px; opacity: 0.8;">
                         <div class="post-header" style="font-size: 14px;">
                             ${parentAuthor.picture ? 
                                 `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` : 
@@ -1971,7 +2004,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                         </div>
                         <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis; color: ${textColor};">${Utils.parseContent(parentPost.content)}</div>
                     </div>
-                    <div style="color: #666; font-size: 12px; margin-bottom: 8px;">↳ Replying to</div>
+                    <div style="color: #666; font-size: 12px; margin-bottom: 8px; margin-left: 12px;">↳ Replying to</div>
                 `;
             }
         }
@@ -1981,6 +2014,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
         return `
             <div class="post" data-post-id="${post.id}">
                 <div class="reply-context">${parentHtml}</div>
+                <div ${parentHtml ? 'style="border-left: 2px solid #444; padding-left: 12px;"' : ''}>
                 <div class="post-header">
                     ${author.picture ?
                         `<img class="avatar" src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` : ''
@@ -2013,6 +2047,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                         '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">⚡XMR</button>'
                     }
                     <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>
+                </div>
                 </div>
             </div>
         `;
