@@ -1,0 +1,49 @@
+# Backup files
+*backup*
+*.backup
+*.bak
+*_backup_*
+backup_*/
+temp_backup/
+production_backups/
+
+# Archive directories
+*_archive/
+v1_archive/
+v2_original/
+v2*/
+
+# Build and minified files (if not used)
+*.min.js.backup
+app-*.min.js
+app-*.js
+
+# Config files
+nginx-*.conf
+deploy-*.sh
+
+# Utility and debug files
+.file-hashes
+integrity-check.sh
+integrity.log
+
+# Alternate versions
+index-*.html
+index_*.html
+
+# Old library files
+nostr-tools-fixed.js
+nostr-tools.bundle.js.backup
+
+# Old style files
+styles-critical.css
+styles-full.min.css
+
+# Old logos and images not in use
+logo_nosmero.svg
+nosmero-logo-orange.svg
+nosmeroav.png
+
+# System files
+.DS_Store
+Thumbs.db
