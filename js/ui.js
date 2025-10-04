@@ -3,6 +3,7 @@
 // Functions for modal management, forms, themes, navigation, file uploads, and QR codes
 
 import { showNotification } from './utils.js';
+import * as State from './state.js';
 import { zapQueue, privateKey } from './state.js';
 
 // ==================== WELCOME MODAL ====================
@@ -65,6 +66,9 @@ export function closeWelcomeModalAndDontShow() {
 
 // Display the login modal for new users or when no keys are stored
 export function showLoginModal() {
+    // Abort any ongoing home feed loading
+    State.abortHomeFeedLoading();
+
     console.log('Showing login modal');
     const modal = document.getElementById('loginModal');
     console.log('Modal element:', modal);

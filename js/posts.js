@@ -212,6 +212,10 @@ export async function loadStreamingHomeFeed() {
     isLoadingHomeFeed = true;
     console.log('🔄 Starting home feed load');
 
+    // Create AbortController for this feed load
+    const abortController = new AbortController();
+    State.setHomeFeedAbortController(abortController);
+
     try {
         State.setCurrentPage('home');
 
@@ -236,9 +240,9 @@ export async function loadStreamingHomeFeed() {
         // Step 1: Always fetch fresh following list
         await loadFreshFollowingList();
 
-        // Step 2: Prepare user profiles AND Monero addresses (must complete before rendering posts)
-        updateHomeFeedStatus('Loading user profiles and addresses...');
-        await prepareProfiles();
+        // Step 2: Prepare user profiles (Monero addresses load in background)
+        updateHomeFeedStatus('Loading user profiles...');
+        await prepareProfiles(); // Only waits for profiles, not Monero addresses
 
         // Step 3: Stream posts directly from relays (no cache)
         updateHomeFeedStatus('Loading posts from relays...');
@@ -396,18 +400,26 @@ async function prepareProfiles() {
     // Fetch profiles for all followed users to improve display
     await fetchProfiles(followingArray);
 
-    // Also fetch Monero addresses for all followed users (NIP-78)
+    // Fetch Monero addresses in background (non-blocking)
+    // This runs in parallel and doesn't block feed loading
     if (window.getUserMoneroAddress) {
-        for (const pubkey of followingArray) {
-            try {
-                const moneroAddr = await window.getUserMoneroAddress(pubkey);
-                if (moneroAddr && State.profileCache[pubkey]) {
-                    State.profileCache[pubkey].monero_address = moneroAddr;
+        Promise.all(
+            followingArray.map(async (pubkey) => {
+                try {
+                    const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                    if (moneroAddr && State.profileCache[pubkey]) {
+                        State.profileCache[pubkey].monero_address = moneroAddr;
+                    }
+                } catch (error) {
+                    console.error(`Failed to load Monero address for ${pubkey.slice(0, 8)}:`, error);
                 }
-            } catch (error) {
-                console.error(`Failed to load Monero address for ${pubkey.slice(0, 8)}:`, error);
+            })
+        ).then(() => {
+            // Re-render after addresses loaded to update XMR buttons
+            if (currentHomeFeedResults.length > 0) {
+                renderHomeFeedResults();
             }
-        }
+        });
     }
 }
 
@@ -423,8 +435,17 @@ async function streamRelayPosts() {
 
     console.log(`📡 Loading initial ${INITIAL_LIMIT} posts from ${followingArray.length} followed users...`);
 
+    // Check if loading was aborted before starting
+    if (State.homeFeedAbortController?.signal.aborted) {
+        console.log('🛑 Feed loading aborted before relay subscription');
+        return;
+    }
+
+    let feedSub = null;
+    let timeoutId = null;
+
     try {
-        const feedSub = State.pool.subscribeMany(readRelays, [
+        feedSub = State.pool.subscribeMany(readRelays, [
             {
                 kinds: [1], // Text notes
                 authors: followingArray,
@@ -432,6 +453,13 @@ async function streamRelayPosts() {
             }
         ], {
             onevent(event) {
+                // Check if aborted during event processing
+                if (State.homeFeedAbortController?.signal.aborted) {
+                    console.log('🛑 Feed loading aborted, ignoring incoming events');
+                    if (feedSub) feedSub.close();
+                    return;
+                }
+
                 // Add to cache, avoiding duplicates
                 if (!cachedHomeFeedPosts.find(p => p.id === event.id)) {
                     cachedHomeFeedPosts.push(event);
@@ -443,13 +471,30 @@ async function streamRelayPosts() {
                 }
             },
             oneose() {
-                feedSub.close();
+                if (feedSub) feedSub.close();
             }
         });
 
         // Let subscription run for 6 seconds to collect posts
-        await new Promise(resolve => setTimeout(resolve, 6000));
-        feedSub.close();
+        await new Promise((resolve, reject) => {
+            timeoutId = setTimeout(resolve, 6000);
+
+            // Listen for abort signal
+            if (State.homeFeedAbortController) {
+                State.homeFeedAbortController.signal.addEventListener('abort', () => {
+                    clearTimeout(timeoutId);
+                    reject(new DOMException('Feed loading aborted', 'AbortError'));
+                });
+            }
+        });
+
+        if (feedSub) feedSub.close();
+
+        // Check if aborted before processing results
+        if (State.homeFeedAbortController?.signal.aborted) {
+            console.log('🛑 Feed loading aborted after relay subscription');
+            return;
+        }
 
         // Sort cache chronologically (newest first)
         cachedHomeFeedPosts.sort((a, b) => b.created_at - a.created_at);
@@ -460,7 +505,13 @@ async function streamRelayPosts() {
         await displayPostsFromCache(30);
 
     } catch (error) {
-        console.error('Error streaming relay posts:', error);
+        if (error.name === 'AbortError') {
+            console.log('🛑 Feed loading aborted');
+            if (feedSub) feedSub.close();
+            if (timeoutId) clearTimeout(timeoutId);
+        } else {
+            console.error('Error streaming relay posts:', error);
+        }
     }
 }
 
@@ -501,30 +552,24 @@ async function displayPostsFromCache(count) {
 
     console.log(`📺 Displaying ${postsToDisplay.length} posts from cache (${displayedPostCount} -> ${displayedPostCount + postsToDisplay.length})`);
 
-    // Fetch profiles for these posts if needed
-    const pubkeysToFetch = postsToDisplay
-        .map(p => p.pubkey)
-        .filter(pk => !State.profileCache[pk]);
+    // Deduplicate and batch fetch profiles if needed
+    const uniquePubkeys = [...new Set(postsToDisplay.map(p => p.pubkey))];
+    const pubkeysToFetch = uniquePubkeys.filter(pk => !State.profileCache[pk]);
 
     if (pubkeysToFetch.length > 0) {
         await fetchProfiles(pubkeysToFetch);
     }
 
-    // Fetch Monero addresses for post authors (deduplicated and parallel)
+    // Fetch Monero addresses in background (non-blocking)
     if (window.getUserMoneroAddress) {
-        // Get unique pubkeys that don't already have Monero address cached or checked
-        const uniquePubkeys = [...new Set(postsToDisplay.map(p => p.pubkey))];
         const pubkeysNeedingMoneroCheck = uniquePubkeys.filter(pk => {
             const profile = State.profileCache[pk];
-            // Skip if we already have address or already checked (has the field set to null/undefined)
             return profile && !profile.hasOwnProperty('monero_address');
         });
 
         if (pubkeysNeedingMoneroCheck.length > 0) {
-            console.log(`🔍 Checking Monero addresses for ${pubkeysNeedingMoneroCheck.length} unique users`);
-
-            // Fetch all in parallel
-            await Promise.all(
+            // Don't await - fetch in background and re-render when done
+            Promise.all(
                 pubkeysNeedingMoneroCheck.map(async (pubkey) => {
                     try {
                         const moneroAddr = await window.getUserMoneroAddress(pubkey);
@@ -532,13 +577,15 @@ async function displayPostsFromCache(count) {
                             State.profileCache[pubkey].monero_address = moneroAddr || null;
                         }
                     } catch (error) {
-                        // Mark as checked (null) so we don't retry
                         if (State.profileCache[pubkey]) {
                             State.profileCache[pubkey].monero_address = null;
                         }
                     }
                 })
-            );
+            ).then(() => {
+                // Re-render posts after Monero addresses are loaded
+                renderHomeFeedResults();
+            });
         }
     }
 
@@ -654,9 +701,35 @@ async function renderHomeFeedResults() {
             break;
     }
 
-    // Render posts asynchronously
-    const renderedPosts = await Promise.all(sortedResults.map(post => renderSinglePost(post)));
+    // STREAMING RENDER: Display posts immediately, then update engagement data in background
+    console.log('🚀 Rendering posts immediately with placeholders...');
+
+    // 1. Deduplicate and batch fetch profiles (fast, keep this blocking)
+    const uniquePubkeys = [...new Set(sortedResults.map(p => p.pubkey))];
+    const pubkeysToFetch = uniquePubkeys.filter(pk => !State.profileCache[pk]);
+    if (pubkeysToFetch.length > 0) {
+        await fetchProfiles(pubkeysToFetch);
+    }
+
+    // 2. RENDER IMMEDIATELY with placeholder engagement data
+    const renderedPosts = await Promise.all(
+        sortedResults.map(post => renderSinglePost(post, 'feed', null, null))
+    );
     resultsEl.innerHTML = renderedPosts.join('');
+    console.log('✅ Posts rendered instantly');
+
+    // 3. BACKGROUND: Fetch engagement counts and update DOM as they arrive
+    const postIds = sortedResults.map(p => p.id);
+    fetchEngagementCounts(postIds).then(engagementData => {
+        console.log('📊 Updating engagement counts...');
+        updateEngagementCounts(engagementData);
+    });
+
+    // 4. BACKGROUND: Fetch parent posts and insert as they arrive
+    fetchParentPosts(sortedResults).then(parentPostsMap => {
+        console.log('👨‍👩‍👧 Updating parent posts...');
+        updateParentPosts(parentPostsMap);
+    });
 
     // Process any embedded notes after rendering
     try {
@@ -665,6 +738,63 @@ async function renderHomeFeedResults() {
     } catch (error) {
         console.error('Error processing embedded notes:', error);
     }
+}
+
+// Update engagement counts in the DOM after background fetch
+function updateEngagementCounts(engagementData) {
+    for (const [postId, counts] of Object.entries(engagementData)) {
+        // Update like count
+        const likeCountEl = document.querySelector(`[data-post-id="${postId}"] .like-count`);
+        if (likeCountEl) {
+            if (counts.reactions > 0) {
+                likeCountEl.textContent = counts.reactions;
+                likeCountEl.style.display = '';
+            }
+        }
+
+        // Update reply count
+        const replyCountEl = document.querySelector(`[data-post-id="${postId}"] .reply-count`);
+        if (replyCountEl) {
+            if (counts.replies > 0) {
+                replyCountEl.textContent = counts.replies;
+                replyCountEl.style.display = '';
+            }
+        }
+
+        // Update repost count
+        const repostCountEl = document.querySelector(`[data-post-id="${postId}"] .repost-count`);
+        if (repostCountEl) {
+            if (counts.reposts > 0) {
+                repostCountEl.textContent = counts.reposts;
+                repostCountEl.style.display = '';
+            }
+        }
+
+        // Update zap count (if exists)
+        const zapCountEl = document.querySelector(`[data-post-id="${postId}"] .zap-count`);
+        if (zapCountEl && counts.zaps > 0) {
+            zapCountEl.textContent = counts.zaps;
+            zapCountEl.style.display = '';
+        }
+    }
+    console.log(`✅ Updated engagement counts for ${Object.keys(engagementData).length} posts`);
+}
+
+// Update parent posts in the DOM after background fetch
+async function updateParentPosts(parentPostsMap) {
+    for (const [replyId, parentPost] of Object.entries(parentPostsMap)) {
+        const postEl = document.querySelector(`[data-post-id="${replyId}"]`);
+        if (!postEl) continue;
+
+        // Find the reply-context div
+        const replyContextEl = postEl.querySelector('.reply-context');
+        if (!replyContextEl) continue;
+
+        // Render the parent post
+        const parentHtml = await renderSinglePost(parentPost, 'reply-context');
+        replyContextEl.innerHTML = parentHtml;
+    }
+    console.log(`✅ Updated ${Object.keys(parentPostsMap).length} parent posts`);
 }
 
 // Update home feed status message
@@ -1488,7 +1618,14 @@ export async function fetchParentPosts(posts) {
 // Fetch engagement counts using NIPs 1, 18, 25, and 27
 async function fetchEngagementCounts(postIds) {
     try {
-        const readRelays = Relays.getReadRelays();
+        // Use major public relays for engagement counts (same as profile fetching)
+        const majorRelays = [
+            'wss://relay.damus.io',
+            'wss://nos.lol',
+            'wss://relay.primal.net',
+            'wss://nostr.band'
+        ];
+
         const counts = {};
 
         // Initialize counts for all post IDs
@@ -1498,11 +1635,11 @@ async function fetchEngagementCounts(postIds) {
 
         return new Promise((resolve) => {
             const timeout = setTimeout(() => {
-                console.log('Engagement fetch timeout, returning current counts');
+                console.log('⏱️ Engagement fetch timeout (2s), returning current counts');
                 resolve(counts);
-            }, 3000); // 3 second timeout
+            }, 2000); // Reduced to 2 second timeout for major relays
 
-            const sub = State.pool.subscribeMany(readRelays, [
+            const sub = State.pool.subscribeMany(majorRelays, [
                 // NIP-25: Reactions (kind 7) - likes/hearts
                 {
                     kinds: [7],
@@ -1584,31 +1721,38 @@ async function fetchEngagementCounts(postIds) {
     }
 }
 
-// Fetch profiles (placeholder - needs implementation)
+// Fetch profiles from major public relays (fast, non-blocking)
 export async function fetchProfiles(pubkeys) {
     if (!pubkeys || pubkeys.length === 0) return;
-    
+
     // Filter out pubkeys we already have profiles for
     const unknownPubkeys = pubkeys.filter(pk => !State.profileCache[pk]);
     if (unknownPubkeys.length === 0) return;
-    
-    console.log('Fetching profiles for', unknownPubkeys.length, 'users:', unknownPubkeys);
-    
+
+    console.log('🔍 Fetching profiles for', unknownPubkeys.length, 'users');
+
     try {
         if (!State.pool) {
             console.warn('Pool not initialized, cannot fetch profiles');
             return;
         }
 
-        // First attempt with current relays (8 second timeout)
-        const readRelays = Relays.getReadRelays();
-        console.log('Fetching profiles from read relays:', readRelays);
-        console.log('Unknown pubkeys:', unknownPubkeys);
+        // Use major public relays for fast profile fetching (not user's NIP-65 relays)
+        const majorRelays = [
+            'wss://relay.damus.io',
+            'wss://nos.lol',
+            'wss://relay.primal.net',
+            'wss://nostr.band'
+        ];
+
+        console.log('📡 Querying major public relays for profiles');
+        console.log('Unknown pubkeys:', unknownPubkeys.map(pk => pk.slice(0, 8) + '...'));
         
         await new Promise((resolve) => {
             let profilesReceived = 0;
-            
-            const sub = State.pool.subscribeMany(readRelays, [
+            const foundPubkeys = new Set();
+
+            const sub = State.pool.subscribeMany(majorRelays, [
                 {
                     kinds: [0], // User metadata
                     authors: unknownPubkeys
@@ -1616,50 +1760,28 @@ export async function fetchProfiles(pubkeys) {
             ], {
                 onevent(event) {
                     try {
-                        const profile = JSON.parse(event.content);
-
-                        // Only update if this profile is newer OR if same timestamp but has more data
-                        const existing = State.profileCache[event.pubkey];
-                        const hasLightning = profile.lud16 || profile.lud06;
-                        const existingHasLightning = existing && (existing.lud16 || existing.lud06);
-
-                        if (!existing) {
-                            // No existing profile, save this one
-                            State.profileCache[event.pubkey] = {
-                                ...profile,
-                                pubkey: event.pubkey,
-                                created_at: event.created_at
-                            };
-                            console.log(`Profile received for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at}, hasLightning: ${!!hasLightning})`);
-                        } else if (existingHasLightning && !hasLightning) {
-                            // DON'T overwrite existing profile that has Lightning with one that doesn't
-                            console.log(`⚠️ Keeping existing profile with Lightning for ${event.pubkey} (ignoring newer profile without Lightning)`);
-                        } else if (event.created_at > existing.created_at) {
-                            // Newer profile, update (only if we didn't skip above)
-                            State.profileCache[event.pubkey] = {
-                                ...profile,
-                                pubkey: event.pubkey,
-                                created_at: event.created_at
-                            };
-                            console.log(`Profile updated (newer) for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at}, hasLightning: ${!!hasLightning})`);
-                        } else if (event.created_at === existing.created_at && hasLightning && !existingHasLightning) {
-                            // Same timestamp but this one has Lightning address
-                            State.profileCache[event.pubkey] = {
-                                ...profile,
-                                pubkey: event.pubkey,
-                                created_at: event.created_at
-                            };
-                            console.log(`Profile updated (same timestamp but has Lightning) for ${event.pubkey}: ${profile.name || 'Anonymous'}`);
-                        } else {
-                            console.log(`Skipping profile for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at} vs cached: ${existing.created_at}, hasLightning: ${!!hasLightning} vs ${!!existingHasLightning})`);
+                        // Skip if we already processed this pubkey
+                        if (foundPubkeys.has(event.pubkey)) {
+                            return;
                         }
 
+                        const profile = JSON.parse(event.content);
+                        const hasLightning = profile.lud16 || profile.lud06;
+
+                        State.profileCache[event.pubkey] = {
+                            ...profile,
+                            pubkey: event.pubkey,
+                            created_at: event.created_at
+                        };
+
+                        foundPubkeys.add(event.pubkey);
                         profilesReceived++;
-                        console.log(`Profiles received: ${profilesReceived}/${unknownPubkeys.length}`);
-                        
-                        // If we've received all profiles, resolve early
+
+                        console.log(`✅ ${profile.name || 'Anonymous'} (${profilesReceived}/${unknownPubkeys.length})`);
+
+                        // Early termination: close as soon as all profiles found
                         if (profilesReceived >= unknownPubkeys.length) {
-                            console.log('All profiles fetched, closing subscription');
+                            console.log('✅ All profiles found, closing immediately');
                             sub.close();
                             resolve();
                         }
@@ -1668,139 +1790,168 @@ export async function fetchProfiles(pubkeys) {
                     }
                 },
                 oneose() {
-                    console.log('Profile fetch complete via oneose');
                     sub.close();
                     resolve();
                 }
             });
-            // Increased timeout to 8 seconds for better reliability
+
+            // Aggressive 2-second timeout (major relays are fast)
             setTimeout(() => {
-                console.log(`Profile fetch timeout. Received ${profilesReceived}/${unknownPubkeys.length} profiles`);
+                console.log(`⏱️ Profile fetch complete: ${profilesReceived}/${unknownPubkeys.length}`);
                 sub.close();
                 resolve();
-            }, 8000);
+            }, 2000);
         });
 
-        // Check for still missing profiles and retry with fallback relays
+        // Background fallback for missing profiles using NIP-65
         const stillMissing = unknownPubkeys.filter(pk => !State.profileCache[pk]);
         if (stillMissing.length > 0) {
-            console.log('Retrying with fallback relays for', stillMissing.length, 'missing profiles:', stillMissing);
-            
-            // Fallback relays with good profile coverage
-            const fallbackRelays = [
-                'wss://relay.damus.io',
-                'wss://nos.lol', 
-                'wss://relay.snort.social',
-                'wss://nostr.wine',
-                'wss://relay.nostr.band',
-                'wss://purplepag.es'
-            ];
+            console.log(`⏳ ${stillMissing.length} profiles not found, will fetch in background using NIP-65`);
 
-            await new Promise((resolve) => {
-                let fallbackProfilesReceived = 0;
-                
-                const fallbackSub = State.pool.subscribeMany(fallbackRelays, [
-                    {
-                        kinds: [0], // User metadata
-                        authors: stillMissing
-                    }
-                ], {
-                    onevent(event) {
-                        try {
-                            const profile = JSON.parse(event.content);
-
-                            // Only update if this profile is newer OR if same timestamp but has more data
-                            const existing = State.profileCache[event.pubkey];
-                            const hasLightning = profile.lud16 || profile.lud06;
-                            const existingHasLightning = existing && (existing.lud16 || existing.lud06);
-
-                            if (!existing) {
-                                State.profileCache[event.pubkey] = {
-                                    ...profile,
-                                    pubkey: event.pubkey,
-                                    created_at: event.created_at
-                                };
-                                console.log(`Fallback profile received for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at}, hasLightning: ${!!hasLightning})`);
-                            } else if (existingHasLightning && !hasLightning) {
-                                // DON'T overwrite existing profile that has Lightning with one that doesn't
-                                console.log(`⚠️ Keeping existing profile with Lightning for ${event.pubkey} (ignoring newer fallback profile without Lightning)`);
-                            } else if (event.created_at > existing.created_at) {
-                                State.profileCache[event.pubkey] = {
-                                    ...profile,
-                                    pubkey: event.pubkey,
-                                    created_at: event.created_at
-                                };
-                                console.log(`Fallback profile updated (newer) for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at}, hasLightning: ${!!hasLightning})`);
-                            } else if (event.created_at === existing.created_at && hasLightning && !existingHasLightning) {
-                                State.profileCache[event.pubkey] = {
-                                    ...profile,
-                                    pubkey: event.pubkey,
-                                    created_at: event.created_at
-                                };
-                                console.log(`Fallback profile updated (same timestamp but has Lightning) for ${event.pubkey}: ${profile.name || 'Anonymous'}`);
-                            } else {
-                                console.log(`Skipping fallback profile for ${event.pubkey}: ${profile.name || 'Anonymous'} (timestamp: ${event.created_at} vs cached: ${existing.created_at}, hasLightning: ${!!hasLightning} vs ${!!existingHasLightning})`);
-                            }
-
-                            fallbackProfilesReceived++;
-                            console.log(`Fallback profiles received: ${fallbackProfilesReceived}/${stillMissing.length}`);
-                            
-                            // If we've received all missing profiles, resolve early
-                            if (fallbackProfilesReceived >= stillMissing.length) {
-                                console.log('All fallback profiles fetched, closing subscription');
-                                fallbackSub.close();
-                                resolve();
-                            }
-                        } catch (error) {
-                            console.error('Failed to parse fallback profile:', error);
-                        }
-                    },
-                    oneose() {
-                        console.log('Fallback profile fetch complete via oneose');
-                        fallbackSub.close();
-                        resolve();
-                    }
-                });
-                
-                // Fallback timeout of 6 seconds
-                setTimeout(() => {
-                    console.log(`Fallback profile fetch timeout. Received ${fallbackProfilesReceived}/${stillMissing.length} additional profiles`);
-                    fallbackSub.close();
-                    resolve();
-                }, 6000);
-            });
+            // Non-blocking background fetch using user-specific relays
+            fetchMissingProfilesViaNIP65(stillMissing);
         }
 
-        // Final summary
-        const finalMissing = unknownPubkeys.filter(pk => !State.profileCache[pk]);
-        const successCount = unknownPubkeys.length - finalMissing.length;
-        console.log(`Profile fetch complete: ${successCount}/${unknownPubkeys.length} profiles loaded${finalMissing.length > 0 ? `, ${finalMissing.length} still missing` : ''}`);
+        const successCount = unknownPubkeys.length - stillMissing.length;
+        console.log(`📊 Initial profile fetch: ${successCount}/${unknownPubkeys.length} loaded`);
 
     } catch (error) {
         console.error('Error fetching profiles:', error);
     }
 }
 
+// Background fetch missing profiles using their NIP-65 relay lists
+async function fetchMissingProfilesViaNIP65(missingPubkeys) {
+    // This runs in background and doesn't block rendering
+    try {
+        console.log(`🔍 Fetching NIP-65 relay lists for ${missingPubkeys.length} missing users`);
+
+        // Step 1: Query major relays for NIP-65 relay lists (kind 10002)
+        const majorRelays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://nostr.band'];
+        const userRelayLists = {};
+
+        await new Promise((resolve) => {
+            const sub = State.pool.subscribeMany(majorRelays, [
+                {
+                    kinds: [10002], // NIP-65 relay list
+                    authors: missingPubkeys
+                }
+            ], {
+                onevent(event) {
+                    // Parse relay list from tags
+                    const relays = event.tags
+                        .filter(tag => tag[0] === 'r')
+                        .map(tag => tag[1])
+                        .filter(url => url && url.startsWith('wss://'));
+
+                    if (relays.length > 0) {
+                        userRelayLists[event.pubkey] = relays.slice(0, 3); // Use first 3 relays
+                        console.log(`📡 Found ${relays.length} relays for ${event.pubkey.slice(0, 8)}`);
+                    }
+                },
+                oneose() {
+                    sub.close();
+                    resolve();
+                }
+            });
+
+            setTimeout(() => {
+                sub.close();
+                resolve();
+            }, 1500);
+        });
+
+        // Step 2: For each user, query their personal relays for profile
+        for (const pubkey of missingPubkeys) {
+            const userRelays = userRelayLists[pubkey];
+
+            if (userRelays && userRelays.length > 0) {
+                console.log(`🔎 Fetching profile for ${pubkey.slice(0, 8)} from their relays`);
+
+                try {
+                    await new Promise((resolve) => {
+                        const sub = State.pool.subscribeMany(userRelays, [
+                            {
+                                kinds: [0],
+                                authors: [pubkey]
+                            }
+                        ], {
+                            onevent(event) {
+                                try {
+                                    const profile = JSON.parse(event.content);
+                                    State.profileCache[event.pubkey] = {
+                                        ...profile,
+                                        pubkey: event.pubkey,
+                                        created_at: event.created_at
+                                    };
+                                    console.log(`✅ Background: Found ${profile.name || 'Anonymous'}`);
+                                    sub.close();
+                                    resolve();
+                                } catch (e) {
+                                    console.error('Parse error:', e);
+                                }
+                            },
+                            oneose() {
+                                sub.close();
+                                resolve();
+                            }
+                        });
+
+                        setTimeout(() => {
+                            sub.close();
+                            resolve();
+                        }, 1000);
+                    });
+                } catch (error) {
+                    console.error(`Failed to fetch profile for ${pubkey.slice(0, 8)}:`, error);
+                }
+            } else {
+                console.log(`⚠️ No NIP-65 relays found for ${pubkey.slice(0, 8)}`);
+            }
+        }
+
+        // Re-render after background profiles loaded
+        const nowFound = missingPubkeys.filter(pk => State.profileCache[pk]).length;
+        if (nowFound > 0 && window.location.hash === '#home') {
+            console.log(`🔄 Re-rendering after ${nowFound} background profiles loaded`);
+            const postsModule = await import('./posts.js');
+            if (postsModule.renderHomeFeedResults) {
+                await postsModule.renderHomeFeedResults();
+            }
+        }
+
+    } catch (error) {
+        console.error('Background NIP-65 profile fetch error:', error);
+    }
+}
+
 // Render a single post (for thread view, search results, etc.)
-export async function renderSinglePost(post, context = 'feed') {
+export async function renderSinglePost(post, context = 'feed', engagementData = null, parentPostsMap = null) {
     try {
         const author = getAuthorInfo(post);
         const moneroAddress = getMoneroAddress(post);
         const lightningAddress = getLightningAddress(post);
-        
+
         // For thread context, we might want to show less engagement data to simplify
         let engagement = { reactions: 0, reposts: 0, replies: 0, zaps: 0 };
         if (context === 'feed' || context === 'highlight') {
-            const engagementData = await fetchEngagementCounts([post.id]);
-            engagement = engagementData[post.id] || engagement;
+            // Use pre-fetched data if available (streaming render will update later)
+            if (engagementData && engagementData[post.id]) {
+                engagement = engagementData[post.id];
+            }
+            // DO NOT fallback fetch - streaming render will update counts in background
         }
-        
+
         // Check if this is a reply and get parent post info (only for feed context)
         let parentHtml = '';
         if (context === 'feed') {
-            const parentPostsMap = await fetchParentPosts([post]);
-            const parentPost = parentPostsMap[post.id];
-            
+            // Use pre-fetched data if available (streaming render will update later)
+            let parentPost = null;
+            if (parentPostsMap && parentPostsMap[post.id]) {
+                parentPost = parentPostsMap[post.id];
+            }
+            // DO NOT fallback fetch - streaming render will insert parents in background
+
             if (parentPost) {
                 const parentAuthor = getAuthorInfo(parentPost);
                 const textColor = '#ccc';
@@ -1828,10 +1979,10 @@ export async function renderSinglePost(post, context = 'feed') {
         // Thread indicator removed per user request
         
         return `
-            <div class="post">
-                ${parentHtml}
+            <div class="post" data-post-id="${post.id}">
+                <div class="reply-context">${parentHtml}</div>
                 <div class="post-header">
-                    ${author.picture ? 
+                    ${author.picture ?
                         `<img class="avatar" src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` : ''
                     }
                     <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
@@ -1844,13 +1995,13 @@ export async function renderSinglePost(post, context = 'feed') {
                 <div class="post-content" ${context !== 'thread' ? `onclick="openThreadView('${post.id}')" style="cursor: pointer;"` : ''}>${Utils.parseContent(post.content)}</div>
                 <div class="post-actions" onclick="event.stopPropagation();">
                     <button class="action-btn" onclick="NostrPosts.replyToPost('${post.id}')">
-                        💬 ${engagement.replies > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${engagement.replies}</span>` : ''}
+                        💬 ${engagement.replies > 0 ? `<span class="reply-count" style="font-size: 12px; margin-left: 2px;">${engagement.replies}</span>` : '<span class="reply-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
                     </button>
                     <button class="action-btn" onclick="NostrPosts.repostNote('${post.id}')">
-                        🔄 ${engagement.reposts > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${engagement.reposts}</span>` : ''}
+                        🔄 ${engagement.reposts > 0 ? `<span class="repost-count" style="font-size: 12px; margin-left: 2px;">${engagement.reposts}</span>` : '<span class="repost-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
                     </button>
                     <button class="action-btn like-btn" id="like-${post.id}" onclick="NostrPosts.likePost('${post.id}')" data-post-id="${post.id}" title="Like this post">
-                        🤍 ${engagement.reactions > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${engagement.reactions}</span>` : ''}
+                        🤍 ${engagement.reactions > 0 ? `<span class="like-count" style="font-size: 12px; margin-left: 2px;">${engagement.reactions}</span>` : '<span class="like-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
                     </button>
                     <button class="action-btn" onclick="sharePost('${post.id}')">📤</button>
                     ${lightningAddress ?

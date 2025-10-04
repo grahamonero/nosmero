@@ -1193,9 +1193,12 @@ async function loadSettings_OLD_DISABLED() {
 
 // Show authentication UI
 function showAuthUI() {
+    // Abort any ongoing home feed loading
+    State.abortHomeFeedLoading();
+
     const feed = document.getElementById('feed');
     if (!feed) return;
-    
+
     feed.innerHTML = `
         <div style="padding: 40px; text-align: center; max-width: 500px; margin: 0 auto;">
             <h2 style="color: #FF6600; margin-bottom: 30px;">Welcome to Nosmero</h2>
@@ -1864,12 +1867,12 @@ async function loadMoneroAddressFromRelays(targetPubkey) {
                 }
             });
 
-            // Timeout after 5 seconds
+            // Timeout after 1 second (NIP-78 queries should be fast or skipped)
             setTimeout(() => {
                 console.log('Query timed out for', pubkey, ', found events:', foundEvents.length);
                 sub.close();
                 resolve(foundEvents);
-            }, 5000);
+            }, 1000);
         });
 
         if (events.length > 0) {
@@ -1913,11 +1916,26 @@ async function getUserMoneroAddress(pubkey) {
 
     // For other users, check their profile cache first
     const profile = State.profileCache[pubkey];
+
+    // STEP 1: Check if we already have cached Monero address
     if (profile && profile.monero_address) {
         return profile.monero_address;
     }
 
-    // Try to load from NIP-78 relays for other users
+    // STEP 2: Check profile "about" field FIRST (instant, no network call)
+    if (profile && profile.about) {
+        const xmrAddress = extractMoneroAddressFromText(profile.about);
+        if (xmrAddress) {
+            console.log('💰 Found Monero address in profile about field:', xmrAddress.slice(0, 10) + '...');
+            // Cache it
+            if (State.profileCache[pubkey]) {
+                State.profileCache[pubkey].monero_address = xmrAddress;
+            }
+            return xmrAddress;
+        }
+    }
+
+    // STEP 3: Only if not found in profile, try NIP-78 relays (network query)
     try {
         const relayAddress = await loadMoneroAddressFromRelays(pubkey);
         if (relayAddress) {
@@ -1931,23 +1949,9 @@ async function getUserMoneroAddress(pubkey) {
         console.warn('Could not load Monero address from relays for user', pubkey, ':', error);
     }
 
-    console.log('🔍 REACHED AFTER TRY/CATCH - about to check fallback for pubkey:', pubkey.slice(0, 8));
-
-    // Fallback: Check if Monero address is in profile "about" field
-    console.log('🔍 Fallback check - profile exists:', !!profile, 'has about:', !!(profile && profile.about));
-    if (profile && profile.about) {
-        console.log('🔍 About field content:', profile.about.slice(0, 100));
-        const xmrAddress = extractMoneroAddressFromText(profile.about);
-        if (xmrAddress) {
-            console.log('💰 Found Monero address in profile about field:', xmrAddress.slice(0, 10) + '...');
-            // Cache it
-            if (State.profileCache[pubkey]) {
-                State.profileCache[pubkey].monero_address = xmrAddress;
-            }
-            return xmrAddress;
-        }
-    } else {
-        console.log('🔍 Cannot scan about field - profile:', !!profile, 'profileCache entry:', !!State.profileCache[pubkey]);
+    // No Monero address found anywhere, cache null to avoid re-checking
+    if (State.profileCache[pubkey]) {
+        State.profileCache[pubkey].monero_address = null;
     }
 
     return null;

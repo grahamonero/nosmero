@@ -33,6 +33,7 @@ export let homeFeedCache = { posts: [], timestamp: 0, isLoading: false };  // Ca
 export let trendingFeedCache = { posts: [], timestamp: 0, isLoading: false };  // Cached trending feed with metadata
 export let relayPerformance = {};  // Track response times for each relay URL
 export let backgroundUpdateInterval = null;  // Interval for background feed updates
+export let homeFeedAbortController = null;  // AbortController for cancelling home feed loading
 export const CACHE_DURATION = 5 * 60 * 1000;  // 5 minutes cache duration
 export const RELAY_TIMEOUT = 2000;  // 2 second timeout for individual relay responses
 
@@ -61,6 +62,16 @@ export function setTrendingFeedCache(cache) { trendingFeedCache = cache; }
 export function setRelayPerformance(performance) { relayPerformance = performance; }
 export function setBackgroundUpdateInterval(interval) { backgroundUpdateInterval = interval; }
 export function setRelays(newRelays) { relays = newRelays; }
+export function setHomeFeedAbortController(controller) { homeFeedAbortController = controller; }
+
+// Abort ongoing home feed loading
+export function abortHomeFeedLoading() {
+    if (homeFeedAbortController) {
+        console.log('🛑 Aborting home feed loading...');
+        homeFeedAbortController.abort();
+        homeFeedAbortController = null;
+    }
+}
 
 // Clear home feed cache to force reload
 export function clearHomeFeedCache() { 

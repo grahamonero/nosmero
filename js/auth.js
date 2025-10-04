@@ -4,15 +4,16 @@
 
 import { encryptData, decryptData, deriveKey } from './crypto.js';
 import { showNotification } from './utils.js';
-import { 
-    setPrivateKey, 
-    setPublicKey, 
-    privateKey, 
-    publicKey, 
-    posts, 
-    homeFeedCache, 
-    trendingFeedCache, 
-    userMoneroAddress 
+import * as State from './state.js';
+import {
+    setPrivateKey,
+    setPublicKey,
+    privateKey,
+    publicKey,
+    posts,
+    homeFeedCache,
+    trendingFeedCache,
+    userMoneroAddress
 } from './state.js';
 
 // ==================== SECURE KEY STORAGE ====================
@@ -103,6 +104,9 @@ export async function getSecurePrivateKey(pin) {
 
 // Generate a new Nostr keypair for a brand new user account
 export async function createNewAccount() {
+    // Abort any ongoing home feed loading
+    State.abortHomeFeedLoading();
+
     try {
         if (!window.NostrTools) {
             alert('Unable to load cryptographic tools. Please refresh the page and try again.');
@@ -269,6 +273,9 @@ export async function loginWithNsec() {
 
 // Login using a browser extension like nos2x or Alby (keeps keys secure)
 export async function loginWithExtension() {
+    // Abort any ongoing home feed loading
+    State.abortHomeFeedLoading();
+
     try {
         if (!window.nostr) {
             alert('No Nostr extension found. Please install nos2x, Alby, or another Nostr browser extension.');
