@@ -1008,6 +1008,12 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false) {
     try {
         // Import Posts module to use proper rendering
         const PostsModule = await import('./posts.js');
+        const StateModule = await import('./state.js');
+
+        // Add all posts to global event cache so interaction buttons work
+        posts.forEach(post => {
+            StateModule.eventCache[post.id] = post;
+        });
 
         // Fetch profiles for posts and any parent posts they might reference
         const allAuthors = [...new Set(posts.map(post => post.pubkey))];
@@ -1015,7 +1021,6 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false) {
 
         // Fetch Monero addresses for all post authors (only once, after all posts loaded)
         if (fetchMoneroAddresses && window.getUserMoneroAddress) {
-            const StateModule = await import('./state.js');
             console.log('💰 Fetching Monero addresses for profile page posts, authors:', allAuthors.length);
             await Promise.all(
                 allAuthors.map(async (pubkey) => {

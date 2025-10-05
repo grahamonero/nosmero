@@ -259,7 +259,15 @@
             border-radius: 8px;
             margin: 8px 0;
         }
-        
+
+        .post-content video {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin: 8px 0;
+            display: block;
+        }
+
         .post-content .mention {
             color: #1d9bf0;
             text-decoration: none;

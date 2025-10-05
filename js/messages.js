@@ -1086,16 +1086,18 @@ export function renderNotifications(groupedNotifications = []) {
         if (interactionGroups.likes.length > 0) {
             const likeAuthors = interactionGroups.likes.slice(0, 3).map(i => {
                 const profile = i.profile || {};
-                return profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
+                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
+                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
             });
             const moreCount = Math.max(0, interactionGroups.likes.length - 3);
             summaryParts.push(`❤️ ${likeAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} liked this`);
         }
-        
+
         if (interactionGroups.reposts.length > 0) {
             const repostAuthors = interactionGroups.reposts.slice(0, 3).map(i => {
                 const profile = i.profile || {};
-                return profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
+                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
+                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
             });
             const moreCount = Math.max(0, interactionGroups.reposts.length - 3);
             summaryParts.push(`🔄 ${repostAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} reposted this`);
@@ -1143,7 +1145,7 @@ export function renderNotifications(groupedNotifications = []) {
                             const displayName = profile.name || profile.display_name || `User ${reply.pubkey.substring(0, 8)}...`;
                             return `
                                 <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid #FF6600;">
-                                    <div style="color: #FF6600; font-size: 13px; font-weight: bold; margin-bottom: 4px;">${displayName}:</div>
+                                    <div style="color: #FF6600; font-size: 13px; font-weight: bold; margin-bottom: 4px; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${reply.pubkey}')">${displayName}:</div>
                                     <div style="color: #ccc; font-size: 14px; line-height: 1.3;">${escapeHtml(reply.content)}</div>
                                 </div>
                             `;

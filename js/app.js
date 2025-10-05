@@ -787,13 +787,18 @@ async function loadUserPosts() {
 function displayUserPosts(posts) {
     const profileContent = document.getElementById('profileContent');
     if (!profileContent) return;
-    
+
     const userProfile = State.profileCache[State.publicKey] || { name: 'Anonymous', picture: null };
-    
+
     // Use the proper renderSinglePost function to show parent posts and thread context
     (async () => {
         try {
             const Posts = await import('./posts.js');
+
+            // Add all posts to global event cache so interaction buttons work
+            posts.forEach(post => {
+                State.eventCache[post.id] = post;
+            });
 
             // Fetch Monero addresses for all post authors
             if (window.getUserMoneroAddress) {
