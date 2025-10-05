@@ -1975,7 +1975,15 @@ function extractMoneroAddressFromText(text) {
 
     console.log('🔍 Scanning text for Monero address, length:', text.length);
 
-    // Monero address regex patterns:
+    // Check for "monero:XXXXX..." format first
+    const moneroLabelRegex = /monero:\s*([48][0-9AB][1-9A-HJ-NP-Za-km-z]{93,105})/i;
+    const labelMatch = text.match(moneroLabelRegex);
+    if (labelMatch && labelMatch[1]) {
+        console.log('✅ Found Monero address with monero: prefix:', labelMatch[1].slice(0, 10) + '...');
+        return labelMatch[1];
+    }
+
+    // Monero address regex patterns (standalone):
     // - Standard addresses start with 4 (95 chars)
     // - Subaddresses start with 8 (95 chars)
     // - Integrated addresses start with 4 (106 chars)
@@ -3553,4 +3561,24 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // Wire up Home and Trend tab buttons
+    const tabButtons = document.querySelectorAll('.tab-bar .tab');
+    tabButtons.forEach(button => {
+        button.addEventListener('click', async function() {
+            const feedType = this.getAttribute('data-feed');
+
+            // Update active state
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            this.classList.add('active');
+
+            // Load appropriate feed
+            const Posts = await import('./posts.js');
+            if (feedType === 'home') {
+                await Posts.loadStreamingHomeFeed();
+            } else if (feedType === 'trending') {
+                await Posts.loadTrendingFeed();
+            }
+        });
+    });
 });

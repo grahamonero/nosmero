@@ -231,6 +231,12 @@ export async function loadStreamingHomeFeed() {
     try {
         State.setCurrentPage('home');
 
+        // Show home feed header/controls
+        const homeFeedHeader = document.getElementById('homeFeedHeader');
+        if (homeFeedHeader) {
+            homeFeedHeader.style.display = 'block';
+        }
+
         // Reset caching system for fresh load
         cachedHomeFeedPosts = [];
         currentHomeFeedResults = [];
@@ -290,7 +296,7 @@ export async function loadStreamingHomeFeed() {
                 }
             }
         } else {
-            updateHomeFeedStatus(`Timeline loaded - ${displayedPostCount} shown, ${cachedHomeFeedPosts.length} cached from ${currentFollowingList.size} users`);
+            updateHomeFeedStatus(`Timeline loaded - ${displayedPostCount} notes shown, ${cachedHomeFeedPosts.length} cached from ${currentFollowingList.size} users`);
         }
 
     } catch (error) {
@@ -314,6 +320,160 @@ export async function loadStreamingHomeFeed() {
     } finally {
         isLoadingHomeFeed = false;
         console.log('🔄 Home feed load completed');
+    }
+}
+
+// ==================== TRENDING FEED (MONERO-FOCUSED) ====================
+
+// Load trending Monero-related notes from last 24 hours
+export async function loadTrendingFeed() {
+    console.log('📈 Loading Monero-focused trending feed');
+
+    try {
+        State.setCurrentPage('trending');
+
+        // Hide home feed header/controls
+        const homeFeedHeader = document.getElementById('homeFeedHeader');
+        if (homeFeedHeader) {
+            homeFeedHeader.style.display = 'none';
+        }
+
+        // Hide Load More button immediately
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        if (loadMoreContainer) {
+            loadMoreContainer.style.display = 'none';
+        }
+
+        // Show loading state
+        const homeFeedList = document.getElementById('homeFeedList');
+        if (homeFeedList) {
+            homeFeedList.innerHTML = '<div class="loading">Loading trending Monero posts...</div>';
+        }
+
+        // Import search module to use its hashtag search
+        const Search = await import('./search.js');
+        const Relays = await import('./relays.js');
+
+        const pool = State.pool;
+        const relays = Relays.DEFAULT_RELAYS;
+
+        if (!pool || !relays.length) {
+            throw new Error('No relay connection available');
+        }
+
+        const allNotes = [];
+        const noteIds = new Set();
+
+        console.log('📡 Querying relays for Monero-related content');
+
+        // Query 1: Search #monero hashtag
+        console.log('🏷️ Searching #monero hashtag...');
+        const moneroHashtagResults = await Search.searchHashtag('monero');
+        moneroHashtagResults.forEach(event => {
+            if (!noteIds.has(event.id)) {
+                noteIds.add(event.id);
+                allNotes.push(event);
+            }
+        });
+
+        // Query 2: Search #xmr hashtag
+        console.log('🏷️ Searching #xmr hashtag...');
+        const xmrHashtagResults = await Search.searchHashtag('xmr');
+        xmrHashtagResults.forEach(event => {
+            if (!noteIds.has(event.id)) {
+                noteIds.add(event.id);
+                allNotes.push(event);
+            }
+        });
+
+        // Query 3: Search for "monero" keyword in content
+        console.log('🔍 Searching "monero" keyword...');
+        const moneroContentResults = await Search.searchContent('monero');
+        moneroContentResults.forEach(event => {
+            if (!noteIds.has(event.id)) {
+                noteIds.add(event.id);
+                allNotes.push(event);
+            }
+        });
+
+        console.log(`💎 Found ${allNotes.length} Monero-related notes from search`);
+
+        // Filter for notes from last 24 hours only
+        const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
+        const recentNotes = allNotes.filter(note => note.created_at >= oneDayAgo);
+
+        console.log(`📅 Filtered to ${recentNotes.length} notes from last 24 hours (removed ${allNotes.length - recentNotes.length} older notes)`);
+
+        if (recentNotes.length === 0) {
+            if (homeFeedList) {
+                homeFeedList.innerHTML = '<div class="status">No trending Monero posts found in the last 24 hours</div>';
+            }
+            return;
+        }
+
+        // Fetch engagement counts for all notes
+        console.log('📊 Fetching engagement counts for Monero notes');
+        const engagementData = await fetchEngagementCounts(recentNotes.map(n => n.id));
+
+        // Calculate engagement scores
+        const notesWithScores = recentNotes.map(note => {
+            const engagement = engagementData[note.id] || { reactions: 0, reposts: 0, replies: 0 };
+            const score = (engagement.reactions * 1) + (engagement.reposts * 2) + (engagement.replies * 3);
+            return { note, score, engagement };
+        });
+
+        // Sort by score descending
+        notesWithScores.sort((a, b) => b.score - a.score);
+
+        // Take top 50
+        const topNotes = notesWithScores.slice(0, 50);
+
+        console.log(`🏆 Top trending note scores:`, topNotes.slice(0, 5).map(n => n.score));
+
+        // Fetch profiles for all note authors
+        const authorPubkeys = [...new Set(topNotes.map(n => n.note.pubkey))];
+        await fetchProfiles(authorPubkeys);
+
+        // Fetch Monero addresses for authors
+        if (window.getUserMoneroAddress) {
+            await Promise.all(
+                authorPubkeys.map(async (pubkey) => {
+                    try {
+                        const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                        if (State.profileCache[pubkey]) {
+                            State.profileCache[pubkey].monero_address = moneroAddr || null;
+                        }
+                    } catch (error) {
+                        if (State.profileCache[pubkey]) {
+                            State.profileCache[pubkey].monero_address = null;
+                        }
+                    }
+                })
+            );
+        }
+
+        // Render trending notes
+        const renderedPosts = await Promise.all(
+            topNotes.map(({ note, engagement }) => renderSinglePost(note, 'feed', { [note.id]: engagement }, null))
+        );
+
+        if (homeFeedList) {
+            homeFeedList.innerHTML = renderedPosts.join('');
+        }
+
+        console.log('✅ Trending feed loaded successfully');
+
+    } catch (error) {
+        console.error('Error loading trending feed:', error);
+        const homeFeedList = document.getElementById('homeFeedList');
+        if (homeFeedList) {
+            homeFeedList.innerHTML = `
+                <div class="error">
+                    Failed to load trending feed: ${error.message}
+                    <button class="retry-btn" onclick="NostrPosts.loadTrendingFeed()">Retry</button>
+                </div>
+            `;
+        }
     }
 }
 
@@ -511,7 +671,7 @@ async function streamRelayPosts() {
         // Sort cache chronologically (newest first)
         cachedHomeFeedPosts.sort((a, b) => b.created_at - a.created_at);
 
-        console.log(`✅ Cached ${cachedHomeFeedPosts.length} posts. Displaying first batch...`);
+        console.log(`✅ Cached ${cachedHomeFeedPosts.length} notes. Displaying first batch...`);
 
         // Display first 30 posts
         await displayPostsFromCache(30);
@@ -562,7 +722,7 @@ export function initializeHomeFeedResults() {
 async function displayPostsFromCache(count) {
     const postsToDisplay = cachedHomeFeedPosts.slice(displayedPostCount, displayedPostCount + count);
 
-    console.log(`📺 Displaying ${postsToDisplay.length} posts from cache (${displayedPostCount} -> ${displayedPostCount + postsToDisplay.length})`);
+    console.log(`📺 Displaying ${postsToDisplay.length} notes from cache (${displayedPostCount} -> ${displayedPostCount + postsToDisplay.length})`);
 
     // Deduplicate and batch fetch profiles if needed
     const uniquePubkeys = [...new Set(postsToDisplay.map(p => p.pubkey))];
@@ -634,6 +794,11 @@ async function displayPostsFromCache(count) {
 
 // Update Load More button visibility and state
 function updateLoadMoreButton() {
+    // Don't show Load More button on trending page
+    if (State.currentPage === 'trending') {
+        return;
+    }
+
     const loadMoreContainer = document.getElementById('loadMoreContainer');
     if (!loadMoreContainer) return;
 
@@ -685,12 +850,18 @@ export async function setHomeFeedSortMode(mode) {
 
 // Render all results based on current sort mode
 async function renderHomeFeedResults() {
+    // Don't render if user has navigated away from home feed
+    if (State.currentPage !== 'home') {
+        console.log('⏭️ Skipping home feed render - user on different page:', State.currentPage);
+        return;
+    }
+
     const resultsEl = document.getElementById('homeFeedList');
     if (!resultsEl) {
         console.error('🚫 homeFeedList element not found for rendering');
         return;
     }
-    console.log(`🎨 Rendering ${currentHomeFeedResults.length} posts to homeFeedList`);
+    console.log(`🎨 Rendering ${currentHomeFeedResults.length} notes to homeFeedList`);
 
     let sortedResults = [...currentHomeFeedResults];
 
@@ -714,7 +885,7 @@ async function renderHomeFeedResults() {
     }
 
     // STREAMING RENDER: Display posts immediately, then update engagement data in background
-    console.log('🚀 Rendering posts immediately with placeholders...');
+    console.log('🚀 Rendering notes immediately with placeholders...');
 
     // 1. Deduplicate and batch fetch profiles (fast, keep this blocking)
     const uniquePubkeys = [...new Set(sortedResults.map(p => p.pubkey))];
@@ -789,7 +960,7 @@ function updateEngagementCounts(engagementData) {
             zapCountEl.style.display = '';
         }
     }
-    console.log(`✅ Updated engagement counts for ${Object.keys(engagementData).length} posts`);
+    console.log(`✅ Updated engagement counts for ${Object.keys(engagementData).length} notes`);
 }
 
 // Update parent posts in the DOM after background fetch
@@ -825,7 +996,7 @@ async function updateParentPosts(parentPostsMap) {
 
         replyContextEl.innerHTML = parentHtml;
     }
-    console.log(`✅ Updated ${Object.keys(parentPostsMap).length} parent posts`);
+    console.log(`✅ Updated ${Object.keys(parentPostsMap).length} parent notes`);
 }
 
 // Update home feed status message

@@ -796,7 +796,26 @@ export async function openThreadView(eventId) {
             console.log('Fetching profiles for thread participants:', allPubkeys.length);
             await Posts.fetchProfiles(allPubkeys);
         }
-        
+
+        // Fetch Monero addresses for all thread participants
+        if (window.getUserMoneroAddress && allPubkeys.length > 0) {
+            console.log('💰 Fetching Monero addresses for thread participants:', allPubkeys.length);
+            await Promise.all(
+                allPubkeys.map(async (pubkey) => {
+                    try {
+                        const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                        if (StateModule.profileCache[pubkey]) {
+                            StateModule.profileCache[pubkey].monero_address = moneroAddr || null;
+                        }
+                    } catch (error) {
+                        if (StateModule.profileCache[pubkey]) {
+                            StateModule.profileCache[pubkey].monero_address = null;
+                        }
+                    }
+                })
+            );
+        }
+
         // Build thread tree structure
         const threadTree = buildThreadTree(threadPosts, eventId);
         
@@ -2033,10 +2052,283 @@ export function copyToClipboard(text) {
 }
 
 // Placeholder for zap queue function (to be implemented)
+// ==================== XMR ZAP QUEUE ====================
+
+// Add a zap to the queue (max 20 items)
 function addToZapQueue(postId, authorName, moneroAddress) {
     console.log('Adding to zap queue:', postId, authorName, moneroAddress);
-    return true; // Placeholder
+
+    // Import state
+    const StateModule = window.NostrState || {};
+    let queue = StateModule.zapQueue || [];
+
+    // Check if already in queue
+    if (queue.find(item => item.postId === postId)) {
+        alert('This note is already in your zap queue');
+        return false;
+    }
+
+    // Check queue limit
+    if (queue.length >= 20) {
+        alert('Zap queue is full (max 20 notes). Please process the queue first.');
+        return false;
+    }
+
+    // Add to queue
+    queue.push({
+        postId,
+        authorName,
+        moneroAddress,
+        timestamp: Date.now()
+    });
+
+    // Update state
+    if (StateModule.setZapQueue) {
+        StateModule.setZapQueue(queue);
+    }
+
+    // Save to localStorage
+    localStorage.setItem('zapQueue', JSON.stringify(queue));
+
+    // Update queue indicator
+    updateZapQueueIndicator();
+
+    console.log(`✅ Added to queue. Queue now has ${queue.length} items.`);
+    return true;
 }
+
+// Show the zap queue modal
+export function showZapQueue() {
+    const StateModule = window.NostrState || {};
+    const queue = StateModule.zapQueue || JSON.parse(localStorage.getItem('zapQueue') || '[]');
+
+    const modal = document.getElementById('zapQueueModal');
+    if (!modal) return;
+
+    const content = document.getElementById('zapQueueContent');
+    if (!content) return;
+
+    if (queue.length === 0) {
+        content.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: #666;">
+                <p style="font-size: 24px; margin-bottom: 12px;">💰</p>
+                <p>Your zap queue is empty</p>
+                <p style="font-size: 14px; margin-top: 8px;">Click "Add to Queue" when zapping notes to batch them into one transaction</p>
+            </div>
+        `;
+    } else {
+        content.innerHTML = `
+            <div style="margin-bottom: 16px; padding: 12px; background: #1a1a1a; border-radius: 8px;">
+                <strong>${queue.length} note${queue.length === 1 ? '' : 's'} in queue</strong>
+                <p style="font-size: 14px; color: #666; margin-top: 4px;">Process queue to display QR codes sequentially for one transaction</p>
+            </div>
+            <div style="max-height: 400px; overflow-y: auto;">
+                ${queue.map((item, index) => `
+                    <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: bold; color: #FF6600;">${item.authorName}</div>
+                            <div style="font-size: 12px; color: #666; margin-top: 4px; word-break: break-all;">${item.moneroAddress.substring(0, 20)}...${item.moneroAddress.substring(item.moneroAddress.length - 10)}</div>
+                        </div>
+                        <button onclick="removeFromZapQueue(${index})" style="background: #ff6b6b; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                            Remove
+                        </button>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    modal.classList.add('show');
+}
+
+// Remove item from queue
+export function removeFromZapQueue(index) {
+    const StateModule = window.NostrState || {};
+    let queue = StateModule.zapQueue || JSON.parse(localStorage.getItem('zapQueue') || '[]');
+
+    if (index >= 0 && index < queue.length) {
+        queue.splice(index, 1);
+
+        // Update state
+        if (StateModule.setZapQueue) {
+            StateModule.setZapQueue(queue);
+        }
+
+        // Save to localStorage
+        localStorage.setItem('zapQueue', JSON.stringify(queue));
+
+        // Update indicator
+        updateZapQueueIndicator();
+
+        // Refresh modal
+        showZapQueue();
+    }
+}
+
+// Clear entire queue
+export function clearZapQueue() {
+    const StateModule = window.NostrState || {};
+
+    if (StateModule.setZapQueue) {
+        StateModule.setZapQueue([]);
+    }
+
+    localStorage.setItem('zapQueue', JSON.stringify([]));
+    updateZapQueueIndicator();
+}
+
+// Update the queue indicator badge
+function updateZapQueueIndicator() {
+    const StateModule = window.NostrState || {};
+    const queue = StateModule.zapQueue || JSON.parse(localStorage.getItem('zapQueue') || '[]');
+
+    const indicator = document.querySelector('.zap-queue-indicator');
+    if (indicator) {
+        if (queue.length > 0) {
+            indicator.textContent = queue.length;
+            indicator.style.display = 'flex';
+        } else {
+            indicator.style.display = 'none';
+        }
+    }
+}
+
+// Show batch QR codes in sequence
+export function showBatchQrCodes() {
+    const StateModule = window.NostrState || {};
+    const queue = StateModule.zapQueue || JSON.parse(localStorage.getItem('zapQueue') || '[]');
+
+    if (queue.length === 0) {
+        alert('Queue is empty');
+        return;
+    }
+
+    // Close queue modal
+    closeZapQueueModal();
+
+    // Create/show batch QR modal
+    let modal = document.getElementById('batchQrModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'batchQrModal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 500px;">
+                <div class="modal-header">Batch Zap QR Codes</div>
+                <div id="batchQrContent"></div>
+                <div class="modal-footer">
+                    <button class="close-btn" onclick="closeBatchQrModal()">Close</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    modal.classList.add('show');
+
+    // Start showing QR codes
+    let currentIndex = 0;
+
+    function showNextQr() {
+        const content = document.getElementById('batchQrContent');
+        if (!content) return;
+
+        const item = queue[currentIndex];
+        const defaultAmount = localStorage.getItem('default-zap-amount') || '0.01';
+
+        content.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+                <div style="margin-bottom: 16px;">
+                    <strong style="font-size: 18px;">QR Code ${currentIndex + 1} of ${queue.length}</strong>
+                    <p style="color: #FF6600; margin-top: 8px;">Zapping ${item.authorName}</p>
+                    <p style="color: #666; font-size: 14px;">${defaultAmount} XMR</p>
+                </div>
+
+                <div id="batchQrCode" style="background: white; padding: 20px; border-radius: 8px; display: inline-block; margin-bottom: 16px;"></div>
+
+                <div style="font-size: 12px; color: #666; word-break: break-all; margin-bottom: 16px;">
+                    ${item.moneroAddress}
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    ${currentIndex > 0 ? `
+                        <button onclick="window.batchQrPrevious()" style="background: #666; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                            ← Previous
+                        </button>
+                    ` : ''}
+                    ${currentIndex < queue.length - 1 ? `
+                        <button onclick="window.batchQrNext()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                            Next →
+                        </button>
+                    ` : `
+                        <button onclick="window.finishBatchZap()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                            Finish & Clear Queue
+                        </button>
+                    `}
+                </div>
+            </div>
+        `;
+
+        // Generate QR code
+        const qrContainer = document.getElementById('batchQrCode');
+        if (qrContainer && window.QRCode) {
+            try {
+                // Create transaction description with note ID
+                const txNote = `from nosmero.com NoteID ${item.postId}`;
+                const moneroUri = `monero:${item.moneroAddress}?tx_amount=${defaultAmount}&tx_description=${encodeURIComponent(txNote)}`;
+
+                qrContainer.innerHTML = '';
+                new window.QRCode(qrContainer, {
+                    text: moneroUri,
+                    width: 256,
+                    height: 256,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: window.QRCode.CorrectLevel.M
+                });
+            } catch (error) {
+                console.error('QR generation error:', error);
+                qrContainer.innerHTML = '<div style="color: #ff6b6b;">QR code generation failed</div>';
+            }
+        }
+    }
+
+    // Navigation functions
+    window.batchQrNext = function() {
+        if (currentIndex < queue.length - 1) {
+            currentIndex++;
+            showNextQr();
+        }
+    };
+
+    window.batchQrPrevious = function() {
+        if (currentIndex > 0) {
+            currentIndex--;
+            showNextQr();
+        }
+    };
+
+    window.finishBatchZap = function() {
+        clearZapQueue();
+        closeBatchQrModal();
+        alert(`✅ Batch zap complete! ${queue.length} zap${queue.length === 1 ? '' : 's'} processed.`);
+    };
+
+    // Show first QR
+    showNextQr();
+}
+
+// Initialize queue indicator on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateZapQueueIndicator();
+
+    // Restore queue from localStorage on page load
+    const savedQueue = JSON.parse(localStorage.getItem('zapQueue') || '[]');
+    const StateModule = window.NostrState || {};
+    if (StateModule.setZapQueue && savedQueue.length > 0) {
+        StateModule.setZapQueue(savedQueue);
+    }
+});
 
 // Make functions available globally for window calls
 // ==================== REPLY MODAL ====================
@@ -2093,6 +2385,9 @@ window.closeZapModal = closeZapModal;
 window.openLightningZapModal = openLightningZapModal;
 window.sendLightningZap = sendLightningZap;
 window.closeLightningZapModal = closeLightningZapModal;
+window.showZapQueue = showZapQueue;
+window.removeFromZapQueue = removeFromZapQueue;
+window.showBatchQrCodes = showBatchQrCodes;
 window.closeZapQueueModal = closeZapQueueModal;
 window.closeBatchQrModal = closeBatchQrModal;
 window.closeUserProfileModal = closeUserProfileModal;
