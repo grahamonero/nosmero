@@ -211,7 +211,8 @@ export async function publishRelayList(readRelays, writeRelays) {
     };
     
     try {
-        const signedEvent = await window.NostrTools.finishEvent(event, State.privateKey);
+        const Utils = await import('./utils.js');
+        const signedEvent = await Utils.signEvent(event);
         await State.pool.publish(getActiveRelays(), signedEvent);
         return true;
     } catch (error) {

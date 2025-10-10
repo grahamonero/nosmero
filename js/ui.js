@@ -1424,21 +1424,9 @@ export async function toggleFollow(pubkey) {
         
         // Sign and publish event
         const writeRelays = RelaysModule.getWriteRelays();
-        
-        if (StateModule.privateKey === 'extension') {
-            const signedEvent = await window.nostr.signEvent(event);
-            await StateModule.pool.publish(writeRelays, signedEvent);
-        } else {
-            let signedEvent;
-            if (window.NostrTools && window.NostrTools.finishEvent) {
-                signedEvent = await window.NostrTools.finishEvent(event, StateModule.privateKey);
-            } else if (window.NostrTools && window.NostrTools.finalizeEvent) {
-                signedEvent = await window.NostrTools.finalizeEvent(event, StateModule.privateKey);
-            } else {
-                throw new Error('No suitable event signing method found');
-            }
-            await StateModule.pool.publish(writeRelays, signedEvent);
-        }
+        const Utils = await import('./utils.js');
+        const signedEvent = await Utils.signEvent(event);
+        await StateModule.pool.publish(writeRelays, signedEvent);
         
         const action = isCurrentlyFollowing ? 'unfollowed' : 'followed';
         console.log(`${action} user:`, pubkey);

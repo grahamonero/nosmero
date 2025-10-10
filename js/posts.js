@@ -2855,6 +2855,7 @@ export function closeNewPostModal() {
 
 // Make functions globally available for HTML onclick handlers
 window.sendReply = sendReplyToCurrentPost; // Use the wrapper function
+window.sendReplyToCurrentPost = sendReplyToCurrentPost; // Also export directly
 window.replyToPost = replyToPost;
 window.handleMediaUpload = handleMediaUpload;
 window.removeMedia = removeMedia;
