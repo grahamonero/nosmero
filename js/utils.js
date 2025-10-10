@@ -1,5 +1,6 @@
 // ==================== UTILITY FUNCTIONS ====================
 import { profileCache, setProfileCache } from './state.js';
+import * as State from './state.js';
 
 // Show notification toast message
 export function showNotification(message, type = 'success') {
@@ -66,6 +67,30 @@ export function showNotification(message, type = 'success') {
         notification.style.animation = 'slideOut 0.3s ease-out';
         setTimeout(() => notification.remove(), 300);
     }, 3000);
+}
+
+// ==================== EVENT SIGNING ====================
+
+/**
+ * Sign a Nostr event using either browser extension or local private key
+ * @param {Object} eventTemplate - Unsigned event template
+ * @returns {Promise<Object>} Signed event
+ */
+export async function signEvent(eventTemplate) {
+    // Check if user is using browser extension (nos2x, Alby, etc.)
+    if (State.privateKey === 'extension') {
+        // Use browser extension's signing
+        if (!window.nostr) {
+            throw new Error('Browser extension not found. Please ensure your Nostr extension is active.');
+        }
+        return await window.nostr.signEvent(eventTemplate);
+    } else {
+        // Use local private key with finalizeEvent
+        if (!State.privateKey) {
+            throw new Error('Not authenticated. Please log in first.');
+        }
+        return await window.NostrTools.finalizeEvent(eventTemplate, State.privateKey);
+    }
 }
 
 // ==================== FORMATTING UTILITIES ====================

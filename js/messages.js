@@ -2,7 +2,7 @@
 // Phase 7: Messages & Notifications
 // Functions for direct messages, conversations, notifications, and real-time subscriptions
 
-import { showNotification, escapeHtml } from './utils.js';
+import { showNotification, escapeHtml, signEvent } from './utils.js';
 import { encryptMessage, decryptMessage } from './crypto.js';
 import * as State from './state.js';
 import * as Relays from './relays.js';
@@ -512,19 +512,19 @@ export async function sendMessage() {
         } else {
             // Use local key for encryption and signing
             const encrypted = await encryptMessage(content, currentConversation, State.privateKey);
-            
-            const { finalizeEvent, verifyEvent } = window.NostrTools;
-            
+
+            const { verifyEvent } = window.NostrTools;
+
             const eventTemplate = {
                 kind: 4,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [['p', currentConversation]],
                 content: encrypted
             };
-            
-            signedEvent = finalizeEvent(eventTemplate, State.privateKey);
+
+            signedEvent = await signEvent(eventTemplate);
             const isValid = verifyEvent(signedEvent);
-            
+
             if (!isValid) {
                 throw new Error('Failed to sign message');
             }

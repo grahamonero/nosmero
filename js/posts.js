@@ -1361,8 +1361,8 @@ export async function likePost(postId) {
                 ],
                 content: 'Unlike' // Deletion reason
             };
-            
-            const signedEvent = await window.NostrTools.finalizeEvent(eventTemplate, State.privateKey);
+
+            const signedEvent = await Utils.signEvent(eventTemplate);
             await State.pool.publish(Relays.getWriteRelays(), signedEvent);
             
             State.likedPosts.delete(postId);
@@ -1381,8 +1381,8 @@ export async function likePost(postId) {
                 ],
                 content: '🤍' // Heart emoji
             };
-            
-            const signedEvent = await window.NostrTools.finalizeEvent(eventTemplate, State.privateKey);
+
+            const signedEvent = await Utils.signEvent(eventTemplate);
             await State.pool.publish(Relays.getWriteRelays(), signedEvent);
             
             State.likedPosts.add(postId);
@@ -1548,7 +1548,7 @@ async function doQuickRepost() {
         content: JSON.stringify(currentRepostPost) // Include original event
     };
 
-    const signedEvent = await window.NostrTools.finalizeEvent(eventTemplate, State.privateKey);
+    const signedEvent = await Utils.signEvent(eventTemplate);
     await State.pool.publish(Relays.getWriteRelays(), signedEvent);
 
     State.repostedPosts.add(currentRepostPost.id);
@@ -1579,7 +1579,7 @@ async function doQuoteRepost() {
         content: noteContent
     };
 
-    const signedEvent = await window.NostrTools.finalizeEvent(eventTemplate, State.privateKey);
+    const signedEvent = await Utils.signEvent(eventTemplate);
     await State.pool.publish(Relays.getWriteRelays(), signedEvent);
 
     Utils.showNotification('Quote repost published!', 'success');
@@ -1689,8 +1689,8 @@ export async function sendReply(replyToId) {
         if (State.userMoneroAddress) {
             eventTemplate.tags.push(['monero', State.userMoneroAddress]);
         }
-        
-        const signedEvent = await window.NostrTools.finalizeEvent(eventTemplate, State.privateKey);
+
+        const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
         
         Utils.showNotification('Reply posted!', 'success');
@@ -2434,25 +2434,8 @@ export async function sendPost() {
             event.tags.push(['monero_address', State.userMoneroAddress]);
         }
         
-        // Sign the event
-        let signedEvent;
-        if (State.privateKey === 'extension') {
-            // Use browser extension
-            if (!window.nostr) {
-                throw new Error('Nostr extension not available');
-            }
-            signedEvent = await window.nostr.signEvent(event);
-        } else if (State.privateKey) {
-            // Use local private key
-            const { finalizeEvent } = window.NostrTools;
-            if (finalizeEvent) {
-                signedEvent = finalizeEvent(event, State.privateKey);
-            } else {
-                throw new Error('No signing function available');
-            }
-        } else {
-            throw new Error('No private key available. Please log in.');
-        }
+        // Sign the event using helper function
+        const signedEvent = await Utils.signEvent(event);
         
         // Publish to write relays only (NIP-65 compliant)
         const writeRelays = Relays.getWriteRelays();
@@ -2726,8 +2709,8 @@ async function uploadMediaToBlossom() {
                 ],
                 content: ''
             };
-            
-            authEvent = await window.NostrTools.finalizeEvent(unsignedEvent, State.privateKey);
+
+            authEvent = await Utils.signEvent(unsignedEvent);
         }
         
         console.log('Created NIP-98 auth event:', authEvent);
@@ -2838,9 +2821,9 @@ export async function publishNewPost() {
         if (moneroAddress) {
             eventTemplate.tags.push(['monero', moneroAddress]);
         }
-        
+
         // Sign and publish event
-        const signedEvent = await window.NostrTools.finalizeEvent(eventTemplate, State.privateKey);
+        const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
         
         Utils.showNotification('Post published!', 'success');

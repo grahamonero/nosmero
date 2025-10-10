@@ -2,7 +2,7 @@
 // Phase 6: UI Components & Modals
 // Functions for modal management, forms, themes, navigation, file uploads, and QR codes
 
-import { showNotification } from './utils.js';
+import { showNotification, signEvent } from './utils.js';
 import * as State from './state.js';
 import { zapQueue, privateKey } from './state.js';
 
@@ -1831,8 +1831,6 @@ export async function requestDeletion() {
             return;
         }
         
-        const { finalizeEvent } = window.NostrTools;
-        
         const deletionEvent = {
             kind: 5,
             created_at: Math.floor(Date.now() / 1000),
@@ -1841,8 +1839,8 @@ export async function requestDeletion() {
             ],
             content: 'Requested deletion'
         };
-        
-        const signedDeletionEvent = finalizeEvent(deletionEvent, State.privateKey);
+
+        const signedDeletionEvent = await signEvent(deletionEvent);
         
         // Publish to relays
         if (State.pool) {

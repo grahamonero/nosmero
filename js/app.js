@@ -1740,29 +1740,11 @@ async function saveLightningAddressToProfile(lightningAddress) {
     
     const writeRelays = Relays.getWriteRelays();
     console.log('Publishing lightning address to write relays:', writeRelays);
-    
-    if (State.privateKey === 'extension') {
-        // Use extension to sign
-        const signedEvent = await window.nostr.signEvent(event);
-        await State.pool.publish(writeRelays, signedEvent);
-        console.log('Lightning address profile published via extension');
-    } else {
-        // Use local private key - try different approaches
-        let signedEvent;
-        
-        if (window.NostrTools && window.NostrTools.finishEvent) {
-            signedEvent = await window.NostrTools.finishEvent(event, State.privateKey);
-        } else if (window.NostrTools && window.NostrTools.finalizeEvent) {
-            signedEvent = await window.NostrTools.finalizeEvent(event, State.privateKey);
-        } else if (window.nostrtools && window.nostrtools.finishEvent) {
-            signedEvent = await window.nostrtools.finishEvent(event, State.privateKey);
-        } else {
-            throw new Error('No suitable event signing method found');
-        }
-        
-        await State.pool.publish(writeRelays, signedEvent);
-        console.log('Lightning address profile published with local key');
-    }
+
+    // Sign and publish event
+    const signedEvent = await Utils.signEvent(event);
+    await State.pool.publish(writeRelays, signedEvent);
+    console.log('Lightning address profile published');
     
     // Update local cache
     const updatedProfile = {
@@ -1805,25 +1787,8 @@ async function saveMoneroAddressToRelays(moneroAddress) {
     console.log('Created NIP-78 event:', appDataEvent);
     
     let signedEvent;
-    if (State.privateKey === 'extension') {
-        console.log('Using extension to sign event...');
-        // Use extension to sign
-        if (!window.nostr) {
-            throw new Error('Browser extension not available');
-        }
-        signedEvent = await window.nostr.signEvent(appDataEvent);
-    } else {
-        console.log('Using local private key to sign event...');
-        // Use local key to sign
-        if (window.NostrTools.finalizeEvent) {
-            signedEvent = window.NostrTools.finalizeEvent(appDataEvent, State.privateKey);
-        } else if (window.NostrTools.signEvent) {
-            signedEvent = window.NostrTools.signEvent(appDataEvent, State.privateKey);
-        } else {
-            throw new Error('NostrTools not available for signing');
-        }
-    }
-    
+    // Sign the event using helper function
+    signedEvent = await Utils.signEvent(appDataEvent);
     console.log('Signed event:', signedEvent);
 
     // Publish to private NIP-78 relay only
@@ -2829,21 +2794,8 @@ async function saveProfile(event) {
             content: JSON.stringify(profileData)
         };
         
-        // Sign the event
-        let signedEvent;
-        if (State.privateKey === 'extension') {
-            if (!window.nostr) {
-                throw new Error('Nostr extension not available');
-            }
-            signedEvent = await window.nostr.signEvent(event);
-        } else {
-            const { finalizeEvent } = window.NostrTools;
-            if (finalizeEvent) {
-                signedEvent = finalizeEvent(event, State.privateKey);
-            } else {
-                throw new Error('No signing function available');
-            }
-        }
+        // Sign the event using helper function
+        const signedEvent = await Utils.signEvent(event);
         
         // Publish to write relays
         const writeRelays = Relays.getWriteRelays();
@@ -3180,20 +3132,8 @@ async function saveSettings() {
             content: JSON.stringify(profileData)
         };
 
-        let signedProfileEvent;
-        if (State.privateKey === 'extension') {
-            if (!window.nostr) {
-                throw new Error('Nostr extension not available');
-            }
-            signedProfileEvent = await window.nostr.signEvent(profileEvent);
-        } else {
-            const { finalizeEvent } = window.NostrTools;
-            if (finalizeEvent) {
-                signedProfileEvent = finalizeEvent(profileEvent, State.privateKey);
-            } else {
-                throw new Error('No signing function available');
-            }
-        }
+        // Sign the event using helper function
+        const signedProfileEvent = await Utils.signEvent(profileEvent);
 
         const relays = await Relays.getWriteRelays();
         await State.pool.publish(relays, signedProfileEvent);
