@@ -182,6 +182,26 @@ async function startApplication() {
         // Ensure user's own profile is available
         await ensureUserProfile();
 
+        // Load zap settings from NIP-78 relay (for cross-device sync)
+        try {
+            const zapSettings = await loadZapSettingsFromRelays();
+            if (zapSettings) {
+                console.log('✅ Loaded zap settings from relay:', zapSettings);
+                // Update localStorage with relay values
+                if (zapSettings.btc) {
+                    localStorage.setItem('default-btc-zap-amount', zapSettings.btc);
+                }
+                if (zapSettings.xmr) {
+                    localStorage.setItem('default-zap-amount', zapSettings.xmr);
+                }
+            } else {
+                console.log('ℹ️ No zap settings found on relay, using localStorage defaults');
+            }
+        } catch (error) {
+            console.error('❌ Error loading zap settings from relay:', error);
+            // Continue with localStorage defaults
+        }
+
         // Load home feed (will fetch fresh following list internally)
         await loadHomeFeed();
         hideAuthUI();
@@ -1793,21 +1813,28 @@ async function saveMoneroAddressToRelays(moneroAddress) {
     if (!State.publicKey || !State.privateKey) {
         throw new Error('User not authenticated');
     }
-    
+
     console.log('Saving Monero address to relays using NIP-78...', moneroAddress);
     console.log('Current public key:', State.publicKey);
     console.log('Current private key type:', typeof State.privateKey);
-    
+
+    // Get current zap amounts from localStorage to preserve them
+    const btcZapAmount = localStorage.getItem('default-btc-zap-amount') || '1000';
+    const xmrZapAmount = localStorage.getItem('default-zap-amount') || '0.001';
+
     // Create NIP-78 event (kind 30078 - application-specific data)
+    // Store ALL payment-related settings in one event
     const appDataEvent = {
         kind: 30078,
         created_at: Math.floor(Date.now() / 1000),
         tags: [
             ["d", "nosmero:payment"], // Application identifier for Nosmero payment data
-            ["type", "monero_address"] // Specify this is for Monero address storage
+            ["type", "payment_settings"] // Now includes all payment settings
         ],
         content: JSON.stringify({
             monero_address: moneroAddress,
+            btc_zap_amount: btcZapAmount,
+            xmr_zap_amount: xmrZapAmount,
             updated_at: Math.floor(Date.now() / 1000),
             app: "nosmero",
             version: "2.0"
@@ -1907,6 +1934,112 @@ async function loadMoneroAddressFromRelays(targetPubkey) {
 
 // Note: Migration function removed - no longer querying old public relays
 // Users must re-enter their Monero address in Settings if they want it on nosmero relay
+
+// Save zap settings to relays using NIP-78
+async function saveZapSettingsToRelays(btcAmount, xmrAmount) {
+    if (!State.publicKey || !State.privateKey) {
+        throw new Error('User not authenticated');
+    }
+
+    console.log('💾 Saving zap settings to relays using NIP-78...', { btc: btcAmount, xmr: xmrAmount });
+
+    // Get current Monero address to preserve it
+    const moneroAddress = await getUserMoneroAddress(State.publicKey) || '';
+
+    // Create NIP-78 event (kind 30078 - application-specific data)
+    // Store ALL payment-related settings in one event
+    const paymentSettingsEvent = {
+        kind: 30078,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+            ["d", "nosmero:payment"], // Application identifier for Nosmero payment data
+            ["type", "payment_settings"] // Now includes all payment settings
+        ],
+        content: JSON.stringify({
+            monero_address: moneroAddress,
+            btc_zap_amount: btcAmount,
+            xmr_zap_amount: xmrAmount,
+            updated_at: Math.floor(Date.now() / 1000),
+            app: "nosmero",
+            version: "2.0"
+        }),
+        pubkey: State.publicKey
+    };
+
+    console.log('📤 Created payment settings NIP-78 event:', paymentSettingsEvent);
+
+    // Sign the event
+    const signedEvent = await Utils.signEvent(paymentSettingsEvent);
+    console.log('✍️ Signed payment settings event:', signedEvent);
+
+    // Publish to private NIP-78 relay
+    console.log('📡 Publishing payment settings to NIP-78 relay:', NIP78_STORAGE_RELAYS);
+    const publishResults = await State.pool.publish(NIP78_STORAGE_RELAYS, signedEvent);
+    console.log('✅ Payment settings publish results:', publishResults);
+
+    console.log('✅ Payment settings saved to relays using NIP-78');
+}
+
+// Load payment settings (including zap amounts) from relays using NIP-78
+async function loadZapSettingsFromRelays() {
+    if (!State.publicKey) {
+        console.log('⚠️ No public key, cannot load payment settings');
+        return null;
+    }
+
+    console.log('📥 Loading payment settings from relays using NIP-78...');
+
+    try {
+        const filter = {
+            kinds: [30078],
+            authors: [State.publicKey],
+            "#d": ["nosmero:payment"], // Query the same event as Monero address
+            limit: 1
+        };
+        console.log('🔍 Using filter:', filter);
+
+        const events = await new Promise((resolve) => {
+            const foundEvents = [];
+            const sub = State.pool.subscribeMany(NIP78_STORAGE_RELAYS, [filter], {
+                onevent(event) {
+                    console.log('📨 Received payment settings NIP-78 event:', event);
+                    foundEvents.push(event);
+                },
+                oneose() {
+                    console.log('✅ Query completed, found events:', foundEvents.length);
+                    sub.close();
+                    resolve(foundEvents);
+                }
+            });
+
+            // Timeout after 2 seconds
+            setTimeout(() => {
+                console.log('⏱️ Query timed out, found events:', foundEvents.length);
+                sub.close();
+                resolve(foundEvents);
+            }, 2000);
+        });
+
+        if (events.length > 0) {
+            // Use the most recent event
+            const latestEvent = events.sort((a, b) => b.created_at - a.created_at)[0];
+            console.log('📋 Using latest payment settings event:', latestEvent);
+            const data = JSON.parse(latestEvent.content);
+            console.log('✅ Loaded payment settings from relays:', data);
+            return {
+                btc: data.btc_zap_amount,
+                xmr: data.xmr_zap_amount
+            };
+        }
+
+        console.log('ℹ️ No payment settings found on relays');
+        return null;
+
+    } catch (error) {
+        console.error('❌ Error loading payment settings from relays:', error);
+        return null;
+    }
+}
 
 // Get Monero address for any user (with NIP-78 support for all users)
 async function getUserMoneroAddress(pubkey) {
@@ -3250,6 +3383,17 @@ async function saveSettings() {
             console.log('✅ Verify localStorage XMR:', localStorage.getItem('default-zap-amount'));
         } else {
             console.warn('⚠️ XMR zap amount NOT saved - value:', xmrZapAmount, 'field:', xmrZapField);
+        }
+
+        // Save zap settings to relays using NIP-78 (for cross-device sync)
+        try {
+            if (btcZapAmount || xmrZapAmount) {
+                await saveZapSettingsToRelays(btcZapAmount || '1000', xmrZapAmount || '0.001');
+                console.log('✅ Zap settings published to NIP-78 relay');
+            }
+        } catch (error) {
+            console.error('❌ Error publishing zap settings to relay:', error);
+            // Don't fail the entire save operation if zap settings publishing fails
         }
 
         // Publish NIP-65 relay list to network (kind 10002)

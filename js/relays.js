@@ -185,38 +185,63 @@ export function parseRelayList(event) {
 
 // Publish user's relay list (NIP-65)
 export async function publishRelayList(readRelays, writeRelays) {
+    console.log('📤 Publishing NIP-65 relay list...');
+    console.log('Read relays:', readRelays);
+    console.log('Write relays:', writeRelays);
+
     const tags = [];
-    
-    // Add read relays
-    readRelays.forEach(url => {
-        tags.push(['r', url, 'read']);
+    const processedRelays = new Set();
+
+    // Find relays that are in BOTH read and write lists
+    const bothRelays = readRelays.filter(url => writeRelays.includes(url));
+    console.log('Relays in both lists (no permission marker):', bothRelays);
+
+    // Add relays that are in BOTH lists (no third element)
+    bothRelays.forEach(url => {
+        tags.push(['r', url]);
+        processedRelays.add(url);
     });
-    
-    // Add write relays  
-    writeRelays.forEach(url => {
-        if (!readRelays.includes(url)) {
-            tags.push(['r', url, 'write']);
-        } else {
-            // If it's in both lists, don't specify permission (means both)
-            const readTag = tags.find(tag => tag[1] === url);
-            if (readTag) readTag[2] = undefined; // Remove 'read' to make it both
+
+    // Add read-only relays (not in write list)
+    readRelays.forEach(url => {
+        if (!processedRelays.has(url)) {
+            tags.push(['r', url, 'read']);
+            processedRelays.add(url);
         }
     });
-    
+
+    // Add write-only relays (not in read list)
+    writeRelays.forEach(url => {
+        if (!processedRelays.has(url)) {
+            tags.push(['r', url, 'write']);
+            processedRelays.add(url);
+        }
+    });
+
+    console.log('📋 Generated tags:', tags);
+
     const event = {
         kind: 10002,
         created_at: Math.floor(Date.now() / 1000),
         tags: tags,
         content: ''
     };
-    
+
+    console.log('📨 Event to publish:', event);
+
     try {
         const Utils = await import('./utils.js');
         const signedEvent = await Utils.signEvent(event);
-        await State.pool.publish(getActiveRelays(), signedEvent);
+        console.log('✍️ Signed event:', signedEvent);
+
+        const publishRelays = getActiveRelays();
+        console.log('📡 Publishing to relays:', publishRelays);
+
+        await State.pool.publish(publishRelays, signedEvent);
+        console.log('✅ NIP-65 relay list published successfully');
         return true;
     } catch (error) {
-        console.error('Failed to publish relay list:', error);
+        console.error('❌ Failed to publish relay list:', error);
         return false;
     }
 }
