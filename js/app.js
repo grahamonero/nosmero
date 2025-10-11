@@ -3042,18 +3042,35 @@ async function populateSettingsForm() {
         }
 
         // Populate default zap amounts
+        console.log('📥 Loading zap amounts from localStorage...');
+        console.log('📱 User agent:', navigator.userAgent);
+
         const btcZapField = document.getElementById('defaultBtcZapAmount');
+        console.log('🔍 BTC zap field on load:', btcZapField);
         if (btcZapField) {
             const btcAmount = localStorage.getItem('default-btc-zap-amount') || '1000';
+            console.log('🔍 BTC amount from localStorage:', btcAmount);
             btcZapField.value = btcAmount;
-            console.log('⚡ Set BTC zap amount to:', btcAmount);
+            console.log('✅ Set BTC zap field value to:', btcAmount);
+            console.log('✅ Verify BTC field.value:', btcZapField.value);
+            // Add autocomplete attribute to prevent mobile browser interference
+            btcZapField.setAttribute('autocomplete', 'off');
+        } else {
+            console.error('❌ BTC zap field not found!');
         }
 
         const xmrZapField = document.getElementById('defaultXmrZapAmount');
+        console.log('🔍 XMR zap field on load:', xmrZapField);
         if (xmrZapField) {
             const xmrAmount = localStorage.getItem('default-zap-amount') || '0.001';
+            console.log('🔍 XMR amount from localStorage:', xmrAmount);
             xmrZapField.value = xmrAmount;
-            console.log('⚡ Set XMR zap amount to:', xmrAmount);
+            console.log('✅ Set XMR zap field value to:', xmrAmount);
+            console.log('✅ Verify XMR field.value:', xmrZapField.value);
+            // Add autocomplete attribute to prevent mobile browser interference
+            xmrZapField.setAttribute('autocomplete', 'off');
+        } else {
+            console.error('❌ XMR zap field not found!');
         }
 
         // Populate relay lists
@@ -3150,16 +3167,61 @@ async function saveSettings() {
         }
 
         // Save default zap amounts to localStorage
-        const btcZapAmount = document.getElementById('defaultBtcZapAmount')?.value.trim();
+        console.log('💾 Starting zap amount save process...');
+        console.log('📱 User agent:', navigator.userAgent);
+        console.log('📱 Platform:', navigator.platform);
+
+        // Add explicit delay for mobile DOM stability
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        const btcZapField = document.getElementById('defaultBtcZapAmount');
+        console.log('🔍 BTC zap field:', btcZapField);
+        console.log('🔍 BTC zap field exists:', !!btcZapField);
+        console.log('🔍 BTC zap field value:', btcZapField?.value);
+        console.log('🔍 BTC zap field value type:', typeof btcZapField?.value);
+
+        const btcZapAmount = btcZapField?.value?.trim();
+        console.log('🔍 BTC zap amount after trim:', btcZapAmount);
+        console.log('🔍 BTC zap amount length:', btcZapAmount?.length);
+        console.log('🔍 BTC zap amount isNaN check:', !isNaN(parseInt(btcZapAmount)));
+
         if (btcZapAmount && !isNaN(parseInt(btcZapAmount))) {
             localStorage.setItem('default-btc-zap-amount', btcZapAmount);
-            console.log('⚡ Saved BTC zap amount:', btcZapAmount);
+            console.log('✅ Saved BTC zap amount to localStorage:', btcZapAmount);
+            console.log('✅ Verify localStorage BTC:', localStorage.getItem('default-btc-zap-amount'));
+        } else {
+            console.warn('⚠️ BTC zap amount NOT saved - value:', btcZapAmount, 'field:', btcZapField);
         }
 
-        const xmrZapAmount = document.getElementById('defaultXmrZapAmount')?.value.trim();
+        const xmrZapField = document.getElementById('defaultXmrZapAmount');
+        console.log('🔍 XMR zap field:', xmrZapField);
+        console.log('🔍 XMR zap field exists:', !!xmrZapField);
+        console.log('🔍 XMR zap field value:', xmrZapField?.value);
+
+        const xmrZapAmount = xmrZapField?.value?.trim();
+        console.log('🔍 XMR zap amount after trim:', xmrZapAmount);
+        console.log('🔍 XMR zap amount length:', xmrZapAmount?.length);
+
         if (xmrZapAmount) {
             localStorage.setItem('default-zap-amount', xmrZapAmount);
-            console.log('⚡ Saved XMR zap amount:', xmrZapAmount);
+            console.log('✅ Saved XMR zap amount to localStorage:', xmrZapAmount);
+            console.log('✅ Verify localStorage XMR:', localStorage.getItem('default-zap-amount'));
+        } else {
+            console.warn('⚠️ XMR zap amount NOT saved - value:', xmrZapAmount, 'field:', xmrZapField);
+        }
+
+        // Publish NIP-65 relay list to network (kind 10002)
+        try {
+            const relayList = Relays.userRelayList;
+            const published = await Relays.publishRelayList(relayList.read, relayList.write);
+            if (published) {
+                console.log('📡 NIP-65 relay list published to network');
+            } else {
+                console.warn('⚠️ Failed to publish relay list to network');
+            }
+        } catch (error) {
+            console.error('❌ Error publishing relay list:', error);
+            // Don't fail the entire save operation if relay publishing fails
         }
 
         closeSettingsModal();
@@ -3389,6 +3451,11 @@ async function addReadRelay() {
     try {
         const success = Relays.addReadRelay(relayUrl);
         if (success) {
+            // Publish updated relay list to network
+            const relayList = Relays.userRelayList;
+            await Relays.publishRelayList(relayList.read, relayList.write);
+            console.log('📡 Updated NIP-65 relay list published after adding read relay');
+
             Utils.showNotification('Read relay added successfully!', 'success');
             input.value = '';
             await populateRelayLists(); // Refresh the lists
@@ -3415,6 +3482,11 @@ async function addWriteRelay() {
     try {
         const success = Relays.addWriteRelay(relayUrl);
         if (success) {
+            // Publish updated relay list to network
+            const relayList = Relays.userRelayList;
+            await Relays.publishRelayList(relayList.read, relayList.write);
+            console.log('📡 Updated NIP-65 relay list published after adding write relay');
+
             Utils.showNotification('Write relay added successfully!', 'success');
             input.value = '';
             await populateRelayLists(); // Refresh the lists
@@ -3432,6 +3504,11 @@ async function removeReadRelayFromModal(relayUrl) {
     try {
         const success = Relays.removeReadRelay(relayUrl);
         if (success) {
+            // Publish updated relay list to network
+            const relayList = Relays.userRelayList;
+            await Relays.publishRelayList(relayList.read, relayList.write);
+            console.log('📡 Updated NIP-65 relay list published after removing read relay');
+
             Utils.showNotification('Read relay removed successfully!', 'success');
             await populateRelayLists(); // Refresh the lists
         } else {
@@ -3448,6 +3525,11 @@ async function removeWriteRelayFromModal(relayUrl) {
     try {
         const success = Relays.removeWriteRelay(relayUrl);
         if (success) {
+            // Publish updated relay list to network
+            const relayList = Relays.userRelayList;
+            await Relays.publishRelayList(relayList.read, relayList.write);
+            console.log('📡 Updated NIP-65 relay list published after removing write relay');
+
             Utils.showNotification('Write relay removed successfully!', 'success');
             await populateRelayLists(); // Refresh the lists
         } else {

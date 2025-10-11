@@ -380,7 +380,10 @@
             padding: 24px;
             max-width: 400px;
             width: 90%;
+            max-height: 85vh;
+            overflow-y: auto;
             text-align: center;
+            -webkit-overflow-scrolling: touch;
         }
 
         .modal-header {
@@ -1181,7 +1184,8 @@
             .modal-content {
                 width: 95%;
                 max-width: 400px;
-                margin: 10% auto;
+                max-height: 92vh;
+                margin: 4vh auto;
             }
             
             /* Mobile compose area adjustments */
