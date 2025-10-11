@@ -853,17 +853,17 @@ function displayUserPosts(posts) {
                             </div>
                         
                             <div style="display: flex; gap: 20px; padding-top: 12px; border-top: 1px solid #333; font-size: 14px;">
-                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'">
+                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="NostrPosts.replyToPost('${post.id}')">
                                     💬 Reply
                                 </span>
-                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'">
+                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="NostrPosts.repostNote('${post.id}')">
                                     🔄 Repost
                                 </span>
-                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'">
+                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="NostrPosts.likePost('${post.id}')">
                                     ❤️ Like
                                 </span>
-                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'">
-                                    ⚡ Zap
+                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="sharePost('${post.id}')">
+                                    📤 Share
                                 </span>
                             </div>
                         </div>
@@ -2477,9 +2477,20 @@ function getDefaultBtcZapAmount() {
     return localStorage.getItem('default-btc-zap-amount') || '1000';
 }
 
+// Share post (copy link to clipboard)
+function sharePost(postId) {
+    const url = `${window.location.origin}${window.location.pathname}#note:${postId}`;
+    navigator.clipboard.writeText(url).then(() => {
+        Utils.showNotification('Note link copied to clipboard');
+    }).catch(() => {
+        Utils.showNotification('Failed to copy link', 'error');
+    });
+}
+
 // Make functions available globally
 window.getUserLightningAddress = getUserLightningAddress;
 window.getDefaultBtcZapAmount = getDefaultBtcZapAmount;
+window.sharePost = sharePost;
 window.openThreadView = UI.openThreadView;
 window.closeThreadModal = UI.closeThreadModal;
 window.closeFollowModal = closeFollowModal;

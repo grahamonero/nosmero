@@ -1271,9 +1271,9 @@ function renderSingleResult(post) {
             </div>
             <div class="post-content" onclick="openThreadView('${post.id}')" style="cursor: pointer; color: #fff; line-height: 1.4; margin-bottom: 12px;">${highlightedContent}</div>
             <div class="post-actions" onclick="event.stopPropagation();" style="display: flex; gap: 16px;">
-                <button class="action-btn" onclick="replyToPost('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">💬</button>
-                <button class="action-btn" onclick="repostNote('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">🔄</button>
-                <button class="action-btn like-btn" id="like-${post.id}" onclick="likePost('${post.id}')" data-post-id="${post.id}" title="Like this post" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">
+                <button class="action-btn" onclick="NostrPosts.replyToPost('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">💬</button>
+                <button class="action-btn" onclick="NostrPosts.repostNote('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">🔄</button>
+                <button class="action-btn like-btn" id="like-${post.id}" onclick="NostrPosts.likePost('${post.id}')" data-post-id="${post.id}" title="Like this post" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">
                     🤍
                 </button>
                 <button class="action-btn" onclick="sharePost('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">📤</button>
