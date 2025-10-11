@@ -86,13 +86,44 @@ async function initializeApp() {
         console.log('- loginWithExtension:', typeof window.loginWithExtension);
         console.log('- showLoginModal:', typeof window.showLoginModal);
         console.log('- logout:', typeof window.logout);
-        
+
+        // Handle URL hash routing (for shared note links)
+        handleHashRouting();
+
     } catch (error) {
         console.error('❌ App initialization failed:', error);
         Utils.showNotification('Failed to start Nosmero: ' + error.message, 'error');
         showErrorFallback();
     }
 }
+
+// Handle URL hash routing for shared note links
+async function handleHashRouting() {
+    const hash = window.location.hash;
+
+    if (hash.startsWith('#note:')) {
+        const noteId = hash.substring(6); // Remove '#note:' prefix
+        console.log('📍 Opening shared note:', noteId);
+
+        // Wait for app to be fully initialized (user logged in, relays connected)
+        const waitForReady = setInterval(() => {
+            if (State.publicKey && State.pool) {
+                clearInterval(waitForReady);
+                console.log('✓ App ready, opening thread view for:', noteId);
+                window.openThreadView(noteId);
+            }
+        }, 500);
+
+        // Timeout after 10 seconds
+        setTimeout(() => {
+            clearInterval(waitForReady);
+            console.log('⚠️ Timeout waiting for app to be ready');
+        }, 10000);
+    }
+}
+
+// Listen for hash changes (browser back/forward)
+window.addEventListener('hashchange', handleHashRouting);
 
 // Wait for nostr-tools library to load
 async function waitForNostrTools() {
