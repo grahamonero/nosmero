@@ -700,12 +700,19 @@ function buildThreadTree(posts, mainEventId) {
 
 export async function openThreadView(eventId) {
     try {
+        // Check if user is selecting text - if so, don't navigate to thread
+        const selection = window.getSelection();
+        if (selection && selection.toString().length > 0) {
+            console.log('Text selection detected, skipping thread navigation');
+            return;
+        }
+
         // Import required modules first
         const [Posts, StateModule] = await Promise.all([
             import('./posts.js'),
             import('./state.js')
         ]);
-        
+
         // Store current page to go back to
         previousPage = StateModule.currentPage || 'home';
         
@@ -1270,9 +1277,9 @@ export async function viewUserProfilePage(pubkey) {
                 </div>
             </div>
         `;
-        
+
         // Update follow button state
-        updateFollowButton(pubkey);
+        await updateFollowButton(pubkey);
 
         // Load follow counts
         await loadFollowCounts(pubkey);
@@ -1414,12 +1421,22 @@ export async function loadFollowingList() {
 }
 
 // Update follow button appearance
-function updateFollowButton(pubkey) {
+async function updateFollowButton(pubkey) {
     const button = document.getElementById(`followBtn_${pubkey}`);
     if (!button) return;
-    
-    const isFollowing = followingList.has(pubkey);
-    
+
+    // Import State module to check global following list
+    const StateModule = await import('./state.js');
+
+    // Check if user is following this pubkey (use global state, not local variable)
+    // StateModule.followingUsers might be a Set or Array, handle both
+    const currentFollowing = StateModule.followingUsers || [];
+    const isFollowing = currentFollowing instanceof Set
+        ? currentFollowing.has(pubkey)
+        : Array.isArray(currentFollowing)
+            ? currentFollowing.includes(pubkey)
+            : false;
+
     if (isFollowing) {
         button.textContent = '✓ Following';
         button.style.background = '#10B981';
@@ -1467,7 +1484,7 @@ export async function toggleFollow(pubkey) {
         localStorage.setItem('following-list-timestamp', Date.now().toString());
 
         // Update button immediately
-        updateFollowButton(pubkey);
+        await updateFollowButton(pubkey);
 
         // Create contact list event (kind 3) with COMPLETE list
         const tags = [...currentFollowing].map(pk => ['p', pk]);
