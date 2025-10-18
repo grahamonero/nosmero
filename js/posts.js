@@ -40,22 +40,14 @@ export function clearHomeFeedState() {
 
 // Get authors for feed - logged in users see followed users, anonymous users see curated authors
 export function getFeedAuthors() {
-    console.log('=== getFeedAuthors DEBUG ===');
-    console.log('publicKey:', !!State.publicKey);
-    console.log('followingUsers exists:', !!State.followingUsers);
-    console.log('followingUsers size:', State.followingUsers ? State.followingUsers.size : 'N/A');
-    console.log('followingUsers contents:', State.followingUsers ? Array.from(State.followingUsers).slice(0, 3) : 'N/A');
-    
     // If user is logged in, get their following list
     if (State.publicKey && State.followingUsers && State.followingUsers.size > 0) {
         const followingArray = Array.from(State.followingUsers);
-        console.log(`✓ Using logged in user feed: ${followingArray.length} followed users`);
         return followingArray;
     }
-    
+
     // Anonymous users or users not following anyone see curated authors
     const curatedAuthors = Utils.getCuratedAuthors();
-    console.log(`⚠ Using anonymous/default feed: ${curatedAuthors.length} curated authors`);
     return curatedAuthors;
 }
 

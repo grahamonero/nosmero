@@ -145,15 +145,35 @@ async function waitForNostrTools() {
 async function checkExistingSession() {
     const storedPrivateKey = localStorage.getItem('nostr-private-key');
     const storedPublicKey = localStorage.getItem('nostr-public-key');
-    
+
     if (storedPrivateKey) {
         console.log('👤 Found existing session, logging in...');
         State.setPrivateKey(storedPrivateKey);
-        
+
         if (storedPrivateKey === 'extension') {
             // Extension user
             if (storedPublicKey) {
                 State.setPublicKey(storedPublicKey);
+            }
+        } else if (storedPrivateKey === 'nip46') {
+            // NIP-46 (Amber) user - restore remote signer connection
+            console.log('📱 Restoring NIP-46 connection...');
+            if (storedPublicKey) {
+                State.setPublicKey(storedPublicKey);
+            }
+
+            try {
+                const NIP46 = await import('./nip46.js');
+                const restored = await NIP46.restoreConnection();
+                if (restored) {
+                    console.log('✅ NIP-46 connection restored');
+                } else {
+                    console.warn('⚠️ Failed to restore NIP-46 connection');
+                    // Keep the session but user will need to reconnect when signing
+                }
+            } catch (error) {
+                console.error('❌ Error restoring NIP-46 connection:', error);
+                // Keep the session but user will need to reconnect when signing
             }
         } else {
             // Local key user
@@ -173,9 +193,13 @@ async function checkExistingSession() {
 
 // Start the main application
 async function startApplication() {
+    console.log('🚦 startApplication() called');
+    console.log('  - State.privateKey:', State.privateKey);
+    console.log('  - State.publicKey:', State.publicKey ? State.publicKey.substring(0, 16) + '...' : 'null');
+
     if (State.privateKey && State.publicKey) {
         console.log('🏠 Starting authenticated session...');
-        
+
         // Update UI for logged in state
         updateUIForLogin();
         
@@ -207,7 +231,7 @@ async function startApplication() {
         hideAuthUI();
     } else {
         console.log('🔐 No session found, enabling anonymous browsing...');
-        
+
         // Update UI for logged out state
         updateUIForLogout();
         
@@ -533,17 +557,13 @@ async function loadUserProfileData() {
 
 // Display profile header
 function displayProfileHeader(profile) {
-    console.log('=== DISPLAY PROFILE HEADER DEBUG ===');
-    console.log('Profile data received:', profile);
-    
     const profileHeader = document.getElementById('profileHeader');
     if (!profileHeader) {
         console.error('profileHeader element not found!');
         return;
     }
-    
+
     const displayName = profile.name || profile.display_name || 'Anonymous';
-    console.log('Display name will be:', displayName);
     const shortPubkey = State.publicKey ? `${State.publicKey.substring(0, 8)}...${State.publicKey.substring(56)}` : '';
     
     profileHeader.innerHTML = `
@@ -615,16 +635,9 @@ async function displayNip05Verification(profile) {
     if (!nip05Container || !profile.nip05) {
         return;
     }
-    
-    console.log('NIP-05 verification debug:', {
-        nip05: profile.nip05,
-        lud16: profile.lud16,
-        isNip05: profile.nip05 && profile.nip05 !== profile.lud16
-    });
-    
+
     // Safety check: don't verify lightning addresses as NIP-05
     if (profile.nip05 === profile.lud16 || profile.nip05 === profile.lud06) {
-        console.log('Skipping NIP-05 verification - appears to be lightning address');
         return;
     }
     
@@ -1773,14 +1786,7 @@ async function saveLightningAddressToProfile(lightningAddress) {
             delete profileData[key];
         }
     });
-    
-    console.log('Saving lightning address to profile:', { lightningAddress, profileData });
-    console.log('NostrTools debug:', {
-        available: !!window.NostrTools,
-        finishEvent: typeof window.NostrTools?.finishEvent,
-        keys: window.NostrTools ? Object.keys(window.NostrTools) : 'NostrTools not available'
-    });
-    
+
     // Create NIP-01 profile event (kind 0)
     const event = {
         kind: 0,
@@ -1790,13 +1796,11 @@ async function saveLightningAddressToProfile(lightningAddress) {
     };
     
     const writeRelays = Relays.getWriteRelays();
-    console.log('Publishing lightning address to write relays:', writeRelays);
 
     // Sign and publish event
     const signedEvent = await Utils.signEvent(event);
     await State.pool.publish(writeRelays, signedEvent);
-    console.log('Lightning address profile published');
-    
+
     // Update local cache
     const updatedProfile = {
         ...currentProfile,
@@ -1804,8 +1808,6 @@ async function saveLightningAddressToProfile(lightningAddress) {
         pubkey: State.publicKey
     };
     State.profileCache[State.publicKey] = updatedProfile;
-    
-    console.log('Lightning address saved and profile updated');
 }
 
 // Save Monero address to relays using NIP-78 (application-specific data)
@@ -3014,20 +3016,12 @@ async function ensureUserProfile() {
         console.warn('No public key available for profile fetch');
         return;
     }
-    
-    console.log('=== ENSURE USER PROFILE DEBUG ===');
-    console.log('Public key:', State.publicKey);
-    console.log('Current profile cache:', State.profileCache[State.publicKey]);
-    console.log('Pool initialized:', !!State.pool);
-    
+
     // Check if profile already cached
     if (State.profileCache[State.publicKey]) {
-        console.log('User profile already cached:', State.profileCache[State.publicKey]);
         return;
     }
-    
-    console.log('Fetching user\'s own profile:', State.publicKey);
-    
+
     try {
         // Import posts module for profile fetching
         const Posts = await import('./posts.js');
@@ -3048,8 +3042,6 @@ async function ensureUserProfile() {
             };
             State.profileCache[State.publicKey] = defaultProfile;
         }
-        
-        console.log('User profile ready:', State.profileCache[State.publicKey]);
     } catch (error) {
         console.error('Error fetching user profile:', error);
     }
@@ -3060,8 +3052,6 @@ async function ensureUserProfile() {
 // Force fresh profile fetch from relays (for modal settings)
 async function forceFreshProfileFetch() {
     return new Promise((resolve) => {
-        console.log('🔍 Fetching fresh profile for:', State.publicKey);
-
         const readRelays = Relays.getReadRelays();
         const timeoutDuration = 5000;
         let profileFound = false;

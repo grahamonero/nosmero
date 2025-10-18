@@ -69,6 +69,12 @@
             <button class="login-option-btn" onclick="loginWithExtension()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
                 🔌 Use Extension
             </button>
+            <button class="login-option-btn" onclick="showLoginWithNIP46()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
+                📱 Use Amber (NIP-46)
+            </button>
+            <button class="login-option-btn" onclick="showLoginWithNsecApp()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
+                🌐 Use nsec.app (NIP-46)
+            </button>
         </div>
         
         <!-- Logout Option (shown when logged in) -->
@@ -188,6 +194,12 @@
                 <button class="login-option-btn" onclick="loginWithExtension()">
                     🔌 Login with Browser Extension
                 </button>
+                <button class="login-option-btn" onclick="showLoginWithNIP46()">
+                    📱 Login with Amber (NIP-46)
+                </button>
+                <button class="login-option-btn" onclick="showLoginWithNsecApp()">
+                    🌐 Login with nsec.app (NIP-46)
+                </button>
             </div>
 
             <!-- Create Account Section -->
@@ -202,7 +214,7 @@
             <!-- Login with nsec Section -->
             <div id="loginWithNsecSection" style="display: none;">
                 <div style="margin-bottom: 16px;">
-                    <input type="password" id="nsecInput" placeholder="Enter your nsec..." 
+                    <input type="password" id="nsecInput" placeholder="Enter your nsec..."
                            style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
                 </div>
                 <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
@@ -210,6 +222,67 @@
                 </div>
                 <button class="send-btn" onclick="loginWithNsec()">Login</button>
                 <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+            </div>
+
+            <!-- Login with NIP-46 (Amber) Section -->
+            <div id="loginWithNIP46Section" style="display: none;">
+                <div style="margin-bottom: 16px;">
+                    <input type="text" id="bunkerInput" placeholder="Enter bunker URI from Amber..."
+                           style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
+                </div>
+                <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
+                    Get your bunker connection URI from the Amber app (Settings → Nostr Connect)
+                </div>
+                <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">📱 How to get bunker URI:</div>
+                    <ol style="color: #ccc; font-size: 13px; margin: 0; padding-left: 20px;">
+                        <li>Open Amber app on your Android device</li>
+                        <li>Go to Settings → Nostr Connect</li>
+                        <li>Tap "Create Connection"</li>
+                        <li>Copy the bunker URI starting with "bunker://"</li>
+                        <li>Paste it here</li>
+                    </ol>
+                </div>
+                <button class="send-btn" onclick="loginWithNIP46()">Connect to Amber</button>
+                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+            </div>
+
+            <!-- Login with NIP-46 (nsec.app) Section -->
+            <div id="loginWithNsecAppSection" style="display: none;">
+                <div style="margin-bottom: 16px;">
+                    <input type="text" id="nsecAppUsernameInput" placeholder="Paste your nsec.app connection string..."
+                           style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
+                </div>
+                <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
+                    Get your connection string from nsec.app (Settings → Nostr Connect / Apps)
+                </div>
+                <div style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
+                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">🌐 How to get your connection string:</div>
+                    <ol style="color: #ccc; font-size: 13px; margin: 0; padding-left: 20px;">
+                        <li>Go to <a href="https://nsec.app" target="_blank" style="color: #8B5CF6;">nsec.app</a> in your browser</li>
+                        <li>Login or create account</li>
+                        <li>Click profile icon or go to Settings</li>
+                        <li>Look for "Nostr Connect" or "Apps" section</li>
+                        <li>Copy the connection string (starts with "bunker://")</li>
+                        <li>Paste it here</li>
+                    </ol>
+                </div>
+
+                <!-- Step 1: Connect -->
+                <div id="nsecAppStep1">
+                    <button class="send-btn" onclick="connectToNsecApp()">Connect to nsec.app</button>
+                    <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+                </div>
+
+                <!-- Step 2: Login (shown after connection) -->
+                <div id="nsecAppStep2" style="display: none;">
+                    <div style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
+                        <div style="color: #8B5CF6; font-weight: bold;">✅ Connected to nsec.app!</div>
+                        <div style="color: #ccc; font-size: 13px; margin-top: 4px;">Now click Login to complete the process.</div>
+                    </div>
+                    <button class="send-btn" onclick="completeNsecAppLogin()">Login</button>
+                    <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+                </div>
             </div>
 
             <!-- Key Display Section -->
@@ -459,26 +532,19 @@
 
     <!-- Security: DOMPurify for XSS protection -->
     <script src="lib/purify.min.js"></script>
-    
+
+    <!-- nostr-login: OAuth-like NIP-46 login for nsec.app -->
+    <script
+        src='https://www.unpkg.com/nostr-login@latest/dist/unpkg.js'
+        data-bunkers="nsec.app"
+        data-perms="sign_event:1,sign_event:4,sign_event:7,nip04_encrypt,nip04_decrypt"
+        data-methods="connect"
+    ></script>
+
     <!-- Load nostr-tools from local copy -->
     <script src="lib/nostr-tools.bundle.js"></script>
-    <script>
-        // Verify NostrTools is loaded and debug its contents
-        console.log('Checking NostrTools after load...');
-        console.log('window.NostrTools exists:', !!window.NostrTools);
-        if (window.NostrTools) {
-            console.log('NostrTools loaded successfully');
-            console.log('Available functions:', Object.keys(window.NostrTools).slice(0, 20));
-            console.log('Has generateSecretKey:', !!window.NostrTools.generateSecretKey);
-            console.log('Has getPublicKey:', !!window.NostrTools.getPublicKey);
-            console.log('Has SimplePool:', !!window.NostrTools.SimplePool);
-            console.log('Has nip19:', !!window.NostrTools.nip19);
-        } else {
-            console.error('NostrTools failed to load - it is undefined');
-        }
-    </script>
-    
+
     <!-- Load the modular v2 application -->
-    <script type="module" src="js/app.js?v=2.3.2"></script>
+    <script type="module" src="js/app.js?v=2.9.5"></script>
 </body>
 </html>

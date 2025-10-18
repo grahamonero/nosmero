@@ -72,7 +72,7 @@ export function showNotification(message, type = 'success') {
 // ==================== EVENT SIGNING ====================
 
 /**
- * Sign a Nostr event using either browser extension or local private key
+ * Sign a Nostr event using browser extension, NIP-46 remote signer, or local private key
  * @param {Object} eventTemplate - Unsigned event template
  * @returns {Promise<Object>} Signed event
  */
@@ -84,8 +84,32 @@ export async function signEvent(eventTemplate) {
             throw new Error('Browser extension not found. Please ensure your Nostr extension is active.');
         }
         return await window.nostr.signEvent(eventTemplate);
-    } else {
-        // Use local private key with finalizeEvent
+    }
+    // Check if user is using NIP-46 remote signer (Amber)
+    else if (State.privateKey === 'nip46') {
+        // Use NIP-46 remote signing
+        if (!window.NIP46) {
+            throw new Error('NIP-46 not initialized. Please reconnect to Amber.');
+        }
+
+        // NIP-46 requires the full event template including pubkey
+        // Add pubkey if it's missing
+        if (!eventTemplate.pubkey) {
+            if (!State.publicKey) {
+                throw new Error('Public key not available. Please log in again.');
+            }
+            eventTemplate.pubkey = State.publicKey;
+        }
+
+        // Add content field if missing (some events like reactions need it)
+        if (eventTemplate.content === undefined) {
+            eventTemplate.content = '';
+        }
+
+        return await window.NIP46.signEventRemote(eventTemplate);
+    }
+    // Use local private key with finalizeEvent
+    else {
         if (!State.privateKey) {
             throw new Error('Not authenticated. Please log in first.');
         }

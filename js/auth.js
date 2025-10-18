@@ -20,7 +20,6 @@ import {
 
 // Clear all user-specific settings to ensure clean state for new users
 function clearUserSettings() {
-    console.log('🧹 Clearing user settings for fresh account');
 
     // Clear user profile data
     localStorage.removeItem('user-lightning-address');
@@ -132,8 +131,7 @@ export async function createNewAccount() {
             // Older versions might return hex string directly
             privateKey = secretKey;
         }
-        
-        console.log('Generated private key type:', typeof privateKey, 'length:', privateKey.length);
+
         localStorage.setItem('nostr-private-key', privateKey);
         setPrivateKey(privateKey);
         
@@ -206,12 +204,7 @@ export async function loginWithNsec() {
         }
         
         const hexPrivateKey = decoded.data;
-        
-        // Debug: log the decoded data
-        console.log('Decoded data type:', typeof hexPrivateKey);
-        console.log('Decoded data length:', hexPrivateKey ? hexPrivateKey.length : 'null');
-        console.log('Decoded data (first 10 chars):', hexPrivateKey ? hexPrivateKey.slice(0, 10) : 'null');
-        
+
         // Handle case where decoded.data might be a Uint8Array instead of hex string
         let normalizedKey = hexPrivateKey;
         if (hexPrivateKey instanceof Uint8Array) {
@@ -219,9 +212,8 @@ export async function loginWithNsec() {
             normalizedKey = Array.from(hexPrivateKey)
                 .map(b => b.toString(16).padStart(2, '0'))
                 .join('');
-            console.log('Converted Uint8Array to hex, length:', normalizedKey.length);
         }
-        
+
         // Validate the decoded hex key before storing it
         if (typeof normalizedKey !== 'string' || normalizedKey.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(normalizedKey)) {
             console.error('Validation failed - type:', typeof normalizedKey, 'length:', normalizedKey ? normalizedKey.length : 'null');
@@ -241,23 +233,17 @@ export async function loginWithNsec() {
         // All validation passed, store and login
         setPrivateKey(normalizedKey);
         localStorage.setItem('nostr-private-key', normalizedKey);
-        
+
         // Generate and set public key
         const derivedPublicKey = getPublicKey(normalizedKey);
         setPublicKey(derivedPublicKey);
-        
-        console.log('Fresh nsec login successful');
+
         showNotification('Login successful!', 'success');
 
         // Load user's NIP-65 relay list after successful login
         try {
             const Relays = await import('./relays.js');
-            const relayListLoaded = await Relays.importRelayList();
-            if (relayListLoaded) {
-                console.log('✓ User NIP-65 relay list loaded');
-            } else {
-                console.log('ℹ No NIP-65 relay list found, using defaults');
-            }
+            await Relays.importRelayList();
         } catch (error) {
             console.error('Error loading NIP-65 relay list:', error);
         }
@@ -310,18 +296,13 @@ export async function loginWithExtension() {
         setPrivateKey('extension'); // Special marker for extension users
         localStorage.setItem('nostr-private-key', 'extension');
         localStorage.setItem('nostr-public-key', pubKey);
-        
+
         showNotification('Extension login successful!', 'success');
 
         // Load user's NIP-65 relay list after successful login
         try {
             const Relays = await import('./relays.js');
-            const relayListLoaded = await Relays.importRelayList();
-            if (relayListLoaded) {
-                console.log('✓ User NIP-65 relay list loaded');
-            } else {
-                console.log('ℹ No NIP-65 relay list found, using defaults');
-            }
+            await Relays.importRelayList();
         } catch (error) {
             console.error('Error loading NIP-65 relay list:', error);
         }
@@ -338,9 +319,376 @@ export async function loginWithExtension() {
             // Fallback: reload the page
             window.location.reload();
         }
-        
+
     } catch (error) {
         alert('Failed to connect to extension: ' + error.message);
+    }
+}
+
+// Temporary storage for public key from Amber
+let amberPublicKey = null;
+
+// Step 1: Connect to Amber (establish bunker connection and get public key)
+export async function connectToAmber() {
+    try {
+        const bunkerInput = document.getElementById('bunkerInput');
+        if (!bunkerInput) {
+            alert('Bunker URI input field not found');
+            return;
+        }
+
+        const bunkerURI = bunkerInput.value.trim();
+        if (!bunkerURI) {
+            alert('Please enter your bunker connection URI from Amber');
+            return;
+        }
+
+        // Basic validation - should start with bunker://
+        if (!bunkerURI.startsWith('bunker://')) {
+            alert('Invalid bunker URI format. Should start with "bunker://"');
+            return;
+        }
+
+        showNotification('Requesting connection approval on Amber...', 'info');
+
+        // Import NIP-46 module
+        const NIP46 = await import('./nip46.js');
+
+        // Connect to Amber (user will approve on Amber - this returns "ack")
+        await NIP46.connect(bunkerURI);
+
+        // Now get the actual public key with a separate request
+        showNotification('Getting your public key from Amber...', 'info');
+        const userPubkey = await NIP46.getPublicKey();
+
+        if (!userPubkey || userPubkey.length !== 64) {
+            throw new Error('Failed to get valid public key from Amber');
+        }
+
+        // Store the public key temporarily
+        amberPublicKey = userPubkey;
+
+        showNotification('Connection established! Now click Login.', 'success');
+
+        // Show step 2 UI
+        const step1 = document.getElementById('nip46Step1');
+        const step2 = document.getElementById('nip46Step2');
+        if (step1) step1.style.display = 'none';
+        if (step2) step2.style.display = 'block';
+
+    } catch (error) {
+        console.error('Amber connection error:', error);
+        showNotification('Failed to connect: ' + error.message, 'error');
+    }
+}
+
+// Step 2: Complete login (use the public key from step 1)
+export async function completeAmberLogin() {
+    // Abort any ongoing home feed loading
+    State.abortHomeFeedLoading();
+
+    try {
+        // Check if we have the public key from connect step
+        if (!amberPublicKey) {
+            throw new Error('Connection not established. Please connect first.');
+        }
+
+        // NOTE: Don't call clearUserSettings() for NIP-46 login!
+        // We're logging into an existing account, not creating a new one.
+        // clearUserSettings() would remove the following list and make it look anonymous.
+
+        showNotification('Completing login...', 'info');
+
+        const userPubkey = amberPublicKey;
+
+        setPublicKey(userPubkey);
+        setPrivateKey('nip46'); // Special marker for NIP-46 users
+
+        localStorage.setItem('nostr-private-key', 'nip46');
+        localStorage.setItem('nostr-public-key', userPubkey);
+
+        showNotification('Login successful!', 'success');
+
+        // Load user's NIP-65 relay list after successful login
+        try {
+            const Relays = await import('./relays.js');
+            await Relays.importRelayList();
+        } catch (error) {
+            console.error('Error loading NIP-65 relay list:', error);
+        }
+
+        // Clear the login UI display before starting authenticated session
+        const feed = document.getElementById('feed');
+        const homeFeedList = document.getElementById('homeFeedList');
+        if (feed) {
+            feed.innerHTML = '<div class="loading">Loading your feed...</div>';
+        }
+        if (homeFeedList) {
+            homeFeedList.innerHTML = '';
+        }
+
+        // Clear all home feed state to prevent anonymous posts from persisting
+        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
+            window.NostrPosts.clearHomeFeedState();
+        }
+
+        // Start the application with the new session
+        if (window.startApplication) {
+            await window.startApplication();
+        } else {
+            // Fallback: reload the page
+            window.location.reload();
+        }
+
+    } catch (error) {
+        console.error('Amber login error:', error);
+        showNotification('Login failed: ' + error.message, 'error');
+    }
+}
+
+// Legacy function for backward compatibility
+export async function loginWithNIP46() {
+    await connectToAmber();
+}
+
+// ==================== NSEC.APP LOGIN (NIP-46) ====================
+
+// Temporary storage for public key from nsec.app
+let nsecAppPublicKey = null;
+
+// Step 1: Connect to nsec.app (establish bunker connection and get public key)
+export async function connectToNsecApp() {
+    try {
+        const usernameInput = document.getElementById('nsecAppUsernameInput');
+        if (!usernameInput) {
+            alert('Username input field not found');
+            return;
+        }
+
+        let input = usernameInput.value.trim();
+        if (!input) {
+            alert('Please enter your nsec.app username or connection string');
+            return;
+        }
+
+        // Handle different input formats
+        let bunkerURI;
+
+        if (input.startsWith('bunker://')) {
+            // Direct bunker URI
+            bunkerURI = input;
+        } else if (input.includes('@nsec.app') || input.includes('@')) {
+            // Username format: username@nsec.app or just username
+            // For now, tell them we need the connection string
+            alert('Please use your nsec.app connection string.\n\nHow to find it:\n1. Go to nsec.app\n2. Click your profile/settings\n3. Look for "Nostr Connect" or "Apps"\n4. Copy the connection string (starts with bunker:// or your npub)');
+            return;
+        } else if (input.startsWith('npub')) {
+            // Could be npub format, but we need the full bunker URI
+            alert('Please use your full connection string from nsec.app.\n\nHow to find it:\n1. Go to nsec.app\n2. Click your profile/settings\n3. Look for "Nostr Connect" or "Apps"\n4. Copy the full connection string');
+            return;
+        } else {
+            // Assume it's a username without @nsec.app
+            alert('Please use your nsec.app connection string.\n\nHow to find it:\n1. Go to nsec.app\n2. Click your profile/settings\n3. Look for "Nostr Connect" or "Apps"\n4. Copy the connection string (starts with bunker://)');
+            return;
+        }
+
+        // Validate bunker URI format
+        if (!bunkerURI.startsWith('bunker://')) {
+            alert('Invalid connection string format. Should start with "bunker://"');
+            return;
+        }
+
+        showNotification('Connecting to nsec.app...', 'info');
+
+        // Import NIP-46 module (SAME module used by Amber)
+        const NIP46 = await import('./nip46.js');
+
+        // Connect to nsec.app (user will approve in nsec.app popup - this returns "ack")
+        await NIP46.connect(bunkerURI);
+
+        // Now get the actual public key with a separate request
+        showNotification('Getting your public key from nsec.app...', 'info');
+        const userPubkey = await NIP46.getPublicKey();
+
+        if (!userPubkey || userPubkey.length !== 64) {
+            throw new Error('Failed to get valid public key from nsec.app');
+        }
+
+        // Store the public key temporarily
+        nsecAppPublicKey = userPubkey;
+
+        showNotification('Connection established! Now click Login.', 'success');
+
+        // Show step 2 UI
+        const step1 = document.getElementById('nsecAppStep1');
+        const step2 = document.getElementById('nsecAppStep2');
+        if (step1) step1.style.display = 'none';
+        if (step2) step2.style.display = 'block';
+
+    } catch (error) {
+        console.error('nsec.app connection error:', error);
+        showNotification('Failed to connect: ' + error.message, 'error');
+    }
+}
+
+// Step 2: Complete login (use the public key from step 1)
+export async function completeNsecAppLogin() {
+    // Abort any ongoing home feed loading
+    State.abortHomeFeedLoading();
+
+    try {
+        // Check if we have the public key from connect step
+        if (!nsecAppPublicKey) {
+            throw new Error('Connection not established. Please connect first.');
+        }
+
+        // NOTE: Don't call clearUserSettings() for NIP-46 login!
+        // We're logging into an existing account, not creating a new one.
+
+        showNotification('Completing login...', 'info');
+
+        const userPubkey = nsecAppPublicKey;
+
+        setPublicKey(userPubkey);
+        setPrivateKey('nip46'); // Special marker for NIP-46 users
+
+        localStorage.setItem('nostr-private-key', 'nip46');
+        localStorage.setItem('nostr-public-key', userPubkey);
+
+        showNotification('Login successful!', 'success');
+
+        // Load user's NIP-65 relay list after successful login
+        try {
+            const Relays = await import('./relays.js');
+            await Relays.importRelayList();
+        } catch (error) {
+            console.error('Error loading NIP-65 relay list:', error);
+        }
+
+        // Clear the login UI display before starting authenticated session
+        const feed = document.getElementById('feed');
+        const homeFeedList = document.getElementById('homeFeedList');
+        if (feed) {
+            feed.innerHTML = '<div class="loading">Loading your feed...</div>';
+        }
+        if (homeFeedList) {
+            homeFeedList.innerHTML = '';
+        }
+
+        // Clear all home feed state to prevent anonymous posts from persisting
+        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
+            window.NostrPosts.clearHomeFeedState();
+        }
+
+        // Start the application with the new session
+        if (window.startApplication) {
+            await window.startApplication();
+        } else {
+            // Fallback: reload the page
+            window.location.reload();
+        }
+
+    } catch (error) {
+        console.error('nsec.app login error:', error);
+        showNotification('Login failed: ' + error.message, 'error');
+    }
+}
+
+// ==================== NOSTR-LOGIN (OAUTH-LIKE NIP-46) ====================
+
+/**
+ * Initialize nostr-login event listeners
+ * This handles the OAuth-like flow where nsec.app connects back to us
+ */
+export function initNostrLogin() {
+    // Listen for authentication events from nostr-login
+    document.addEventListener('nlAuth', async (e) => {
+        if (e.detail.type === 'login' || e.detail.type === 'signup') {
+
+            try {
+                // nostr-login provides window.nostr API after successful OAuth
+                if (!window.nostr) {
+                    console.error('❌ window.nostr not available after nlAuth');
+                    throw new Error('window.nostr not available after nostr-login');
+                }
+
+                showNotification('Getting your public key...', 'info');
+
+                // Get pubkey from window.nostr (provided by nostr-login)
+                const pubKey = await window.nostr.getPublicKey();
+
+                // Clear any existing user settings to ensure fresh login
+                clearUserSettings();
+
+                // Set state (same as extension login)
+                setPublicKey(pubKey);
+                setPrivateKey('extension'); // Mark as extension-type (uses window.nostr)
+                localStorage.setItem('nostr-private-key', 'extension');
+                localStorage.setItem('nostr-public-key', pubKey);
+
+                showNotification('nsec.app login successful!', 'success');
+
+                // Load user's NIP-65 relay list after successful login
+                try {
+                    const Relays = await import('./relays.js');
+                    await Relays.importRelayList();
+                } catch (error) {
+                    console.error('Error loading NIP-65 relay list:', error);
+                }
+
+                // Clear the login UI display before starting authenticated session
+                const feed = document.getElementById('feed');
+                const homeFeedList = document.getElementById('homeFeedList');
+                if (feed) {
+                    feed.innerHTML = '<div class="loading">Loading your feed...</div>';
+                }
+                if (homeFeedList) {
+                    homeFeedList.innerHTML = '';
+                }
+
+                // Clear all home feed state to prevent anonymous posts from persisting
+                if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
+                    window.NostrPosts.clearHomeFeedState();
+                }
+
+                // Start the application with the new session
+                if (window.startApplication) {
+                    await window.startApplication();
+                } else {
+                    // Fallback: reload the page
+                    window.location.reload();
+                }
+
+            } catch (error) {
+                console.error('nostr-login authentication error:', error);
+                showNotification('Login failed: ' + error.message, 'error');
+            }
+
+        } else if (e.detail.type === 'logout') {
+            // Handle logout
+            logout();
+        }
+    });
+
+    // Listen for any nostr-login errors
+    window.addEventListener('error', (e) => {
+        if (e.message && e.message.includes('nostr-login')) {
+            console.error('❌ nostr-login error:', e);
+        }
+    });
+
+}
+
+// Initialize nostr-login when this module loads
+// This is safe to call even if nostr-login script hasn't loaded yet
+// The event listener will be ready when nostr-login fires its events
+if (typeof document !== 'undefined') {
+    // Wait for DOM to be ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initNostrLogin);
+    } else {
+        // DOM already loaded
+        initNostrLogin();
     }
 }
 
@@ -348,6 +696,11 @@ export async function loginWithExtension() {
 
 // Clear stored keys and return to login screen
 export function logout() {
+    // Disconnect NIP-46 if active
+    if (privateKey === 'nip46' && window.NIP46) {
+        window.NIP46.disconnect();
+    }
+
     // Clear stored keys
     localStorage.removeItem('nostr-private-key');
     localStorage.removeItem('nostr-public-key');
@@ -358,7 +711,7 @@ export function logout() {
     // Reset variables
     setPrivateKey(null);
     setPublicKey(null);
-    
+
     // Clear caches
     if (homeFeedCache) {
         Object.assign(homeFeedCache, { posts: [], timestamp: 0, isLoading: false });
@@ -366,12 +719,12 @@ export function logout() {
     if (trendingFeedCache) {
         Object.assign(trendingFeedCache, { posts: [], timestamp: 0, isLoading: false });
     }
-    
+
     // Update UI elements immediately
     updateUIForLogout();
-    
+
     showNotification('Logged out successfully', 'success');
-    
+
     // Reload page after a brief delay to enable anonymous browsing with default follows
     setTimeout(() => {
         window.location.reload();
@@ -405,5 +758,10 @@ function updateUIForLogout() {
 window.createNewAccount = createNewAccount;
 window.loginWithNsec = loginWithNsec;
 window.loginWithExtension = loginWithExtension;
+window.loginWithNIP46 = loginWithNIP46;
+window.connectToAmber = connectToAmber;
+window.completeAmberLogin = completeAmberLogin;
+window.connectToNsecApp = connectToNsecApp;
+window.completeNsecAppLogin = completeNsecAppLogin;
 window.logout = logout;
 window.updateUIForLogout = updateUIForLogout;

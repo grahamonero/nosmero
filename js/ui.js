@@ -69,12 +69,9 @@ export function showLoginModal() {
     // Abort any ongoing home feed loading
     State.abortHomeFeedLoading();
 
-    console.log('Showing login modal');
     const modal = document.getElementById('loginModal');
-    console.log('Modal element:', modal);
     if (modal) {
         modal.classList.add('show');
-        console.log('Modal classes after adding show:', modal.className);
     }
 }
 
@@ -100,7 +97,7 @@ export function showCreateAccount() {
 // Show nsec login interface
 export function showLoginWithNsec() {
     hideLoginModal();
-    
+
     // Create a simple input modal for nsec
     const feed = document.getElementById('feed');
     if (feed) {
@@ -110,24 +107,24 @@ export function showLoginWithNsec() {
                 <p style="color: #ccc; margin-bottom: 30px;">
                     Enter your nsec private key to login
                 </p>
-                
+
                 <div style="margin-bottom: 30px;">
-                    <input type="password" id="nsecInput" placeholder="nsec1..." 
+                    <input type="password" id="nsecInput" placeholder="nsec1..."
                            style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 20px;"
                            onkeypress="if(event.key==='Enter') loginWithNsec()">
-                    
+
                     <div style="display: flex; gap: 12px; justify-content: center;">
-                        <button onclick="loginWithNsec()" 
+                        <button onclick="loginWithNsec()"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold;">
                             🔑 Login
                         </button>
-                        <button onclick="showAuthUI()" 
+                        <button onclick="showAuthUI()"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
                             ← Back
                         </button>
                     </div>
                 </div>
-                
+
                 <div style="font-size: 12px; color: #666; text-align: left; max-width: 400px; margin: 0 auto;">
                     <p><strong>Security Tips:</strong></p>
                     <ul style="text-align: left; margin: 10px 0;">
@@ -138,12 +135,126 @@ export function showLoginWithNsec() {
                 </div>
             </div>
         `;
-        
+
         // Focus the input field
         setTimeout(() => {
             const input = document.getElementById('nsecInput');
             if (input) input.focus();
         }, 100);
+    }
+}
+
+// Show NIP-46 (Amber) login interface
+export function showLoginWithNIP46() {
+    hideLoginModal();
+
+    // Create a simple input modal for bunker URI
+    const feed = document.getElementById('feed');
+    if (feed) {
+        feed.innerHTML = `
+            <div id="nip46LoginContainer" style="padding: 40px; text-align: center; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #FF6600; margin-bottom: 30px;">📱 Login with Amber (NIP-46)</h2>
+                <p style="color: #ccc; margin-bottom: 30px;">
+                    Connect to your Amber signer app for secure remote signing
+                </p>
+
+                <div id="nip46Step1" style="margin-bottom: 30px;">
+                    <input type="text" id="bunkerInput" placeholder="bunker://..."
+                           style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 13px; margin-bottom: 20px; font-family: monospace;"
+                           onkeypress="if(event.key==='Enter') connectToAmber()">
+
+                    <div style="display: flex; gap: 12px; justify-content: center;">
+                        <button id="connectBtn" onclick="connectToAmber()"
+                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold;">
+                            📱 Connect to Amber
+                        </button>
+                        <button onclick="showAuthUI()"
+                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
+                            ← Back
+                        </button>
+                    </div>
+                </div>
+
+                <div id="nip46Step2" style="display: none; margin-bottom: 30px;">
+                    <div style="background: rgba(76, 175, 80, 0.1); padding: 20px; border-radius: 12px; border-left: 3px solid #4CAF50; margin-bottom: 20px;">
+                        <p style="color: #4CAF50; font-weight: bold; margin-bottom: 8px;">✅ Amber Approved Connection</p>
+                        <p style="color: #ccc; font-size: 14px;">Click the Login button below to complete your login</p>
+                    </div>
+
+                    <button id="loginBtn" onclick="completeAmberLogin()"
+                            style="padding: 16px 32px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #4CAF50, #45a049); color: #000; font-weight: bold; font-size: 16px; width: 100%; max-width: 300px;">
+                        🔓 Complete Login
+                    </button>
+                </div>
+
+                <div style="font-size: 13px; color: #666; text-align: left; background: rgba(255, 102, 0, 0.1); padding: 20px; border-radius: 12px; border-left: 3px solid #FF6600; margin-top: 30px;">
+                    <p style="color: #FF6600; font-weight: bold; margin-bottom: 12px;">📱 How to get your bunker URI from Amber:</p>
+                    <ol style="text-align: left; margin: 0; padding-left: 20px; line-height: 1.8;">
+                        <li>Open the <strong>Amber app</strong> on your Android device</li>
+                        <li>Go to <strong>Settings → Nostr Connect</strong></li>
+                        <li>Tap <strong>"Create Connection"</strong> or <strong>"Add"</strong></li>
+                        <li>Copy the connection URI (starts with <code style="background: #000; padding: 2px 6px; border-radius: 4px; color: #FF6600;">bunker://</code>)</li>
+                        <li>Paste it in the field above</li>
+                    </ol>
+                    <p style="margin-top: 16px; color: #ccc;">
+                        <strong>Note:</strong> Keep Amber running on your phone. You'll need to approve each request on your device.
+                    </p>
+                </div>
+            </div>
+        `;
+
+        // Focus the input field
+        setTimeout(() => {
+            const input = document.getElementById('bunkerInput');
+            if (input) input.focus();
+        }, 100);
+    }
+}
+
+// Show NIP-46 (nsec.app) login interface using nostr-login library
+export function showLoginWithNsecApp() {
+    hideLoginModal();
+
+    try {
+        // Launch the nostr-login widget by dispatching custom event
+        // This will show a popup/modal for OAuth-like authentication with nsec.app
+        document.dispatchEvent(new CustomEvent('nlLaunch', {
+            detail: 'welcome'
+        }));
+
+        // Show a loading message in the feed area while waiting for OAuth
+        const feed = document.getElementById('feed');
+        if (feed) {
+            feed.innerHTML = `
+                <div id="nsecAppLoginContainer" style="padding: 40px; text-align: center; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #8B5CF6; margin-bottom: 30px;">🌐 Connecting to nsec.app...</h2>
+                    <p style="color: #ccc; margin-bottom: 30px;">
+                        Complete the login in the popup window
+                    </p>
+
+                    <div style="font-size: 13px; color: #666; text-align: left; background: rgba(139, 92, 246, 0.1); padding: 20px; border-radius: 12px; border-left: 3px solid #8B5CF6; margin-top: 30px;">
+                        <p style="color: #8B5CF6; font-weight: bold; margin-bottom: 12px;">🌐 Using nsec.app OAuth login:</p>
+                        <ul style="text-align: left; margin: 0; padding-left: 20px; line-height: 1.8;">
+                            <li>A popup window will appear with nsec.app login</li>
+                            <li>Login or create account (works on desktop, Android, iOS!)</li>
+                            <li>Authorize Nosmero to access your account</li>
+                            <li>You'll be redirected back and logged in automatically</li>
+                        </ul>
+                        <p style="margin-top: 16px; color: #ccc;">
+                            <strong>Note:</strong> This uses OAuth-like flow - much simpler than manual bunker URI!
+                        </p>
+                    </div>
+
+                    <button onclick="showAuthUI()" style="margin-top: 20px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
+                        ← Back to Login Options
+                    </button>
+                </div>
+            `;
+        }
+
+    } catch (error) {
+        console.error('❌ Failed to launch nostr-login:', error);
+        alert('Failed to launch nsec.app login: ' + error.message);
     }
 }
 
@@ -266,10 +377,9 @@ function generateMoneroQRCode(container, address, amount, postId) {
         if (typeof QRCode === 'undefined') {
             throw new Error('QRCode library not loaded');
         }
-        
+
         container.innerHTML = '<div id="qrCode"></div>';
-        console.log('Generating QR code for:', moneroUri);
-        
+
         // Try to generate QR code with description
         try {
             new QRCode(document.getElementById('qrCode'), {
@@ -618,27 +728,13 @@ export async function openThreadView(eventId) {
         
         // Update current page state
         StateModule.setCurrentPage('thread');
-        
+
         // Get the main note - check both eventCache and posts array
-        console.log('Searching for note ID:', eventId);
-        console.log('EventCache size:', Object.keys(StateModule.eventCache).length);
-        console.log('Posts array size:', StateModule.posts.length);
-        
-        // Debug: log first few post IDs
-        if (StateModule.posts.length > 0) {
-            console.log('Sample post IDs:', StateModule.posts.slice(0, 3).map(p => p.id));
-        }
-        
         let mainPost = StateModule.eventCache[eventId] || StateModule.posts.find(p => p.id === eventId);
-        
+
         // If found in posts array but not in eventCache, add it to eventCache
         if (mainPost && !StateModule.eventCache[eventId]) {
             StateModule.eventCache[eventId] = mainPost;
-        }
-        
-        console.log('Found note:', !!mainPost);
-        if (mainPost) {
-            console.log('Note content preview:', mainPost.content?.substring(0, 100));
         }
         
         if (!mainPost) {
@@ -722,8 +818,6 @@ export async function openThreadView(eventId) {
         const relays = Relays.getActiveRelays();
         
         if (pool && relays.length) {
-            console.log('Fetching replies from relays for thread:', eventId);
-            
             await new Promise((resolve) => {
                 const sub = pool.subscribeMany(relays, [
                     {
@@ -738,7 +832,6 @@ export async function openThreadView(eventId) {
                             StateModule.eventCache[event.id] = event; // Cache it
                             threadPosts.push(event);
                             processedIds.add(event.id);
-                            console.log('Found additional reply:', event.id);
                         }
                     },
                     oneose: () => {
@@ -756,8 +849,6 @@ export async function openThreadView(eventId) {
             
             // Also fetch replies to the parent if this is a reply
             if (parentId) {
-                console.log('Fetching additional replies to parent:', parentId);
-                
                 await new Promise((resolve) => {
                     const sub = pool.subscribeMany(relays, [
                         {
@@ -772,7 +863,6 @@ export async function openThreadView(eventId) {
                                 StateModule.eventCache[event.id] = event; // Cache it
                                 threadPosts.push(event);
                                 processedIds.add(event.id);
-                                console.log('Found additional reply to parent:', event.id);
                             }
                         },
                         oneose: () => {
@@ -793,13 +883,11 @@ export async function openThreadView(eventId) {
         // Fetch profiles for all thread participants
         const allPubkeys = threadPosts.map(post => post.pubkey).filter(pk => pk);
         if (allPubkeys.length > 0) {
-            console.log('Fetching profiles for thread participants:', allPubkeys.length);
             await Posts.fetchProfiles(allPubkeys);
         }
 
         // Fetch Monero addresses for all thread participants
         if (window.getUserMoneroAddress && allPubkeys.length > 0) {
-            console.log('💰 Fetching Monero addresses for thread participants:', allPubkeys.length);
             await Promise.all(
                 allPubkeys.map(async (pubkey) => {
                     try {
@@ -917,9 +1005,7 @@ async function fetchUserPosts(pubkey) {
         
         const userPostsContainer = document.getElementById('userPostsContainer');
         if (!userPostsContainer) return;
-        
-        console.log('Fetching posts for user:', pubkey);
-        
+
         const userPosts = [];
         let hasReceivedPosts = false;
         let moneroAddressesFetched = false; // Track if we already fetched Monero addresses
@@ -965,7 +1051,6 @@ async function fetchUserPosts(pubkey) {
             },
             async oneose() {
                 clearTimeout(timeout);
-                console.log(`Fetched ${userPosts.length} posts for user`);
                 sub.close();
 
                 if (userPosts.length === 0) {
@@ -1021,12 +1106,10 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false) {
 
         // Fetch Monero addresses for all post authors (only once, after all posts loaded)
         if (fetchMoneroAddresses && window.getUserMoneroAddress) {
-            console.log('💰 Fetching Monero addresses for profile page posts, authors:', allAuthors.length);
             await Promise.all(
                 allAuthors.map(async (pubkey) => {
                     try {
                         const moneroAddr = await window.getUserMoneroAddress(pubkey);
-                        console.log('💰 Profile page author', pubkey.slice(0, 8), 'Monero address:', moneroAddr ? moneroAddr.slice(0, 10) + '...' : 'none');
                         if (StateModule.profileCache[pubkey]) {
                             StateModule.profileCache[pubkey].monero_address = moneroAddr || null;
                         }
@@ -1084,8 +1167,6 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false) {
 
 export async function viewUserProfilePage(pubkey) {
     try {
-        console.log('Viewing user profile:', pubkey);
-        
         // Import required modules
         const [StateModule, Posts] = await Promise.all([
             import('./state.js'),
@@ -1124,10 +1205,8 @@ export async function viewUserProfilePage(pubkey) {
         
         // Update current page state
         StateModule.setCurrentPage('profile');
-        
-        // Always fetch fresh profile to ensure we have latest Lightning address
-        console.log('Fetching fresh profile for user:', pubkey);
 
+        // Always fetch fresh profile to ensure we have latest Lightning address
         // Clear any cached profile to force fresh fetch
         delete StateModule.profileCache[pubkey];
 
@@ -1144,19 +1223,7 @@ export async function viewUserProfilePage(pubkey) {
                 about: 'No profile information available'
             };
         }
-        
-        // Debug: log the profile data to see what fields are available
-        console.log('Profile data for display:', {
-            pubkey: userProfile.pubkey,
-            name: userProfile.name,
-            about: userProfile.about,
-            website: userProfile.website,
-            nip05: userProfile.nip05,
-            lud16: userProfile.lud16,
-            picture: userProfile.picture,
-            allFields: Object.keys(userProfile)
-        });
-        
+
         // Render profile page
         profilePage.innerHTML = `
             <div style="max-width: 800px; margin: 0 auto; padding: 20px; word-wrap: break-word; overflow-wrap: break-word;">
@@ -1308,12 +1375,9 @@ export async function loadFollowingList() {
                             });
                             
                             followingList = followingFromRelay;
-                            
+
                             // Update global state
-                            console.log('=== UPDATING GLOBAL STATE ===');
-                            console.log('Setting followingUsers to:', followingFromRelay);
                             StateModule.setFollowingUsers(followingFromRelay);
-                            console.log('Global State.followingUsers now has size:', StateModule.followingUsers.size);
 
                             // Clear cached home feed since follow list changed
                             StateModule.setHomeFeedCache({
@@ -1321,12 +1385,10 @@ export async function loadFollowingList() {
                                 timestamp: 0,
                                 isLoading: false
                             });
-                            console.log('✓ Cleared home feed cache - will load fresh posts from user follows');
 
                             // Save to localStorage with timestamp
                             localStorage.setItem('following-list', JSON.stringify([...followingList]));
                             localStorage.setItem('following-list-timestamp', Date.now().toString());
-                            console.log('✓ Loaded following list from relays:', followingList.size, 'users');
 
                             // Note: Home feed now handles fresh following list fetching automatically via streaming approach
                         } catch (error) {
@@ -1387,15 +1449,11 @@ export async function toggleFollow(pubkey) {
         const currentFollowing = new Set(StateModule.followingUsers || []);
         const isCurrentlyFollowing = currentFollowing.has(pubkey);
 
-        console.log(`🔄 Toggle follow for ${pubkey.slice(0, 8)}: currently following ${currentFollowing.size} users`);
-
         // Update following set
         if (isCurrentlyFollowing) {
             currentFollowing.delete(pubkey);
-            console.log(`➖ Unfollowing ${pubkey.slice(0, 8)} - now following ${currentFollowing.size} users`);
         } else {
             currentFollowing.add(pubkey);
-            console.log(`➕ Following ${pubkey.slice(0, 8)} - now following ${currentFollowing.size} users`);
         }
 
         // Update global state immediately
@@ -1413,8 +1471,7 @@ export async function toggleFollow(pubkey) {
 
         // Create contact list event (kind 3) with COMPLETE list
         const tags = [...currentFollowing].map(pk => ['p', pk]);
-        console.log(`📝 Publishing contact list with ${tags.length} follows`);
-        
+
         const event = {
             kind: 3,
             created_at: Math.floor(Date.now() / 1000),
@@ -1427,24 +1484,19 @@ export async function toggleFollow(pubkey) {
         const Utils = await import('./utils.js');
         const signedEvent = await Utils.signEvent(event);
         await StateModule.pool.publish(writeRelays, signedEvent);
-        
+
         const action = isCurrentlyFollowing ? 'unfollowed' : 'followed';
-        console.log(`${action} user:`, pubkey);
-        
+
         // Show notification (assuming Utils is available)
         try {
             const Utils = await import('./utils.js');
             Utils.showNotification(`User ${action}!`, 'success');
         } catch (error) {
-            console.log('Notification not available');
+            // Notification not available
         }
-        
-        // No cache clearing needed - real-time system always fetches fresh data
-        console.log('✓ Follow/unfollow action completed - real-time feed will update automatically');
 
         // Refresh home feed if user is currently on home page
         if (StateModule.currentPage === 'home') {
-            console.log('🔄 Force refreshing home feed after follow/unfollow action');
             import('./posts.js').then(Posts => {
                 Posts.loadFeedRealtime().catch(error => console.error('Error refreshing home feed:', error));
             });
@@ -1477,8 +1529,6 @@ async function loadFollowCounts(pubkey) {
         if (followersElement) {
             followersElement.querySelector('div:first-child').textContent = followersCount;
         }
-        
-        console.log(`Profile ${pubkey.substring(0, 8)} - Following: ${followingCount}, Followers: ${followersCount}`);
     } catch (error) {
         console.error('Error loading follow counts:', error);
     }
@@ -1508,8 +1558,6 @@ async function getFollowingCount(pubkey) {
                         // Count 'p' tags (users being followed)
                         const pTags = event.tags.filter(tag => tag[0] === 'p' && tag[1]);
                         count = pTags.length;
-                        console.log(`🔍 Profile following count for ${pubkey.slice(0, 8)}: found ${count} users`);
-                        console.log('🔍 First 5 p-tags:', pTags.slice(0, 5).map(tag => tag[1].slice(0, 8)));
                     } catch (error) {
                         console.error('Error parsing following list:', error);
                     }
@@ -2047,8 +2095,6 @@ export function copyToClipboard(text) {
 
 // Add a zap to the queue (max 20 items)
 function addToZapQueue(postId, authorName, moneroAddress) {
-    console.log('Adding to zap queue:', postId, authorName, moneroAddress);
-
     // Import state
     const StateModule = window.NostrState || {};
     let queue = StateModule.zapQueue || [];
@@ -2084,7 +2130,6 @@ function addToZapQueue(postId, authorName, moneroAddress) {
     // Update queue indicator
     updateZapQueueIndicator();
 
-    console.log(`✅ Added to queue. Queue now has ${queue.length} items.`);
     return true;
 }
 
@@ -2368,6 +2413,8 @@ window.showLoginModal = showLoginModal;
 window.hideLoginModal = hideLoginModal;
 window.showCreateAccount = showCreateAccount;
 window.showLoginWithNsec = showLoginWithNsec;
+window.showLoginWithNIP46 = showLoginWithNIP46;
+window.showLoginWithNsecApp = showLoginWithNsecApp;
 window.showGeneratedKeyModal = showGeneratedKeyModal;
 window.closeKeyModal = closeKeyModal;
 window.openZapModal = openZapModal;
