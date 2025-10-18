@@ -2,7 +2,7 @@
 // Phase 7: Messages & Notifications
 // Functions for direct messages, conversations, notifications, and real-time subscriptions
 
-import { showNotification, escapeHtml, signEvent } from './utils.js';
+import { showNotification, escapeHtml, parseContent, signEvent } from './utils.js';
 import { encryptMessage, decryptMessage } from './crypto.js';
 import * as State from './state.js';
 import * as Relays from './relays.js';
@@ -1125,8 +1125,8 @@ export function renderNotifications(groupedNotifications = []) {
                 <!-- Original Note -->
                 <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #333;">
                     <div style="color: #888; font-size: 14px; margin-bottom: 8px;">Your note:</div>
-                    <div style="color: ${isNoteFound ? '#fff' : '#888'}; line-height: 1.4; font-size: 15px; ${!isNoteFound ? 'font-style: italic;' : ''}">
-                        ${escapeHtml(originalContent)}
+                    <div style="color: ${isNoteFound ? '#fff' : '#888'}; line-height: 1.4; font-size: 15px; ${!isNoteFound ? 'font-style: italic;' : ''}; word-wrap: break-word; overflow-wrap: break-word;">
+                        ${parseContent(originalContent)}
                     </div>
                 </div>
                 
@@ -1146,7 +1146,7 @@ export function renderNotifications(groupedNotifications = []) {
                             return `
                                 <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid #FF6600;">
                                     <div style="color: #FF6600; font-size: 13px; font-weight: bold; margin-bottom: 4px; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${reply.pubkey}')">${displayName}:</div>
-                                    <div style="color: #ccc; font-size: 14px; line-height: 1.3;">${escapeHtml(reply.content)}</div>
+                                    <div style="color: #ccc; font-size: 14px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word;">${parseContent(reply.content)}</div>
                                 </div>
                             `;
                         }).join('')}
