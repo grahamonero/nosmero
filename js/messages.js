@@ -3,12 +3,11 @@
 // Functions for direct messages, conversations, notifications, and real-time subscriptions
 
 import { showNotification, escapeHtml, parseContent, signEvent } from './utils.js';
-import { encryptMessage, decryptMessage } from './crypto.js';
+import { encryptMessage, decryptMessage, wrapGiftMessage, unwrapGiftMessage } from './crypto.js';
 import * as State from './state.js';
 import * as Relays from './relays.js';
 
-const { 
-    relays, 
+const {
     profileCache,
     setCurrentPage,
     currentPage,
@@ -166,14 +165,41 @@ export async function loadMessages() {
             return;
         }
         
-        // Subscribe to encrypted DMs
-        messagesSubscription = State.pool.subscribeMany(relays, [
-            { kinds: [4], authors: [State.publicKey], limit: 500 }, // Sent messages
-            { kinds: [4], '#p': [State.publicKey], limit: 500 }     // Received messages
+        // Subscribe to encrypted DMs (both NIP-04 and NIP-17)
+        // Use read relays for receiving messages
+        const readRelays = Relays.getReadRelays();
+        let relaysToUse = readRelays.length > 0 ? readRelays : State.relays;
+
+        // Always include Nosmero relay for NIP-17 DMs
+        const nosmeroRelay = window.location.port === '8080'
+            ? 'ws://nosmero.com:8080/nip78-relay'
+            : 'wss://nosmero.com/nip78-relay';
+
+        if (!relaysToUse.includes(nosmeroRelay)) {
+            relaysToUse = [...relaysToUse, nosmeroRelay];
+            console.log('📨 Added Nosmero relay for receiving NIP-17 DMs');
+        }
+
+        console.log('Subscribing to DMs on relays:', relaysToUse);
+        console.log('Read relays:', readRelays);
+        console.log('State.relays:', State.relays);
+        console.log('User pubkey:', State.publicKey);
+
+        // Get timestamp for messages from last 30 days
+        const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+
+        messagesSubscription = State.pool.subscribeMany(relaysToUse, [
+            // NIP-04 (legacy encrypted DMs)
+            { kinds: [4], authors: [State.publicKey], limit: 500 }, // Sent NIP-04 messages
+            { kinds: [4], '#p': [State.publicKey], limit: 500 },     // Received NIP-04 messages
+            // NIP-17 (modern gift-wrapped DMs)
+            // NOTE: NIP-17 messages don't have #p tags (recipient is hidden for privacy)
+            // We must fetch recent kind 1059 and try unwrapping each one (silently ignore failures)
+            { kinds: [1059], since: thirtyDaysAgo, limit: 100 }   // Recent NIP-17 messages only
         ], {
             onevent(event) {
                 if (!processedIds.has(event.id)) {
-                    console.log('Received DM event:', event.id, 'from:', event.pubkey);
+                    console.log('📨 Received DM event:', event.id, 'kind:', event.kind, 'from:', event.pubkey);
                     dmEvents.push(event);
                     processedIds.add(event.id);
                     
@@ -212,58 +238,94 @@ export async function processMessages(events) {
     console.log('Processing', events.length, 'message events');
     conversations = {};
     const participantPubkeys = new Set();
-    
+
     for (const event of events) {
         try {
-            console.log('Processing event:', event.id, 'from:', event.pubkey);
-            
-            // Determine the other party's pubkey
-            const otherPubkey = event.pubkey === State.publicKey ? 
-                event.tags.find(t => t[0] === 'p')?.[1] : 
-                event.pubkey;
-            
-            if (!otherPubkey) {
-                console.warn('No recipient found for message:', event.id);
+            console.log('Processing event:', event.id, 'kind:', event.kind, 'from:', event.pubkey);
+
+            let otherPubkey, decryptedContent, encryptionMethod, realTimestamp;
+
+            // Handle NIP-17 gift-wrapped messages (kind 1059)
+            if (event.kind === 1059) {
+                try {
+                    const unwrapped = unwrapGiftMessage(event, State.privateKey);
+
+                    if (!unwrapped || !unwrapped.content) {
+                        // Not for us, silently skip
+                        continue;
+                    }
+
+                    // The unwrapped message contains the actual content and sender info
+                    decryptedContent = unwrapped.content;
+                    otherPubkey = unwrapped.pubkey;
+                    encryptionMethod = 'NIP-17';
+                    realTimestamp = unwrapped.created_at; // Use real timestamp from unwrapped rumor
+
+                    console.log('✅ Unwrapped NIP-17 message from:', otherPubkey);
+                } catch (error) {
+                    // Not for us (invalid MAC/base64), silently skip
+                    continue;
+                }
+            }
+            // Handle NIP-04 encrypted messages (kind 4)
+            else if (event.kind === 4) {
+                // Determine the other party's pubkey
+                otherPubkey = event.pubkey === State.publicKey ?
+                    event.tags.find(t => t[0] === 'p')?.[1] :
+                    event.pubkey;
+
+                if (!otherPubkey) {
+                    console.warn('No recipient found for NIP-04 message:', event.id);
+                    continue;
+                }
+
+                // Decrypt the NIP-04 message
+                decryptedContent = await decryptMessage(event.content, otherPubkey, State.privateKey);
+                encryptionMethod = 'NIP-04';
+                realTimestamp = event.created_at; // Use event timestamp for NIP-04
+
+                if (!decryptedContent) {
+                    console.warn('Failed to decrypt NIP-04 message:', event.id);
+                    continue;
+                }
+            }
+            else {
+                console.warn('Unknown message kind:', event.kind);
                 continue;
             }
-            
+
             // Collect participant pubkeys for profile fetching
             participantPubkeys.add(otherPubkey);
-            
-            // Decrypt the message
-            const decryptedContent = await decryptMessage(event.content, otherPubkey, State.privateKey);
-            
-            if (!decryptedContent) {
-                console.warn('Failed to decrypt message:', event.id);
-                continue;
-            }
-            
+
             // Initialize conversation if needed
             if (!conversations[otherPubkey]) {
                 conversations[otherPubkey] = {
                     messages: [],
                     lastMessage: null,
-                    profile: profileCache[otherPubkey] || null
+                    profile: profileCache[otherPubkey] || null,
+                    unread: 0
                 };
             }
-            
+
             // Create message object
             const message = {
                 id: event.id,
                 content: decryptedContent,
-                timestamp: event.created_at,
-                sent: event.pubkey === State.publicKey,
+                timestamp: realTimestamp,
+                // For NIP-17, check the unwrapped otherPubkey; for NIP-04, check event.pubkey
+                sent: encryptionMethod === 'NIP-17' ? otherPubkey !== State.publicKey : event.pubkey === State.publicKey,
+                encryptionMethod: encryptionMethod, // Store which encryption was used
                 event: event
             };
-            
+
             conversations[otherPubkey].messages.push(message);
-            
+
             // Update last message if this is newer
-            if (!conversations[otherPubkey].lastMessage || 
+            if (!conversations[otherPubkey].lastMessage ||
                 message.timestamp > conversations[otherPubkey].lastMessage.timestamp) {
                 conversations[otherPubkey].lastMessage = message;
             }
-            
+
         } catch (error) {
             console.error('Error processing message event:', event.id, error);
         }
@@ -287,54 +349,95 @@ export async function processMessages(events) {
 // Process a single message (for real-time updates)
 export async function processSingleMessage(event) {
     try {
-        console.log('Processing single message:', event.id);
-        
-        const otherPubkey = event.pubkey === State.publicKey ? 
-            event.tags.find(t => t[0] === 'p')?.[1] : 
-            event.pubkey;
-        
-        if (!otherPubkey) return;
-        
-        const decryptedContent = await decryptMessage(event.content, otherPubkey, State.privateKey);
-        if (!decryptedContent) return;
-        
+        console.log('Processing single message:', event.id, 'kind:', event.kind);
+
+        let otherPubkey, decryptedContent, encryptionMethod, realTimestamp;
+
+        // Handle NIP-17 gift-wrapped messages (kind 1059)
+        if (event.kind === 1059) {
+            try {
+                const unwrapped = unwrapGiftMessage(event, State.privateKey);
+
+                if (!unwrapped || !unwrapped.content) {
+                    // Not for us, silently skip
+                    return;
+                }
+
+                decryptedContent = unwrapped.content;
+                otherPubkey = unwrapped.pubkey;
+                encryptionMethod = 'NIP-17';
+                realTimestamp = unwrapped.created_at; // Use real timestamp from unwrapped rumor
+
+                console.log('✅ Unwrapped real-time NIP-17 message from:', otherPubkey);
+            } catch (error) {
+                // Not for us (invalid MAC/base64), silently skip
+                return;
+            }
+        }
+        // Handle NIP-04 encrypted messages (kind 4)
+        else if (event.kind === 4) {
+            otherPubkey = event.pubkey === State.publicKey ?
+                event.tags.find(t => t[0] === 'p')?.[1] :
+                event.pubkey;
+
+            if (!otherPubkey) return;
+
+            decryptedContent = await decryptMessage(event.content, otherPubkey, State.privateKey);
+            encryptionMethod = 'NIP-04';
+            realTimestamp = event.created_at; // Use event timestamp for NIP-04
+
+            if (!decryptedContent) return;
+        }
+        else {
+            console.warn('Unknown real-time message kind:', event.kind);
+            return;
+        }
+
         // Initialize conversation if needed
         if (!conversations[otherPubkey]) {
             conversations[otherPubkey] = {
                 messages: [],
                 lastMessage: null,
-                profile: State.profileCache[otherPubkey] || null
+                profile: State.profileCache[otherPubkey] || null,
+                unread: 0
             };
-            
+
             // Fetch profile if we don't have it
             if (!State.profileCache[otherPubkey]) {
                 await fetchConversationProfiles([otherPubkey]);
             }
         }
-        
+
         // Check if message already exists
         const exists = conversations[otherPubkey].messages.some(m => m.id === event.id);
         if (exists) return;
-        
+
         const message = {
             id: event.id,
             content: decryptedContent,
-            timestamp: event.created_at,
-            sent: event.pubkey === State.publicKey,
+            timestamp: realTimestamp,
+            // For NIP-17, check the unwrapped otherPubkey; for NIP-04, check event.pubkey
+            sent: encryptionMethod === 'NIP-17' ? otherPubkey !== State.publicKey : event.pubkey === State.publicKey,
+            encryptionMethod: encryptionMethod,
             event: event
         };
-        
+
         conversations[otherPubkey].messages.push(message);
         conversations[otherPubkey].messages.sort((a, b) => a.timestamp - b.timestamp);
         conversations[otherPubkey].lastMessage = message;
-        
+
+        // Increment unread count if it's a received message and not currently viewing this conversation
+        if (!message.sent && currentConversation !== otherPubkey) {
+            conversations[otherPubkey].unread = (conversations[otherPubkey].unread || 0) + 1;
+        }
+
         // Update UI if viewing this conversation
         if (currentConversation === otherPubkey) {
             selectConversation(otherPubkey);
         }
-        
+
         renderConversations();
-        
+
     } catch (error) {
         console.error('Error processing single message:', error);
     }
@@ -370,17 +473,20 @@ export function renderConversations() {
         const profile = conv.profile || State.profileCache[pubkey] || { name: 'Loading...', picture: null };
         const lastMsg = conv.lastMessage;
         const time = lastMsg ? formatTime(lastMsg.timestamp) : '';
-        const preview = lastMsg ? (lastMsg.content.length > 50 ? 
+        const preview = lastMsg ? (lastMsg.content.length > 50 ?
             lastMsg.content.substring(0, 50) + '...' : lastMsg.content) : '';
-        
+
         const displayName = profile.name || profile.display_name || 'Unknown User';
-        
+        const unreadBadge = (conv.unread && conv.unread > 0) ?
+            `<div style="position: absolute; top: 12px; right: 12px; width: 10px; height: 10px; background: #FF6600; border-radius: 50%; box-shadow: 0 0 4px #FF6600;"></div>` : '';
+
         return `
-            <div class="conversation-item ${currentConversation === pubkey ? 'active' : ''}" onclick="selectConversation('${pubkey}', this)">
+            <div class="conversation-item ${currentConversation === pubkey ? 'active' : ''}" onclick="selectConversation('${pubkey}', this)" style="position: relative;">
+                ${unreadBadge}
                 <div class="conversation-time">${time}</div>
-                ${profile.picture ? 
+                ${profile.picture ?
                     `<img src="${profile.picture}" class="conversation-avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                     <div class="conversation-avatar-placeholder" style="display: none;">${displayName.charAt(0).toUpperCase()}</div>` : 
+                     <div class="conversation-avatar-placeholder" style="display: none;">${displayName.charAt(0).toUpperCase()}</div>` :
                     `<div class="conversation-avatar-placeholder">${displayName.charAt(0).toUpperCase()}</div>`
                 }
                 <div class="conversation-info">
@@ -395,7 +501,12 @@ export function renderConversations() {
 // Select and display a conversation
 export function selectConversation(pubkey, clickedElement = null) {
     currentConversation = pubkey;
-    
+
+    // Clear unread count when opening conversation
+    if (conversations[pubkey]) {
+        conversations[pubkey].unread = 0;
+    }
+
     // Update active state in sidebar
     document.querySelectorAll('.conversation-item').forEach(item => {
         item.classList.remove('active');
@@ -418,22 +529,29 @@ export function selectConversation(pubkey, clickedElement = null) {
     const displayName = profile.name || profile.display_name || 'Unknown User';
     messageHeader.innerHTML = `<span>💬 ${displayName}</span>`;
     
-    // Show messages
+    // Show messages with encryption method badges
     messageThread.innerHTML = conversation.messages.map(msg => {
         const time = formatTime(msg.timestamp);
+        const encryptionBadge = msg.encryptionMethod === 'NIP-17' ?
+            '<span style="font-size: 10px; background: linear-gradient(135deg, #00ff00, #00aa00); color: #000; padding: 2px 6px; border-radius: 4px; margin-left: 8px; font-weight: bold;">🔒 NIP-17</span>' :
+            '<span style="font-size: 10px; background: #666; color: #fff; padding: 2px 6px; border-radius: 4px; margin-left: 8px;">🔓 NIP-04</span>';
+
         return `
-            <div class="message ${msg.sent ? 'sent' : 'received'}">
+            <div class="message-bubble ${msg.sent ? 'sent' : 'received'}">
                 <div class="message-content">${escapeHtml(msg.content)}</div>
-                <div class="message-time">${time}</div>
+                <div class="message-time">${time}${encryptionBadge}</div>
             </div>
         `;
     }).join('');
     
     // Show composer
     messageComposer.style.display = 'flex';
-    
+
     // Scroll to bottom
     messageThread.scrollTop = messageThread.scrollHeight;
+
+    // Re-render conversations to clear orange dot
+    renderConversations();
 }
 
 // Start new message
@@ -465,7 +583,8 @@ export function startNewMessage() {
             conversations[recipientPubkey] = {
                 messages: [],
                 lastMessage: null,
-                profile: profileCache[recipientPubkey] || null
+                profile: profileCache[recipientPubkey] || null,
+                unread: 0
             };
         }
         
@@ -478,28 +597,72 @@ export function startNewMessage() {
     }
 }
 
-// Send encrypted message
+// Send encrypted message (using NIP-17 by default)
 export async function sendMessage() {
     if (!currentConversation) return;
-    
+
     const input = document.getElementById('messageInput');
     if (!input) return;
-    
+
     const content = input.value.trim();
     if (!content) return;
-    
+
     try {
-        let signedEvent;
-        
-        if (State.privateKey === 'extension') {
-            // Use extension for encryption and signing
+        let signedEvent, encryptionMethod;
+
+        // Check if pool is initialized
+        if (!State.pool) {
+            console.error('Pool not initialized when sending message');
+            showNotification('Connection error: Pool not ready', 'error');
+            return;
+        }
+
+        // Check if NIP-17 is enabled in settings
+        const useNip17 = localStorage.getItem('use-nip17-dms') === 'true';
+
+        // Use NIP-17 if enabled and not using extension
+        if (useNip17 && State.privateKey !== 'extension') {
+            console.log('Sending NIP-17 gift-wrapped message to:', currentConversation);
+
+            try {
+                // Create NIP-17 gift-wrapped message
+                signedEvent = wrapGiftMessage(content, State.privateKey, currentConversation);
+                encryptionMethod = 'NIP-17';
+
+                console.log('Created NIP-17 gift-wrapped event:', signedEvent.id);
+            } catch (error) {
+                console.error('NIP-17 wrapping failed, falling back to NIP-04:', error);
+                // Fallback to NIP-04 if NIP-17 fails
+                const encrypted = await encryptMessage(content, currentConversation, State.privateKey);
+                const { verifyEvent } = window.NostrTools;
+
+                const eventTemplate = {
+                    kind: 4,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [['p', currentConversation]],
+                    content: encrypted
+                };
+
+                signedEvent = await signEvent(eventTemplate);
+                const isValid = verifyEvent(signedEvent);
+
+                if (!isValid) {
+                    throw new Error('Failed to sign NIP-04 message');
+                }
+
+                encryptionMethod = 'NIP-04';
+            }
+        } else {
+            // Extensions don't support NIP-17 yet, use NIP-04
+            console.log('Using extension, sending NIP-04 message');
+
             if (!window.nostr) {
                 alert('Nostr extension not found. Please reconnect.');
                 return;
             }
-            
+
             const encrypted = await window.nostr.nip04.encrypt(currentConversation, content);
-            
+
             const eventTemplate = {
                 kind: 4,
                 created_at: Math.floor(Date.now() / 1000),
@@ -507,66 +670,98 @@ export async function sendMessage() {
                 content: encrypted,
                 pubkey: State.publicKey
             };
-            
+
             signedEvent = await window.nostr.signEvent(eventTemplate);
-        } else {
-            // Use local key for encryption and signing
-            const encrypted = await encryptMessage(content, currentConversation, State.privateKey);
+            encryptionMethod = 'NIP-04';
+        }
 
-            const { verifyEvent } = window.NostrTools;
+        // Publish to relays (use write relays)
+        const writeRelays = Relays.getWriteRelays();
+        let relaysToUse = writeRelays.length > 0 ? writeRelays : State.relays;
 
-            const eventTemplate = {
-                kind: 4,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [['p', currentConversation]],
-                content: encrypted
-            };
+        // If using NIP-17, add Nosmero relay for better delivery
+        if (encryptionMethod === 'NIP-17') {
+            const nosmeroRelay = window.location.port === '8080'
+                ? 'ws://nosmero.com:8080/nip78-relay'
+                : 'wss://nosmero.com/nip78-relay';
 
-            signedEvent = await signEvent(eventTemplate);
-            const isValid = verifyEvent(signedEvent);
-
-            if (!isValid) {
-                throw new Error('Failed to sign message');
+            // Add Nosmero relay if not already in list
+            if (!relaysToUse.includes(nosmeroRelay)) {
+                relaysToUse = [nosmeroRelay, ...relaysToUse];
+                console.log('📨 Added Nosmero relay for NIP-17 DM:', nosmeroRelay);
             }
         }
-        
-        // Check if pool is initialized
-        if (!State.pool) {
-            console.error('Pool not initialized when sending message');
-            showNotification('Connection error: Pool not ready', 'error');
-            return;
+
+        try {
+            const publishPromises = State.pool.publish(relaysToUse, signedEvent);
+            console.log('Publishing to relays:', relaysToUse);
+            console.log('Event kind:', signedEvent.kind, 'ID:', signedEvent.id);
+            await Promise.any(publishPromises);
+            console.log('Successfully published to at least one relay');
+        } catch (publishError) {
+            console.error('Failed to publish event:', publishError);
+
+            // If NIP-17 failed to publish, try NIP-04 fallback
+            if (encryptionMethod === 'NIP-17' && State.privateKey !== 'extension') {
+                console.log('NIP-17 publish failed, falling back to NIP-04');
+
+                const encrypted = await encryptMessage(content, currentConversation, State.privateKey);
+                const { verifyEvent } = window.NostrTools;
+
+                const eventTemplate = {
+                    kind: 4,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [['p', currentConversation]],
+                    content: encrypted
+                };
+
+                signedEvent = await signEvent(eventTemplate);
+                const isValid = verifyEvent(signedEvent);
+
+                if (!isValid) {
+                    throw new Error('Failed to sign NIP-04 fallback message');
+                }
+
+                encryptionMethod = 'NIP-04';
+
+                // Try publishing NIP-04 version
+                await Promise.any(State.pool.publish(relaysToUse, signedEvent));
+                console.log('Successfully sent NIP-04 fallback message');
+            } else {
+                throw publishError; // Re-throw if not NIP-17 or already NIP-04
+            }
         }
-        
-        // Publish to relays
-        await Promise.any(State.pool.publish(relays, signedEvent));
-        
+
         // Add to local conversation
         if (!conversations[currentConversation]) {
             conversations[currentConversation] = {
                 messages: [],
                 lastMessage: null,
-                profile: profileCache[currentConversation] || null
+                profile: profileCache[currentConversation] || null,
+                unread: 0
             };
         }
-        
+
         const message = {
             id: signedEvent.id,
             content: content,
-            timestamp: signedEvent.created_at,
+            // Use current time for display (NIP-17 gift-wrap has randomized timestamp for privacy)
+            timestamp: Math.floor(Date.now() / 1000),
             sent: true,
+            encryptionMethod: encryptionMethod,
             event: signedEvent
         };
-        
+
         conversations[currentConversation].messages.push(message);
         conversations[currentConversation].lastMessage = message;
-        
+
         // Update UI
         input.value = '';
         selectConversation(currentConversation);
         renderConversations();
-        
-        showNotification('Message sent!', 'success');
-        
+
+        showNotification(`Message sent (${encryptionMethod})!`, 'success');
+
     } catch (error) {
         console.error('Error sending message:', error);
         alert('Failed to send message: ' + error.message);

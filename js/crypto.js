@@ -101,7 +101,9 @@ export async function getSecurePrivateKey(pin) {
     }
 }
 
-// Message encryption/decryption for NIP-04 DMs
+// ==================== NIP-04 DM ENCRYPTION (LEGACY) ====================
+
+// Message encryption/decryption for NIP-04 DMs (legacy, deprecated)
 export async function encryptMessage(content, recipientPubkey, privateKey) {
     try {
         const { nip04 } = window.NostrTools;
@@ -120,7 +122,7 @@ export async function decryptMessage(encryptedContent, otherPubkey, privateKey) 
                 console.error('Extension does not support NIP-04 decryption');
                 return null;
             }
-            
+
             try {
                 return await window.nostr.nip04.decrypt(otherPubkey, encryptedContent);
             } catch (e) {
@@ -133,12 +135,102 @@ export async function decryptMessage(encryptedContent, otherPubkey, privateKey) 
                 console.error('No private key available');
                 return null;
             }
-            
+
             const { nip04 } = window.NostrTools;
             return await nip04.decrypt(privateKey, otherPubkey, encryptedContent);
         }
     } catch (error) {
         console.error('Failed to decrypt message:', error, 'Content:', encryptedContent);
         return null;
+    }
+}
+
+// ==================== NIP-44 ENCRYPTION (MODERN) ====================
+
+// Get conversation key for NIP-44 encryption
+export function getConversationKey(privateKey, publicKey) {
+    try {
+        const { nip44 } = window.NostrTools;
+        return nip44.getConversationKey(privateKey, publicKey);
+    } catch (error) {
+        console.error('Failed to get conversation key:', error);
+        throw error;
+    }
+}
+
+// Encrypt message using NIP-44
+export function encryptMessageNIP44(content, privateKey, recipientPubkey) {
+    try {
+        const { nip44 } = window.NostrTools;
+        const conversationKey = nip44.getConversationKey(privateKey, recipientPubkey);
+        return nip44.encrypt(content, conversationKey);
+    } catch (error) {
+        console.error('NIP-44 encryption failed:', error);
+        throw error;
+    }
+}
+
+// Decrypt message using NIP-44
+export function decryptMessageNIP44(ciphertext, privateKey, senderPubkey) {
+    try {
+        const { nip44 } = window.NostrTools;
+        const conversationKey = nip44.getConversationKey(privateKey, senderPubkey);
+        return nip44.decrypt(ciphertext, conversationKey);
+    } catch (error) {
+        console.error('NIP-44 decryption failed:', error);
+        throw error;
+    }
+}
+
+// ==================== NIP-17 GIFT WRAPPING ====================
+
+// Create a gift-wrapped NIP-17 message
+export function wrapGiftMessage(content, senderPrivateKey, recipientPubkey) {
+    try {
+        const { nip17 } = window.NostrTools;
+
+        // Create recipient object (NIP-17 expects this format)
+        const recipient = {
+            publicKey: recipientPubkey
+        };
+
+        // wrapEvent returns a kind 1059 gift-wrapped event
+        const wrappedEvent = nip17.wrapEvent(
+            senderPrivateKey,
+            recipient,
+            content,
+            '', // conversationTitle (optional)
+            null // replyTo (optional)
+        );
+
+        return wrappedEvent;
+    } catch (error) {
+        console.error('Failed to wrap gift message:', error);
+        throw error;
+    }
+}
+
+// Unwrap a NIP-17 gift-wrapped message
+export function unwrapGiftMessage(wrappedEvent, recipientPrivateKey) {
+    try {
+        const { nip17 } = window.NostrTools;
+
+        // unwrapEvent returns the original message
+        const unwrapped = nip17.unwrapEvent(wrappedEvent, recipientPrivateKey);
+        return unwrapped;
+    } catch (error) {
+        // Silently fail - this is expected when message isn't for us
+        throw error;
+    }
+}
+
+// Unwrap many NIP-17 gift-wrapped messages
+export function unwrapManyGiftMessages(wrappedEvents, recipientPrivateKey) {
+    try {
+        const { nip17 } = window.NostrTools;
+        return nip17.unwrapManyEvents(wrappedEvents, recipientPrivateKey);
+    } catch (error) {
+        console.error('Failed to unwrap multiple gift messages:', error);
+        throw error;
     }
 }

@@ -3238,6 +3238,14 @@ async function populateSettingsForm() {
             console.error('❌ XMR zap field not found!');
         }
 
+        // Populate NIP-17 DM setting
+        const useNip17Checkbox = document.getElementById('useNip17Dms');
+        if (useNip17Checkbox) {
+            const useNip17 = localStorage.getItem('use-nip17-dms') === 'true';
+            useNip17Checkbox.checked = useNip17;
+            console.log('📨 NIP-17 DMs enabled:', useNip17);
+        }
+
         // Populate relay lists
         await populateRelayLists();
 
@@ -3384,6 +3392,13 @@ async function saveSettings() {
         } catch (error) {
             console.error('❌ Error publishing zap settings to relay:', error);
             // Don't fail the entire save operation if zap settings publishing fails
+        }
+
+        // Save NIP-17 DM preference
+        const useNip17Checkbox = document.getElementById('useNip17Dms');
+        if (useNip17Checkbox) {
+            localStorage.setItem('use-nip17-dms', useNip17Checkbox.checked.toString());
+            console.log('📨 NIP-17 DMs preference saved:', useNip17Checkbox.checked);
         }
 
         // Publish NIP-65 relay list to network (kind 10002)
