@@ -305,31 +305,42 @@ export function closeKeyModal() {
 // ==================== ZAP MODAL ====================
 
 // Open modal with QR code for sending Monero tips (zaps) to post authors
-export function openZapModal(postId, authorName, moneroAddress, mode = 'choose') {
+export function openZapModal(postId, authorName, moneroAddress, mode = 'choose', customAmount = null) {
     const modal = document.getElementById('zapModal');
     const details = document.getElementById('zapDetails');
-    
+
     if (!modal || !details) return;
-    
-    const amount = localStorage.getItem('default-zap-amount') || '0.00018';
+
+    const defaultAmount = localStorage.getItem('default-zap-amount') || '0.00018';
+    const amount = customAmount || defaultAmount;
     const truncatedPostId = postId.slice(0, 8);
     
     if (mode === 'choose') {
         // Show options to either zap immediately or add to queue
         details.innerHTML = `
             <div style="margin-bottom: 16px; text-align: center;">
-                <strong>Zap ${authorName}</strong><br>
-                <span style="color: #FF6600;">${amount} XMR</span>
+                <strong>Zap ${authorName}</strong>
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; text-align: center; margin-bottom: 8px; color: #FF6600; font-weight: bold;">
+                    Amount (XMR)
+                </label>
+                <input type="number"
+                       id="moneroZapAmount"
+                       value="${defaultAmount}"
+                       step="0.00001"
+                       min="0.00001"
+                       style="width: 100%; padding: 10px; border: 2px solid #FF6600; border-radius: 8px; font-size: 16px; text-align: center; background: #1a1a1a; color: #fff;">
             </div>
             <div style="margin-bottom: 20px; font-size: 12px; color: #666; word-break: break-all; text-align: center;">
                 ${moneroAddress}
             </div>
             <div style="display: flex; gap: 12px; justify-content: center;">
-                <button onclick="openZapModal('${postId}', '${authorName}', '${moneroAddress}', 'immediate')" 
+                <button id="zapNowBtn"
                         style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                     Zap Now
                 </button>
-                <button onclick="addToQueueAndClose('${postId}', '${authorName}', '${moneroAddress}')" 
+                <button id="addToQueueBtn"
                         style="background: #6B73FF; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                     Add to Queue (${zapQueue.length}/20)
                 </button>
@@ -340,6 +351,20 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose')
         if (qrContainer) {
             qrContainer.style.display = 'none';
         }
+
+        // Attach event listeners to buttons
+        setTimeout(() => {
+            const zapNowBtn = document.getElementById('zapNowBtn');
+            const addToQueueBtn = document.getElementById('addToQueueBtn');
+
+            if (zapNowBtn) {
+                zapNowBtn.onclick = () => zapWithCustomAmount(postId, authorName, moneroAddress);
+            }
+
+            if (addToQueueBtn) {
+                addToQueueBtn.onclick = () => addToQueueAndClose(postId, authorName, moneroAddress);
+            }
+        }, 0);
         
     } else if (mode === 'immediate') {
         // Show immediate zap QR code
@@ -365,6 +390,19 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose')
     }
 
     modal.classList.add('show');
+}
+
+// Handle custom amount zap - reads amount from input and shows QR
+export function zapWithCustomAmount(postId, authorName, moneroAddress) {
+    const amountInput = document.getElementById('moneroZapAmount');
+    const customAmount = parseFloat(amountInput?.value);
+
+    if (!customAmount || customAmount <= 0 || isNaN(customAmount)) {
+        alert('Please enter a valid amount');
+        return;
+    }
+
+    openZapModal(postId, authorName, moneroAddress, 'immediate', customAmount);
 }
 
 // Generate QR code for Monero payment
@@ -413,7 +451,11 @@ function generateMoneroQRCode(container, address, amount, postId) {
 }
 
 export function addToQueueAndClose(postId, authorName, moneroAddress) {
-    if (addToZapQueue(postId, authorName, moneroAddress)) {
+    // Get custom amount from input if available
+    const amountInput = document.getElementById('moneroZapAmount');
+    const customAmount = amountInput ? parseFloat(amountInput.value) : null;
+
+    if (addToZapQueue(postId, authorName, moneroAddress, customAmount)) {
         closeZapModal();
     }
 }
@@ -443,8 +485,18 @@ export function openLightningZapModal(postId, authorName, lightningAddress) {
 
     details.innerHTML = `
         <div style="margin-bottom: 16px; text-align: center;">
-            <strong>⚡ Lightning Zap ${authorName}</strong><br>
-            <span style="color: #FFDF00;">${defaultAmount} sats</span>
+            <strong>⚡ Lightning Zap ${authorName}</strong>
+        </div>
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; text-align: center; margin-bottom: 8px; color: #FFDF00; font-weight: bold;">
+                Amount (sats)
+            </label>
+            <input type="number"
+                   id="lightningZapAmount"
+                   value="${defaultAmount}"
+                   step="1"
+                   min="1"
+                   style="width: 100%; padding: 10px; border: 2px solid #FFDF00; border-radius: 8px; font-size: 16px; text-align: center; background: #1a1a1a; color: #fff;">
         </div>
         <div style="margin-bottom: 20px; font-size: 12px; color: #666; word-break: break-all; text-align: center;">
             ${lightningAddress}
@@ -2111,7 +2163,7 @@ export function copyToClipboard(text) {
 // ==================== XMR ZAP QUEUE ====================
 
 // Add a zap to the queue (max 20 items)
-function addToZapQueue(postId, authorName, moneroAddress) {
+function addToZapQueue(postId, authorName, moneroAddress, customAmount = null) {
     // Import state
     const StateModule = window.NostrState || {};
     let queue = StateModule.zapQueue || [];
@@ -2128,11 +2180,15 @@ function addToZapQueue(postId, authorName, moneroAddress) {
         return false;
     }
 
+    // Get amount (custom or default)
+    const amount = customAmount || localStorage.getItem('default-zap-amount') || '0.00018';
+
     // Add to queue
     queue.push({
         postId,
         authorName,
         moneroAddress,
+        amount,
         timestamp: Date.now()
     });
 
@@ -2180,6 +2236,7 @@ export function showZapQueue() {
                     <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1;">
                             <div style="font-weight: bold; color: #FF6600;">${item.authorName}</div>
+                            <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">${item.amount || '0.00018'} XMR</div>
                             <div style="font-size: 12px; color: #666; margin-top: 4px; word-break: break-all;">${item.moneroAddress.substring(0, 20)}...${item.moneroAddress.substring(item.moneroAddress.length - 10)}</div>
                         </div>
                         <button onclick="removeFromZapQueue(${index})" style="background: #ff6b6b; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px;">
@@ -2287,14 +2344,14 @@ export function showBatchQrCodes() {
         if (!content) return;
 
         const item = queue[currentIndex];
-        const defaultAmount = localStorage.getItem('default-zap-amount') || '0.01';
+        const amount = item.amount || localStorage.getItem('default-zap-amount') || '0.01';
 
         content.innerHTML = `
             <div style="text-align: center; padding: 20px;">
                 <div style="margin-bottom: 16px;">
                     <strong style="font-size: 18px;">QR Code ${currentIndex + 1} of ${queue.length}</strong>
                     <p style="color: #FF6600; margin-top: 8px;">Zapping ${item.authorName}</p>
-                    <p style="color: #666; font-size: 14px;">${defaultAmount} XMR</p>
+                    <p style="color: #666; font-size: 14px;">${amount} XMR</p>
                 </div>
 
                 <div id="batchQrCode" style="background: white; padding: 20px; border-radius: 8px; display: inline-block; margin-bottom: 16px;"></div>
@@ -2328,7 +2385,7 @@ export function showBatchQrCodes() {
             try {
                 // Create transaction description with note ID
                 const txNote = `from nosmero.com NoteID ${item.postId}`;
-                const moneroUri = `monero:${item.moneroAddress}?tx_amount=${defaultAmount}&tx_description=${encodeURIComponent(txNote)}`;
+                const moneroUri = `monero:${item.moneroAddress}?tx_amount=${amount}&tx_description=${encodeURIComponent(txNote)}`;
 
                 qrContainer.innerHTML = '';
                 new window.QRCode(qrContainer, {
@@ -2435,6 +2492,7 @@ window.showLoginWithNsecApp = showLoginWithNsecApp;
 window.showGeneratedKeyModal = showGeneratedKeyModal;
 window.closeKeyModal = closeKeyModal;
 window.openZapModal = openZapModal;
+window.zapWithCustomAmount = zapWithCustomAmount;
 window.addToQueueAndClose = addToQueueAndClose;
 window.closeZapModal = closeZapModal;
 window.openLightningZapModal = openLightningZapModal;
