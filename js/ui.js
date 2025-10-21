@@ -377,16 +377,61 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                 ${moneroAddress}
             </div>
             <div style="font-size: 12px; color: #999; text-align: center; margin-bottom: 12px;">
-                Note: nosmero.com NoteId:${truncatedPostId} (included in transaction note)
+                Note: nosmero.com NoteId:${truncatedPostId}
+            </div>
+            <div style="text-align: center; margin-top: 16px;">
+                <button id="copyPaymentUriBtn"
+                        style="background: #FF6600; border: none; color: #fff; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; width: 100%; margin-bottom: 12px;">
+                    Copy Payment URI
+                </button>
+                <div style="font-size: 11px; color: #999; margin-bottom: 10px; line-height: 1.4;">
+                    Try Payment URI first. If your wallet doesn't support it, use individual buttons below.
+                </div>
+                <div style="display: flex; gap: 8px; justify-content: center;">
+                    <button id="copyAddressBtn"
+                            style="background: #8B5CF6; border: none; color: #fff; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px; flex: 1;">
+                        Copy Address
+                    </button>
+                    <button id="copyAmountBtn"
+                            style="background: #8B5CF6; border: none; color: #fff; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px; flex: 1;">
+                        Copy Amount
+                    </button>
+                    <button id="copyNoteBtn"
+                            style="background: #8B5CF6; border: none; color: #fff; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px; flex: 1;">
+                        Copy Note
+                    </button>
+                </div>
             </div>
         `;
-        
+
         // Make sure QR container is visible
         const qrContainer = document.querySelector('.qr-container');
         if (qrContainer) {
             qrContainer.style.display = 'block';
             generateMoneroQRCode(qrContainer, moneroAddress, amount, postId);
         }
+
+        // Attach copy button event listeners
+        setTimeout(() => {
+            const copyUriBtn = document.getElementById('copyPaymentUriBtn');
+            const copyAddrBtn = document.getElementById('copyAddressBtn');
+            const copyAmtBtn = document.getElementById('copyAmountBtn');
+            const copyNoteBtn = document.getElementById('copyNoteBtn');
+
+            if (copyUriBtn) {
+                copyUriBtn.onclick = () => copyMoneroPaymentUri(moneroAddress, amount, postId, copyUriBtn);
+            }
+            if (copyAddrBtn) {
+                copyAddrBtn.onclick = () => copyMoneroFieldToClipboard(moneroAddress, copyAddrBtn, 'Address');
+            }
+            if (copyAmtBtn) {
+                copyAmtBtn.onclick = () => copyMoneroFieldToClipboard(amount.toString(), copyAmtBtn, 'Amount');
+            }
+            if (copyNoteBtn) {
+                const txNote = `nosmero.com NoteId:${truncatedPostId}`;
+                copyNoteBtn.onclick = () => copyMoneroFieldToClipboard(txNote, copyNoteBtn, 'Note');
+            }
+        }, 0);
     }
 
     modal.classList.add('show');
@@ -448,6 +493,48 @@ function generateMoneroQRCode(container, address, amount, postId) {
         console.error('QR code generation completely failed:', error);
         container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">QR code generation failed<br><small>' + error.message + '</small></div>';
     }
+}
+
+// Copy Monero payment URI to clipboard (same format as QR code)
+function copyMoneroPaymentUri(address, amount, postId, buttonElement) {
+    const shortNoteId = postId.substring(0, 8);
+    const txNote = `nosmero.com NoteId:${shortNoteId}`;
+    const moneroUri = `monero:${address}?tx_amount=${amount}&tx_description=${encodeURIComponent(txNote)}`;
+
+    navigator.clipboard.writeText(moneroUri).then(() => {
+        // Success feedback
+        const originalText = buttonElement.textContent;
+        buttonElement.textContent = 'Copied!';
+        buttonElement.style.background = '#10B981'; // Green color
+
+        // Reset button after 2 seconds
+        setTimeout(() => {
+            buttonElement.textContent = originalText;
+            buttonElement.style.background = '#FF6600';
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard. Please copy manually:\n\n' + moneroUri);
+    });
+}
+
+// Generic function to copy Monero payment fields to clipboard with visual feedback
+function copyMoneroFieldToClipboard(text, buttonElement, label) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Success feedback
+        const originalText = buttonElement.textContent;
+        buttonElement.textContent = 'Copied!';
+        buttonElement.style.background = '#10B981'; // Green color
+
+        // Reset button after 2 seconds
+        setTimeout(() => {
+            buttonElement.textContent = originalText;
+            buttonElement.style.background = '#8B5CF6'; // Back to purple
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert(`Failed to copy ${label}. Please copy manually:\n\n${text}`);
+    });
 }
 
 export function addToQueueAndClose(postId, authorName, moneroAddress) {
@@ -2346,6 +2433,8 @@ export function showBatchQrCodes() {
         const item = queue[currentIndex];
         const amount = item.amount || localStorage.getItem('default-zap-amount') || '0.01';
 
+        const shortNoteId = item.postId.substring(0, 8);
+
         content.innerHTML = `
             <div style="text-align: center; padding: 20px;">
                 <div style="margin-bottom: 16px;">
@@ -2356,8 +2445,36 @@ export function showBatchQrCodes() {
 
                 <div id="batchQrCode" style="background: white; padding: 20px; border-radius: 8px; display: inline-block; margin-bottom: 16px;"></div>
 
-                <div style="font-size: 12px; color: #666; word-break: break-all; margin-bottom: 16px;">
+                <div style="font-size: 12px; color: #666; word-break: break-all; margin-bottom: 12px;">
                     ${item.moneroAddress}
+                </div>
+
+                <div style="font-size: 12px; color: #999; text-align: center; margin-bottom: 16px;">
+                    Note: nosmero.com NoteId:${shortNoteId}
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <button id="batchCopyUriBtn"
+                            style="background: #FF6600; border: none; color: #fff; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; width: 100%; margin-bottom: 12px;">
+                        Copy Payment URI
+                    </button>
+                    <div style="font-size: 11px; color: #999; margin-bottom: 10px; line-height: 1.4;">
+                        Try Payment URI first. If your wallet doesn't support it, use individual buttons below.
+                    </div>
+                    <div style="display: flex; gap: 8px; justify-content: center;">
+                        <button id="batchCopyAddressBtn"
+                                style="background: #8B5CF6; border: none; color: #fff; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px; flex: 1;">
+                            Copy Address
+                        </button>
+                        <button id="batchCopyAmountBtn"
+                                style="background: #8B5CF6; border: none; color: #fff; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px; flex: 1;">
+                            Copy Amount
+                        </button>
+                        <button id="batchCopyNoteBtn"
+                                style="background: #8B5CF6; border: none; color: #fff; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px; flex: 1;">
+                            Copy Note
+                        </button>
+                    </div>
                 </div>
 
                 <div style="display: flex; gap: 12px; justify-content: center;">
@@ -2384,7 +2501,7 @@ export function showBatchQrCodes() {
         if (qrContainer && window.QRCode) {
             try {
                 // Create transaction description with note ID
-                const txNote = `from nosmero.com NoteID ${item.postId}`;
+                const txNote = `nosmero.com NoteId:${shortNoteId}`;
                 const moneroUri = `monero:${item.moneroAddress}?tx_amount=${amount}&tx_description=${encodeURIComponent(txNote)}`;
 
                 qrContainer.innerHTML = '';
@@ -2401,6 +2518,28 @@ export function showBatchQrCodes() {
                 qrContainer.innerHTML = '<div style="color: #ff6b6b;">QR code generation failed</div>';
             }
         }
+
+        // Attach copy button event listeners
+        setTimeout(() => {
+            const copyUriBtn = document.getElementById('batchCopyUriBtn');
+            const copyAddrBtn = document.getElementById('batchCopyAddressBtn');
+            const copyAmtBtn = document.getElementById('batchCopyAmountBtn');
+            const copyNoteBtn = document.getElementById('batchCopyNoteBtn');
+
+            if (copyUriBtn) {
+                copyUriBtn.onclick = () => copyMoneroPaymentUri(item.moneroAddress, amount, item.postId, copyUriBtn);
+            }
+            if (copyAddrBtn) {
+                copyAddrBtn.onclick = () => copyMoneroFieldToClipboard(item.moneroAddress, copyAddrBtn, 'Address');
+            }
+            if (copyAmtBtn) {
+                copyAmtBtn.onclick = () => copyMoneroFieldToClipboard(amount.toString(), copyAmtBtn, 'Amount');
+            }
+            if (copyNoteBtn) {
+                const txNote = `nosmero.com NoteId:${shortNoteId}`;
+                copyNoteBtn.onclick = () => copyMoneroFieldToClipboard(txNote, copyNoteBtn, 'Note');
+            }
+        }, 0);
     }
 
     // Navigation functions
