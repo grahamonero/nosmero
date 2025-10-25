@@ -1812,7 +1812,7 @@ export async function fetchParentPosts(posts) {
 }
 
 // Fetch engagement counts using NIPs 1, 18, 25, and 27
-async function fetchEngagementCounts(postIds) {
+export async function fetchEngagementCounts(postIds) {
     try {
         // Use major public relays for engagement counts (same as profile fetching)
         const majorRelays = [

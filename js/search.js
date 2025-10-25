@@ -3,10 +3,11 @@
 // Functions for user search, hashtag search, content discovery, and search results
 
 import { showNotification } from './utils.js';
-import { 
-    pool, 
-    relays, 
-    posts, 
+import { SEARCH_RELAYS } from './relays.js';
+import {
+    pool,
+    relays,
+    posts,
     profileCache,
     setCurrentPage
 } from './state.js';
@@ -245,6 +246,16 @@ export async function performSearch() {
             }
         }
 
+        // Fetch engagement data for all results
+        if (currentSearchResults.length > 0) {
+            updateSearchStatus(`Fetching engagement data for ${currentSearchResults.length} results...`);
+            const Posts = await import('./posts.js');
+            const postIds = currentSearchResults.map(post => post.id);
+            searchEngagementData = await Posts.fetchEngagementCounts(postIds);
+            console.log('📊 Engagement data fetched for search results');
+            renderSearchResults(); // Re-render with engagement counts
+        }
+
         // Update final status
         if (currentSearchResults.length === 0) {
             updateSearchStatus(`No results found for "${query}"`);
@@ -355,42 +366,36 @@ export async function searchContent(query) {
     });
 
     console.log(`Found ${results.length} results in cached posts`);
-    
-    // Always expand search to broader relay network for better results
-    if (results.length < 50) {
-        try {
-            console.log('Expanding search to broader relay network...');
-            
-            // Create multiple search filters for better coverage
-            const searchFilters = [];
-            
-            // NIP-50 search if query is simple enough
-            if (parsedQuery.terms.length === 1 && parsedQuery.exactPhrases.length === 0) {
-                searchFilters.push({
-                    kinds: [1],
-                    search: parsedQuery.terms[0],
-                    limit: 50
-                });
-            }
-            
-            // Broad content search without author restrictions
+
+    // Always expand search to network-wide search relays for better results
+    // This ensures users get results regardless of their follow count
+    try {
+        console.log(`Expanding search to ${SEARCH_RELAYS.length} network relays...`);
+
+        // Create multiple search filters for better coverage
+        const searchFilters = [];
+
+        // NIP-50 search if query is simple enough (prioritized for speed)
+        if (parsedQuery.terms.length === 1 && parsedQuery.exactPhrases.length === 0) {
             searchFilters.push({
                 kinds: [1],
-                limit: 100,
-                since: Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60) // Last 7 days
+                search: parsedQuery.terms[0],
+                limit: 50
             });
-            
-            // Search with higher performance relays first
-            const prioritizedRelays = [...relays].sort((a, b) => {
-                const perfA = window.relayPerformance?.[a]?.avgResponseTime || 999999;
-                const perfB = window.relayPerformance?.[b]?.avgResponseTime || 999999;
-                return perfA - perfB;
-            });
-            
-            const searchPromises = searchFilters.map(filter => {
-                return new Promise((resolve) => {
-                    const tempResults = [];
-                    const searchSub = pool.subscribeMany(prioritizedRelays.slice(0, 5), [filter], {
+        }
+
+        // Broad content search without author restrictions
+        searchFilters.push({
+            kinds: [1],
+            limit: 100,
+            since: Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60) // Last 7 days
+        });
+
+        const searchPromises = searchFilters.map(filter => {
+            return new Promise((resolve) => {
+                const tempResults = [];
+                // Use all SEARCH_RELAYS for comprehensive network-wide results
+                const searchSub = pool.subscribeMany(SEARCH_RELAYS, [filter], {
                         onevent(event) {
                             // Apply advanced filtering to relay results
                             const content = event.content.toLowerCase();
@@ -423,12 +428,12 @@ export async function searchContent(query) {
                             resolve(tempResults);
                         }
                     });
-                    
-                    // Timeout after 5 seconds
+
+                    // Timeout after 10 seconds (increased for network-wide search)
                     setTimeout(() => {
                         searchSub.close();
                         resolve(tempResults);
-                    }, 5000);
+                    }, 10000);
                 });
             });
             
@@ -441,11 +446,10 @@ export async function searchContent(query) {
                     results.push(event);
                 }
             });
-            
+
         } catch (error) {
             console.error('Expanded search error:', error);
         }
-    }
 
     // Cache results
     searchResultsCache[cacheKey] = {
@@ -491,10 +495,10 @@ export async function searchThreads(query) {
         return isThread(post);
     });
     
-    // Try to find more thread posts from relays
+    // Try to find more thread posts from network-wide search relays
     try {
         const threadResults = [];
-        const searchSub = pool.subscribeMany(relays, [
+        const searchSub = pool.subscribeMany(SEARCH_RELAYS, [
             {
                 kinds: [1],
                 limit: 50,
@@ -605,9 +609,9 @@ export async function searchArticles(query) {
     
     try {
         const articles = [];
-        
-        // Search for NIP-23 long-form articles (kind 30023)
-        const articleSub = pool.subscribeMany(relays, [
+
+        // Search for NIP-23 long-form articles (kind 30023) across network
+        const articleSub = pool.subscribeMany(SEARCH_RELAYS, [
             {
                 kinds: [30023], // NIP-23 long-form articles
                 limit: 20,
@@ -681,10 +685,10 @@ export async function searchHashtag(hashtag) {
     
     try {
         const results = [];
-        
-        // Search for posts with this hashtag
-        const hashtagSub = pool.subscribeMany(relays, [
-            { 
+
+        // Search for posts with this hashtag across network-wide relays
+        const hashtagSub = pool.subscribeMany(SEARCH_RELAYS, [
+            {
                 kinds: [1],
                 '#t': [cleanTag],
                 limit: 50
@@ -749,12 +753,12 @@ export async function searchUser(query) {
     }
     
     if (searchPubkey) {
-        // Search for posts by this specific user
+        // Search for posts by this specific user across network
         try {
             const results = [];
-            
-            const userSub = pool.subscribeMany(relays, [
-                { 
+
+            const userSub = pool.subscribeMany(SEARCH_RELAYS, [
+                {
                     kinds: [1],
                     authors: [searchPubkey],
                     limit: 20
@@ -864,15 +868,9 @@ export async function performStreamingContentSearch(query) {
         since: Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60) // Last 7 days
     });
 
-    // Search with prioritized relays
-    const prioritizedRelays = [...relays].sort((a, b) => {
-        const perfA = window.relayPerformance?.[a]?.avgResponseTime || 999999;
-        const perfB = window.relayPerformance?.[b]?.avgResponseTime || 999999;
-        return perfA - perfB;
-    });
-
+    // Use SEARCH_RELAYS for network-wide search
     for (const filter of searchFilters) {
-        const searchSub = pool.subscribeMany(prioritizedRelays.slice(0, 5), [filter], {
+        const searchSub = pool.subscribeMany(SEARCH_RELAYS, [filter], {
             onevent(event) {
                 if (matchesQuery(event, parsedQuery)) {
                     addSearchResult(event);
@@ -910,8 +908,8 @@ export async function performStreamingHashtagSearch(hashtag) {
 
     updateSearchStatus('Searching relays for hashtag...');
 
-    // Search relays and stream results
-    const hashtagSub = pool.subscribeMany(relays, [
+    // Search network-wide relays and stream results
+    const hashtagSub = pool.subscribeMany(SEARCH_RELAYS, [
         {
             kinds: [1],
             '#t': [cleanTag],
@@ -960,8 +958,8 @@ export async function performStreamingUserSearch(query) {
             }
         });
 
-        // Search relays
-        const userSub = pool.subscribeMany(relays, [
+        // Search network-wide relays
+        const userSub = pool.subscribeMany(SEARCH_RELAYS, [
             {
                 kinds: [1],
                 authors: [searchPubkey],
@@ -1008,8 +1006,8 @@ export async function performStreamingThreadsSearch(query) {
         }
     });
 
-    // Search relays for threads
-    const threadSub = pool.subscribeMany(relays, [
+    // Search network-wide relays for threads
+    const threadSub = pool.subscribeMany(SEARCH_RELAYS, [
         {
             kinds: [1],
             limit: 50,
@@ -1053,7 +1051,7 @@ export async function performStreamingArticlesSearch(query) {
 
     updateSearchStatus('Searching articles...');
 
-    const articleSub = pool.subscribeMany(relays, [
+    const articleSub = pool.subscribeMany(SEARCH_RELAYS, [
         {
             kinds: [30023], // NIP-23 long-form articles
             limit: 20,
@@ -1122,12 +1120,14 @@ function matchesQuery(post, parsedQuery) {
 let currentSearchResults = [];
 let currentSearchQuery = '';
 let currentSortMode = 'stream'; // 'stream', 'date', 'engagement'
+let searchEngagementData = {}; // Stores engagement counts for search results
 
 // Initialize search results container with header and controls
 export function initializeSearchResults(query) {
     currentSearchResults = [];
     currentSearchQuery = query;
     currentSortMode = 'stream';
+    searchEngagementData = {}; // Reset engagement data for new search
 
     const searchResults = document.getElementById('searchResults');
     if (!searchResults) return;
@@ -1189,7 +1189,7 @@ function updateSearchResultsCount() {
 }
 
 // Set sort mode and re-render results
-export function setSortMode(mode) {
+export async function setSortMode(mode) {
     currentSortMode = mode;
 
     // Update button styles
@@ -1204,6 +1204,15 @@ export function setSortMode(mode) {
         activeBtn.style.background = 'linear-gradient(135deg, #FF6600, #8B5CF6)';
         activeBtn.style.border = 'none';
         activeBtn.style.color = '#000';
+    }
+
+    // Fetch engagement data if switching to engagement mode and not already fetched
+    if (mode === 'engagement' && currentSearchResults.length > 0 && Object.keys(searchEngagementData).length === 0) {
+        updateSearchStatus('Fetching engagement data...');
+        const Posts = await import('./posts.js');
+        const postIds = currentSearchResults.map(post => post.id);
+        searchEngagementData = await Posts.fetchEngagementCounts(postIds);
+        console.log('📊 Engagement data fetched for', postIds.length, 'search results');
     }
 
     renderSearchResults();
@@ -1222,11 +1231,15 @@ function renderSearchResults() {
             sortedResults.sort((a, b) => b.created_at - a.created_at);
             break;
         case 'engagement':
-            // Simple engagement score based on content length and recency
+            // Real engagement score: (reactions × 1) + (reposts × 2) + (replies × 3)
             sortedResults.sort((a, b) => {
-                const engagementA = (a.content.length / 10) + ((Date.now() / 1000 - a.created_at) / 86400);
-                const engagementB = (b.content.length / 10) + ((Date.now() / 1000 - b.created_at) / 86400);
-                return engagementB - engagementA;
+                const engagementA = searchEngagementData[a.id] || { reactions: 0, reposts: 0, replies: 0 };
+                const engagementB = searchEngagementData[b.id] || { reactions: 0, reposts: 0, replies: 0 };
+
+                const scoreA = (engagementA.reactions * 1) + (engagementA.reposts * 2) + (engagementA.replies * 3);
+                const scoreB = (engagementB.reactions * 1) + (engagementB.reposts * 2) + (engagementB.replies * 3);
+
+                return scoreB - scoreA;
             });
             break;
         case 'stream':
@@ -1235,7 +1248,10 @@ function renderSearchResults() {
             break;
     }
 
-    resultsEl.innerHTML = sortedResults.map(post => renderSingleResult(post)).join('');
+    resultsEl.innerHTML = sortedResults.map(post => {
+        const engagement = searchEngagementData[post.id] || { reactions: 0, reposts: 0, replies: 0 };
+        return renderSingleResult(post, engagement);
+    }).join('');
 
     // Update like button states
     sortedResults.forEach(post => {
@@ -1244,7 +1260,7 @@ function renderSearchResults() {
 }
 
 // Render a single search result
-function renderSingleResult(post) {
+function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, replies: 0 }) {
     const author = getAuthorInfo(post);
     const moneroAddress = getMoneroAddress(post);
     const lightningAddress = getLightningAddress(post);
@@ -1270,11 +1286,15 @@ function renderSingleResult(post) {
                 </div>
             </div>
             <div class="post-content" onclick="openThreadView('${post.id}')" style="cursor: pointer; color: #fff; line-height: 1.4; margin-bottom: 12px;">${highlightedContent}</div>
-            <div class="post-actions" onclick="event.stopPropagation();" style="display: flex; gap: 16px;">
-                <button class="action-btn" onclick="NostrPosts.replyToPost('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">💬</button>
-                <button class="action-btn" onclick="NostrPosts.repostNote('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">🔄</button>
-                <button class="action-btn like-btn" id="like-${post.id}" onclick="NostrPosts.likePost('${post.id}')" data-post-id="${post.id}" title="Like this post" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">
-                    🤍
+            <div class="post-actions" onclick="event.stopPropagation();" style="display: flex; gap: 16px; align-items: center;">
+                <button class="action-btn" onclick="NostrPosts.replyToPost('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
+                    💬${engagement.replies > 0 ? ` <span style="font-size: 12px; color: #999;">${engagement.replies}</span>` : ''}
+                </button>
+                <button class="action-btn" onclick="NostrPosts.repostNote('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
+                    🔄${engagement.reposts > 0 ? ` <span style="font-size: 12px; color: #999;">${engagement.reposts}</span>` : ''}
+                </button>
+                <button class="action-btn like-btn" id="like-${post.id}" onclick="NostrPosts.likePost('${post.id}')" data-post-id="${post.id}" title="Like this post" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
+                    🤍${engagement.reactions > 0 ? ` <span style="font-size: 12px; color: #999;">${engagement.reactions}</span>` : ''}
                 </button>
                 <button class="action-btn" onclick="sharePost('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">📤</button>
                 ${lightningAddress ?

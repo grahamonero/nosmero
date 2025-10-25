@@ -6,11 +6,24 @@ import * as State from './state.js';
 // Default relays configuration
 export const DEFAULT_RELAYS = [
     'wss://nos.lol',
-    'wss://relay.damus.io', 
+    'wss://relay.damus.io',
     'wss://purplepag.es',
     'wss://relay.nostr.band',
     'wss://relay.snort.social',
     'wss://nostr.wine'
+];
+
+// Search-optimized relays with NIP-50 support prioritized
+// Used for network-wide search to get results regardless of user's follow count
+export const SEARCH_RELAYS = [
+    'wss://relay.nostr.band',
+    'wss://search.nos.today',
+    'wss://nos.lol',
+    'wss://relay.damus.io',
+    'wss://purplepag.es',
+    'wss://nostr.wine',
+    'wss://relay.snort.social',
+    'wss://nostr-pub.wellorder.net'
 ];
 
 // Current active relays array (imported from state)
