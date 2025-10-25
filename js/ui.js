@@ -395,7 +395,7 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                 ${moneroAddress}
             </div>
             <div style="font-size: 12px; color: #999; text-align: center; margin-bottom: 12px;">
-                Note: nosmero.com NoteId:${truncatedPostId}
+                Note: nosmero.com/n/${postId}
             </div>
             <div style="text-align: center; margin-top: 16px;">
                 <button id="copyPaymentUriBtn"
@@ -446,7 +446,7 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                 copyAmtBtn.onclick = () => copyMoneroFieldToClipboard(amount.toString(), copyAmtBtn, 'Amount');
             }
             if (copyNoteBtn) {
-                const txNote = `nosmero.com NoteId:${truncatedPostId}`;
+                const txNote = `nosmero.com/n/${postId}`;
                 copyNoteBtn.onclick = () => copyMoneroFieldToClipboard(txNote, copyNoteBtn, 'Note');
             }
         }, 0);
@@ -470,10 +470,9 @@ export function zapWithCustomAmount(postId, authorName, moneroAddress) {
 
 // Generate QR code for Monero payment
 function generateMoneroQRCode(container, address, amount, postId) {
-    const shortNoteId = postId.substring(0, 8);
-    const txNote = `nosmero.com NoteId:${shortNoteId}`;
+    const txNote = `nosmero.com/n/${postId}`;
     const moneroUri = `monero:${address}?tx_amount=${amount}&tx_description=${encodeURIComponent(txNote)}`;
-    
+
     try {
         if (typeof QRCode === 'undefined') {
             throw new Error('QRCode library not loaded');
@@ -481,42 +480,24 @@ function generateMoneroQRCode(container, address, amount, postId) {
 
         container.innerHTML = '<div id="qrCode"></div>';
 
-        // Try to generate QR code with description
-        try {
-            new QRCode(document.getElementById('qrCode'), {
-                text: moneroUri,
-                width: 200,
-                height: 200,
-                colorDark: '#000000',
-                colorLight: '#FFFFFF',
-                correctLevel: QRCode.CorrectLevel.L
-            });
-        } catch (qrError) {
-            console.warn('QR with description failed, trying without description:', qrError);
-            // Fallback: generate simpler QR without description
-            const simpleUri = `monero:${address}?tx_amount=${amount}`;
-            container.innerHTML = '<div id="qrCode"></div>';
-            new QRCode(document.getElementById('qrCode'), {
-                text: simpleUri,
-                width: 200,
-                height: 200,
-                colorDark: '#000000',
-                colorLight: '#FFFFFF',
-                correctLevel: QRCode.CorrectLevel.L
-            });
-            // Show warning that post ID is not included
-            container.innerHTML += '<div style="margin-top: 8px; font-size: 11px; color: #999; text-align: center;">Note: Post ID not included (QR too large)</div>';
-        }
+        // Generate QR code with full note ID and improved error correction
+        new QRCode(document.getElementById('qrCode'), {
+            text: moneroUri,
+            width: 200,
+            height: 200,
+            colorDark: '#000000',
+            colorLight: '#FFFFFF',
+            correctLevel: QRCode.CorrectLevel.M  // Medium error correction for better scanning
+        });
     } catch (error) {
-        console.error('QR code generation completely failed:', error);
+        console.error('QR code generation failed:', error);
         container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">QR code generation failed<br><small>' + error.message + '</small></div>';
     }
 }
 
 // Copy Monero payment URI to clipboard (same format as QR code)
 function copyMoneroPaymentUri(address, amount, postId, buttonElement) {
-    const shortNoteId = postId.substring(0, 8);
-    const txNote = `nosmero.com NoteId:${shortNoteId}`;
+    const txNote = `nosmero.com/n/${postId}`;
     const moneroUri = `monero:${address}?tx_amount=${amount}&tx_description=${encodeURIComponent(txNote)}`;
 
     navigator.clipboard.writeText(moneroUri).then(() => {
@@ -1108,6 +1089,126 @@ export async function openThreadView(eventId) {
         const threadContent = document.getElementById('threadContent');
         if (threadContent) {
             threadContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #ff6666;">Error loading thread</div>';
+        }
+    }
+}
+
+// Open single note view (for direct links, e.g., from Monero QR codes)
+export async function openSingleNoteView(eventId) {
+    try {
+        // Import required modules
+        const [Posts, StateModule, Relays] = await Promise.all([
+            import('./posts.js'),
+            import('./state.js'),
+            import('./relays.js')
+        ]);
+
+        // Store current page to go back to
+        previousPage = StateModule.currentPage || 'home';
+
+        // Hide all other pages and show thread page
+        document.getElementById('feed')?.style.setProperty('display', 'none');
+        document.getElementById('messagesPage')?.style.setProperty('display', 'none');
+        document.getElementById('profilePage')?.style.setProperty('display', 'none');
+
+        const threadPage = document.getElementById('threadPage');
+        const threadContent = document.getElementById('threadPageContent');
+
+        if (!threadPage || !threadContent) {
+            console.error('Thread page elements not found');
+            return;
+        }
+
+        // Show loading state
+        threadContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">Loading note...</div>';
+        threadPage.style.display = 'block';
+
+        // Update current page state
+        StateModule.setCurrentPage('thread');
+
+        // Get the note - check cache first
+        let note = StateModule.eventCache[eventId] || StateModule.posts.find(p => p.id === eventId);
+
+        // If not in cache, fetch from relays
+        if (!note) {
+            const pool = StateModule.pool;
+            const relays = Relays.getActiveRelays();
+
+            if (!pool || !relays.length) {
+                threadContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #ff6666;">Error: No relay connection available</div>';
+                return;
+            }
+
+            // Fetch the specific event
+            await new Promise((resolve) => {
+                const sub = pool.subscribeMany(relays, [
+                    { ids: [eventId] }
+                ], {
+                    onevent(event) {
+                        StateModule.eventCache[event.id] = event;
+                        if (event.id === eventId) {
+                            note = event;
+                        }
+                    },
+                    oneose: () => {
+                        sub.close();
+                        resolve();
+                    }
+                });
+
+                // Timeout after 5 seconds
+                setTimeout(() => {
+                    sub.close();
+                    resolve();
+                }, 5000);
+            });
+        }
+
+        if (!note) {
+            threadContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #ff6666;">Note not found</div>';
+            return;
+        }
+
+        // Fetch profile for the note author
+        await Posts.fetchProfiles([note.pubkey]);
+
+        // Fetch Monero address for the author
+        if (window.getUserMoneroAddress) {
+            try {
+                const moneroAddr = await window.getUserMoneroAddress(note.pubkey);
+                if (StateModule.profileCache[note.pubkey]) {
+                    StateModule.profileCache[note.pubkey].monero_address = moneroAddr || null;
+                }
+            } catch (error) {
+                if (StateModule.profileCache[note.pubkey]) {
+                    StateModule.profileCache[note.pubkey].monero_address = null;
+                }
+            }
+        }
+
+        // Render just this single note (highlighted)
+        const noteHtml = await Posts.renderSinglePost(note, 'highlight');
+        threadContent.innerHTML = `
+            <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-left: 3px solid #FF6600; border-radius: 4px;">
+                <div style="color: #FF6600; font-weight: bold;">📍 Direct Note Link</div>
+                <div style="color: #999; font-size: 12px; margin-top: 4px;">This is the specific note that was linked or zapped.</div>
+            </div>
+            ${noteHtml}
+        `;
+
+        // Process any embedded notes
+        try {
+            const Utils = await import('./utils.js');
+            await Utils.processEmbeddedNotes('threadPageContent');
+        } catch (error) {
+            console.error('Error processing embedded notes:', error);
+        }
+
+    } catch (error) {
+        console.error('Error opening single note view:', error);
+        const threadContent = document.getElementById('threadPageContent');
+        if (threadContent) {
+            threadContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #ff6666;">Error loading note</div>';
         }
     }
 }
@@ -2468,7 +2569,7 @@ export function showBatchQrCodes() {
                 </div>
 
                 <div style="font-size: 12px; color: #999; text-align: center; margin-bottom: 16px;">
-                    Note: nosmero.com NoteId:${shortNoteId}
+                    Note: nosmero.com/n/${item.postId}
                 </div>
 
                 <div style="margin-bottom: 20px;">
@@ -2519,7 +2620,7 @@ export function showBatchQrCodes() {
         if (qrContainer && window.QRCode) {
             try {
                 // Create transaction description with note ID
-                const txNote = `nosmero.com NoteId:${shortNoteId}`;
+                const txNote = `nosmero.com/n/${item.postId}`;
                 const moneroUri = `monero:${item.moneroAddress}?tx_amount=${amount}&tx_description=${encodeURIComponent(txNote)}`;
 
                 qrContainer.innerHTML = '';
@@ -2554,7 +2655,7 @@ export function showBatchQrCodes() {
                 copyAmtBtn.onclick = () => copyMoneroFieldToClipboard(amount.toString(), copyAmtBtn, 'Amount');
             }
             if (copyNoteBtn) {
-                const txNote = `nosmero.com NoteId:${shortNoteId}`;
+                const txNote = `nosmero.com/n/${item.postId}`;
                 copyNoteBtn.onclick = () => copyMoneroFieldToClipboard(txNote, copyNoteBtn, 'Note');
             }
         }, 0);

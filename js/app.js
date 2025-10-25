@@ -71,15 +71,18 @@ async function initializeApp() {
         initializeThemeToggle();
         console.log('✓ Theme toggle initialized');
 
+        // Check for direct note links BEFORE loading feed
+        checkDirectNoteLink();  // Check for /n/{noteId} URLs from Monero transactions
+
         // Check for existing user session
         await checkExistingSession();
-        
+
         // Start the application
         await startApplication();
-        
+
         Utils.showNotification('Nosmero loaded successfully!', 'success');
         console.log('🎉 Nosmero v0.95 ready!');
-        
+
         // Debug: Check if auth functions are properly exposed
         console.log('🔍 Auth functions check:');
         console.log('- createNewAccount:', typeof window.createNewAccount);
@@ -87,8 +90,8 @@ async function initializeApp() {
         console.log('- showLoginModal:', typeof window.showLoginModal);
         console.log('- logout:', typeof window.logout);
 
-        // Handle URL hash routing (for shared note links)
-        handleHashRouting();
+        // Handle hash routing (for shared note links)
+        handleHashRouting();  // Check for #note:{noteId} URLs
 
     } catch (error) {
         console.error('❌ App initialization failed:', error);
@@ -120,6 +123,27 @@ async function handleHashRouting() {
             console.log('⚠️ Timeout waiting for app to be ready');
         }, 10000);
     }
+}
+
+// Track if we're loading a direct note link (to skip feed loading)
+let directNoteId = null;
+
+// Handle path-based routing for Monero QR code links (nosmero.com/n/{noteId})
+function checkDirectNoteLink() {
+    const pathname = window.location.pathname;
+    console.log('🔍 Checking for direct note link, pathname:', pathname);
+
+    // Match pattern: /n/{64-char-hex-noteId}
+    const notePathMatch = pathname.match(/^\/n\/([a-f0-9]{64})$/i);
+    console.log('🔍 Regex match result:', notePathMatch);
+
+    if (notePathMatch) {
+        directNoteId = notePathMatch[1];
+        console.log('📍 Direct note link detected, will skip feed and go straight to note:', directNoteId);
+        return true;
+    }
+    console.log('❌ No direct note link detected');
+    return false;
 }
 
 // Listen for hash changes (browser back/forward)
@@ -234,16 +258,34 @@ async function startApplication() {
         }
 
         // Load home feed (will fetch fresh following list internally)
-        await loadHomeFeed();
-        hideAuthUI();
+        if (directNoteId) {
+            console.log('⏭️ Skipping feed load, going directly to single note:', directNoteId);
+            hideAuthUI();
+            // Open the single note directly after a brief delay for UI to settle
+            setTimeout(() => {
+                window.openSingleNoteView(directNoteId);
+            }, 500);
+        } else {
+            await loadHomeFeed();
+            hideAuthUI();
+        }
     } else {
         console.log('🔐 No session found, enabling anonymous browsing...');
 
         // Update UI for logged out state
         updateUIForLogout();
-        
-        await loadHomeFeed();
-        hideAuthUI();
+
+        if (directNoteId) {
+            console.log('⏭️ Skipping feed load, going directly to single note:', directNoteId);
+            hideAuthUI();
+            // Open the single note directly after a brief delay for UI to settle
+            setTimeout(() => {
+                window.openSingleNoteView(directNoteId);
+            }, 500);
+        } else {
+            await loadHomeFeed();
+            hideAuthUI();
+        }
     }
 }
 
@@ -2750,6 +2792,7 @@ window.getUserLightningAddress = getUserLightningAddress;
 window.getDefaultBtcZapAmount = getDefaultBtcZapAmount;
 window.sharePost = sharePost;
 window.openThreadView = UI.openThreadView;
+window.openSingleNoteView = UI.openSingleNoteView;
 window.closeThreadModal = UI.closeThreadModal;
 window.closeFollowModal = closeFollowModal;
 window.loadFollowersPage = loadFollowersPage;
