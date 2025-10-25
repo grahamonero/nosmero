@@ -389,13 +389,43 @@ async function loadUserProfile() {
     }
 }
 
+// Helper function to save profile to both cache and localStorage
+function saveProfileToCache(pubkey, profile) {
+    State.profileCache[pubkey] = profile;
+    localStorage.setItem(`profile-${pubkey}`, JSON.stringify(profile));
+    console.log('💾 Profile saved to cache and localStorage');
+}
+
+// Helper function to load profile from localStorage
+function loadProfileFromLocalStorage(pubkey) {
+    try {
+        const cached = localStorage.getItem(`profile-${pubkey}`);
+        if (cached) {
+            const profile = JSON.parse(cached);
+            console.log('📦 Profile loaded from localStorage:', profile.name);
+            return profile;
+        }
+    } catch (error) {
+        console.error('Error loading profile from localStorage:', error);
+    }
+    return null;
+}
+
 // Load user profile data
 async function loadUserProfileData() {
     try {
         console.log('Loading user profile data for pubkey:', State.publicKey);
-        
-        // First, display cached profile immediately if available to avoid blank page
-        const cachedProfile = State.profileCache[State.publicKey];
+
+        // First, check localStorage for cached profile
+        let cachedProfile = State.profileCache[State.publicKey];
+        if (!cachedProfile) {
+            cachedProfile = loadProfileFromLocalStorage(State.publicKey);
+            if (cachedProfile) {
+                State.profileCache[State.publicKey] = cachedProfile;
+            }
+        }
+
+        // Display cached profile immediately if available to avoid blank page
         console.log('Cached profile check:', {
             exists: !!cachedProfile,
             name: cachedProfile?.name,
@@ -413,36 +443,62 @@ async function loadUserProfileData() {
         let userProfile = null;
         let profileFound = false;
         let profileEvents = [];
-        
+
         console.log('=== FETCHING USER PROFILE FROM RELAYS ===');
         const readRelays = Relays.getReadRelays();
-        console.log('Using read relays for profile fetch:', readRelays);
+        console.log('📥 Using read relays for profile fetch:', readRelays);
+        console.log('📥 Fetching for pubkey:', State.publicKey);
+        console.log('📥 Filter:', { kinds: [0], authors: [State.publicKey], limit: 5 });
         console.log('Pool available:', !!State.pool);
-        console.log('Public key:', State.publicKey);
-        
+
         if (!State.pool) {
             console.error('No pool available for profile fetch!');
             return;
         }
-        
+
+        // Track which relays respond
+        const relayResponses = {};
+        readRelays.forEach(relay => {
+            relayResponses[relay] = { events: 0, eoseReceived: false };
+        });
+
         const sub = State.pool.subscribeMany(readRelays, [
             { kinds: [0], authors: [State.publicKey], limit: 5 }
         ], {
-            onevent(event) {
+            onevent(event, relay) {
                 try {
-                    console.log('Received profile event:', event);
+                    if (relay && relayResponses[relay]) {
+                        relayResponses[relay].events++;
+                    }
+                    console.log(`📨 Received profile event from ${relay || 'unknown relay'}:`, event.id);
+                    console.log('Event created_at:', new Date(event.created_at * 1000).toISOString());
+
                     const profile = JSON.parse(event.content);
                     console.log('Parsed profile data:', profile);
-                    
+
                     // Store all profile events to find the most complete one
-                    profileEvents.push({ event, profile, timestamp: event.created_at });
+                    profileEvents.push({ event, profile, timestamp: event.created_at, relay });
                 } catch (error) {
                     console.error('Error parsing user profile:', error);
                 }
             },
-            oneose() {
-                sub.close();
-                
+            oneose(relay) {
+                if (relay && relayResponses[relay]) {
+                    relayResponses[relay].eoseReceived = true;
+                }
+
+                // Check if all relays have responded
+                const allResponded = Object.values(relayResponses).every(r => r.eoseReceived);
+                if (allResponded) {
+                    sub.close();
+
+                    // Log relay responses summary
+                    console.log('📊 RELAY RESPONSE SUMMARY:');
+                    Object.entries(relayResponses).forEach(([relay, stats]) => {
+                        console.log(`  ${relay}: ${stats.events} events, EOSE: ${stats.eoseReceived}`);
+                    });
+                }
+
                 // Process collected profile events to find the best one
                 if (profileEvents.length > 0) {
                     console.log('Processing', profileEvents.length, 'profile events');
@@ -491,17 +547,28 @@ async function loadUserProfileData() {
                             lud16: profile.lud16 || existingProfile.lud16 || null,
                             lud06: profile.lud06 || existingProfile.lud06 || null
                         };
-                        
-                        State.profileCache[State.publicKey] = userProfile;
+
+                        saveProfileToCache(State.publicKey, userProfile);
                         profileFound = true;
                         console.log('Updated profile cache with:', userProfile);
                         displayProfileHeader(userProfile);
                     }
                 }
                 
-                console.log('Profile fetch completed. Profile found:', profileFound);
-                
-                if (!profileFound) {
+                console.log('📊 Profile fetch completed. Profile found:', profileFound);
+                console.log('📊 Total profile events received:', profileEvents.length);
+
+                if (profileEvents.length === 0) {
+                    console.warn('⚠️ NO PROFILE EVENTS RECEIVED FROM ANY RELAY');
+                    console.warn('⚠️ This could mean:');
+                    console.warn('   1. Profile not yet synced to read relays');
+                    console.warn('   2. Read/write relay mismatch');
+                    console.warn('   3. Relays not storing kind 0 events');
+                    console.warn('   4. iOS WebSocket connection issues');
+                }
+
+                // Only create default profile if NO cached profile exists
+                if (!profileFound && !State.profileCache[State.publicKey]) {
                     console.log('=== NO PROFILE FOUND - CREATING DEFAULT ===');
                     // Create a comprehensive default profile
                     const defaultProfile = {
@@ -514,10 +581,12 @@ async function loadUserProfileData() {
                         website: null,
                         created_at: Math.floor(Date.now() / 1000)
                     };
-                    
+
                     console.log('Created default profile:', defaultProfile);
-                    State.profileCache[State.publicKey] = defaultProfile;
+                    saveProfileToCache(State.publicKey, defaultProfile);
                     displayProfileHeader(defaultProfile);
+                } else if (!profileFound && State.profileCache[State.publicKey]) {
+                    console.log('✅ Profile fetch failed but cached profile exists - keeping cached version');
                 }
             }
         });
@@ -538,8 +607,10 @@ async function loadUserProfileData() {
                     monero_address: localStorage.getItem('user-monero-address') || null,
                     created_at: Math.floor(Date.now() / 1000)
                 };
-                State.profileCache[State.publicKey] = fallbackProfile;
+                saveProfileToCache(State.publicKey, fallbackProfile);
                 displayProfileHeader(fallbackProfile);
+            } else if (!profileFound && State.profileCache[State.publicKey]) {
+                console.log('✅ Profile fetch timed out but cached profile exists - keeping cached version');
             }
         }, 5000);
         
@@ -3279,6 +3350,7 @@ async function saveSettings() {
 
         delete profileData.pubkey;
         delete profileData.created_at;
+        delete profileData.monero_address;  // Monero address goes to NIP-78 relay, not kind 0 profile
 
         console.log('🔍 Original Lightning address:', currentProfile.lud16 || currentProfile.lud06 || 'None');
         console.log('🔍 New Lightning address from form:', lightningAddress || 'Empty');
@@ -3325,15 +3397,53 @@ async function saveSettings() {
         // Sign the event using helper function
         const signedProfileEvent = await Utils.signEvent(profileEvent);
 
-        const relays = await Relays.getWriteRelays();
-        await State.pool.publish(relays, signedProfileEvent);
+        const writeRelays = await Relays.getWriteRelays();
+        const readRelays = await Relays.getReadRelays();
+
+        console.log('📤 Publishing profile to write relays:', writeRelays);
+        console.log('📥 Will fetch profile from read relays:', readRelays);
+
+        // Check for relay mismatch
+        const writeSet = new Set(writeRelays);
+        const readSet = new Set(readRelays);
+        const onlyInWrite = writeRelays.filter(r => !readSet.has(r));
+        const onlyInRead = readRelays.filter(r => !writeSet.has(r));
+
+        if (onlyInWrite.length > 0 || onlyInRead.length > 0) {
+            console.warn('⚠️ RELAY MISMATCH DETECTED:');
+            if (onlyInWrite.length > 0) {
+                console.warn('  📤 Only in WRITE:', onlyInWrite);
+            }
+            if (onlyInRead.length > 0) {
+                console.warn('  📥 Only in READ:', onlyInRead);
+            }
+            console.warn('  ⚠️ Profile may not be fetchable after save!');
+        } else {
+            console.log('✅ Read/Write relays match - profile should be fetchable');
+        }
+
+        console.log('📤 Profile event ID:', signedProfileEvent.id);
+        console.log('📤 Profile event content preview:', JSON.stringify(profileData).substring(0, 100));
+
+        const publishResults = await Promise.allSettled(
+            writeRelays.map(relay => State.pool.publish([relay], signedProfileEvent))
+        );
+
+        publishResults.forEach((result, index) => {
+            if (result.status === 'fulfilled') {
+                console.log(`✅ Published to ${writeRelays[index]}`);
+            } else {
+                console.error(`❌ Failed to publish to ${writeRelays[index]}:`, result.reason);
+            }
+        });
+
         console.log('📡 Profile event published to relays');
 
-        State.profileCache[State.publicKey] = {
+        saveProfileToCache(State.publicKey, {
             ...profileData,
             pubkey: State.publicKey,
             created_at: signedProfileEvent.created_at
-        };
+        });
 
         if (moneroAddress) {
             await saveMoneroAddressToRelays(moneroAddress);
