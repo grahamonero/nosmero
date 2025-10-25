@@ -4,6 +4,7 @@
 
 import { encryptData, decryptData, deriveKey } from './crypto.js';
 import { showNotification } from './utils.js';
+import { loadNostrLogin } from './nostr-login-loader.js';
 import * as State from './state.js';
 import {
     setPrivateKey,
@@ -599,8 +600,22 @@ export async function completeNsecAppLogin() {
 /**
  * Initialize nostr-login event listeners
  * This handles the OAuth-like flow where nsec.app connects back to us
+ * If user has a previous nsec.app session, loads the library to restore it
  */
-export function initNostrLogin() {
+export async function initNostrLogin() {
+    // Check if user has previous nsec.app session
+    const needsNostrLogin = localStorage.getItem('nostr-private-key') === 'nsec-app';
+
+    if (needsNostrLogin) {
+        console.log('🔄 nsec.app session detected, loading nostr-login...');
+        try {
+            await loadNostrLogin();
+            console.log('✅ nostr-login loaded, waiting for auto-restore...');
+        } catch (error) {
+            console.error('❌ Failed to load nostr-login:', error);
+        }
+    }
+
     // Listen for authentication events from nostr-login
     document.addEventListener('nlAuth', async (e) => {
         if (e.detail.type === 'login' || e.detail.type === 'signup') {
@@ -620,10 +635,10 @@ export function initNostrLogin() {
                 // Clear any existing user settings to ensure fresh login
                 clearUserSettings();
 
-                // Set state (same as extension login)
+                // Set state (mark as nsec.app OAuth login)
                 setPublicKey(pubKey);
-                setPrivateKey('extension'); // Mark as extension-type (uses window.nostr)
-                localStorage.setItem('nostr-private-key', 'extension');
+                setPrivateKey('nsec-app'); // Mark as nsec.app OAuth (uses window.nostr from nostr-login)
+                localStorage.setItem('nostr-private-key', 'nsec-app');
                 localStorage.setItem('nostr-public-key', pubKey);
 
                 showNotification('nsec.app login successful!', 'success');
@@ -680,15 +695,17 @@ export function initNostrLogin() {
 }
 
 // Initialize nostr-login when this module loads
-// This is safe to call even if nostr-login script hasn't loaded yet
+// Loads the library dynamically if user has a previous nsec.app session
 // The event listener will be ready when nostr-login fires its events
 if (typeof document !== 'undefined') {
     // Wait for DOM to be ready
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initNostrLogin);
+        document.addEventListener('DOMContentLoaded', () => {
+            initNostrLogin().catch(err => console.error('Error initializing nostr-login:', err));
+        });
     } else {
         // DOM already loaded
-        initNostrLogin();
+        initNostrLogin().catch(err => console.error('Error initializing nostr-login:', err));
     }
 }
 

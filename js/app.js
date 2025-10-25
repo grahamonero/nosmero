@@ -151,10 +151,17 @@ async function checkExistingSession() {
         State.setPrivateKey(storedPrivateKey);
 
         if (storedPrivateKey === 'extension') {
-            // Extension user
+            // Traditional browser extension user (nos2x, Alby, etc.)
             if (storedPublicKey) {
                 State.setPublicKey(storedPublicKey);
             }
+        } else if (storedPrivateKey === 'nsec-app') {
+            // nsec.app OAuth user (nostr-login provides window.nostr)
+            // The nostr-login library is already loaded by auth.js initNostrLogin()
+            if (storedPublicKey) {
+                State.setPublicKey(storedPublicKey);
+            }
+            console.log('🌐 nsec.app session detected, nostr-login should auto-restore');
         } else if (storedPrivateKey === 'nip46') {
             // NIP-46 (Amber) user - restore remote signer connection
             console.log('📱 Restoring NIP-46 connection...');
@@ -1184,8 +1191,12 @@ async function loadSettings_OLD_DISABLED() {
                     <label style="color: #ccc; display: block; margin-bottom: 8px;">Private Key Storage</label>
                     <div style="background: #333; padding: 15px; border-radius: 8px;">
                         <p style="color: #fff; margin: 0; font-size: 14px;">
-                            ${State.privateKey === 'extension' ? 
-                                '🔌 Using browser extension (most secure)' : 
+                            ${State.privateKey === 'extension' ?
+                                '🔌 Using browser extension (most secure)' :
+                                State.privateKey === 'nsec-app' ?
+                                '🌐 Using nsec.app OAuth (most secure)' :
+                                State.privateKey === 'nip46' ?
+                                '📱 Using Amber remote signer (most secure)' :
                                 '💾 Stored locally (encrypted recommended)'
                             }
                         </p>
@@ -1667,7 +1678,17 @@ function exportPrivateKey() {
         alert('Cannot export private key from browser extension. Check your extension settings.');
         return;
     }
-    
+
+    if (State.privateKey === 'nsec-app') {
+        alert('Cannot export private key from nsec.app. Your keys are managed by nsec.app.');
+        return;
+    }
+
+    if (State.privateKey === 'nip46') {
+        alert('Cannot export private key from Amber. Your keys are managed by your Amber signer.');
+        return;
+    }
+
     if (!State.privateKey) {
         alert('No private key available to export');
         return;

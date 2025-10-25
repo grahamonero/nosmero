@@ -3,6 +3,7 @@
 // Functions for modal management, forms, themes, navigation, file uploads, and QR codes
 
 import { showNotification, signEvent } from './utils.js';
+import { loadNostrLogin } from './nostr-login-loader.js';
 import * as State from './state.js';
 import { zapQueue, privateKey } from './state.js';
 
@@ -212,18 +213,35 @@ export function showLoginWithNIP46() {
 }
 
 // Show NIP-46 (nsec.app) login interface using nostr-login library
-export function showLoginWithNsecApp() {
+export async function showLoginWithNsecApp() {
     hideLoginModal();
 
     try {
+        // Show a loading message while we load nostr-login
+        const feed = document.getElementById('feed');
+        if (feed) {
+            feed.innerHTML = `
+                <div id="nsecAppLoginContainer" style="padding: 40px; text-align: center; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #8B5CF6; margin-bottom: 30px;">🌐 Loading nsec.app...</h2>
+                    <p style="color: #ccc; margin-bottom: 30px;">
+                        Please wait while we load the authentication library...
+                    </p>
+                </div>
+            `;
+        }
+
+        // Load nostr-login library first if not already loaded
+        console.log('📥 Loading nostr-login for nsec.app...');
+        await loadNostrLogin();
+        console.log('✅ nostr-login loaded, launching OAuth...');
+
         // Launch the nostr-login widget by dispatching custom event
         // This will show a popup/modal for OAuth-like authentication with nsec.app
         document.dispatchEvent(new CustomEvent('nlLaunch', {
             detail: 'welcome'
         }));
 
-        // Show a loading message in the feed area while waiting for OAuth
-        const feed = document.getElementById('feed');
+        // Update the loading message to show OAuth is starting
         if (feed) {
             feed.innerHTML = `
                 <div id="nsecAppLoginContainer" style="padding: 40px; text-align: center; max-width: 600px; margin: 0 auto;">

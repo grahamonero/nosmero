@@ -116,17 +116,17 @@ export async function encryptMessage(content, recipientPubkey, privateKey) {
 
 export async function decryptMessage(encryptedContent, otherPubkey, privateKey) {
     try {
-        if (privateKey === 'extension') {
-            // Use browser extension for decryption
+        if (privateKey === 'extension' || privateKey === 'nsec-app') {
+            // Use window.nostr for decryption (browser extension or nsec.app)
             if (!window.nostr || !window.nostr.nip04) {
-                console.error('Extension does not support NIP-04 decryption');
+                console.error('window.nostr does not support NIP-04 decryption');
                 return null;
             }
 
             try {
                 return await window.nostr.nip04.decrypt(otherPubkey, encryptedContent);
             } catch (e) {
-                console.error('Extension failed to decrypt:', e);
+                console.error('Failed to decrypt with window.nostr:', e);
                 return null;
             }
         } else {

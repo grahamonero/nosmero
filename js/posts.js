@@ -2671,11 +2671,11 @@ async function uploadMediaToBlossom() {
     try {
         // Create NIP-98 auth event
         let authEvent;
-        
-        if (State.privateKey === 'extension') {
-            // Use browser extension to sign
+
+        if (State.privateKey === 'extension' || State.privateKey === 'nsec-app') {
+            // Use window.nostr to sign (browser extension or nsec.app)
             if (!window.nostr) {
-                throw new Error('Nostr extension not available');
+                throw new Error('window.nostr not available');
             }
             
             const unsignedEvent = {

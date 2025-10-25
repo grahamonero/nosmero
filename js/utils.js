@@ -77,11 +77,12 @@ export function showNotification(message, type = 'success') {
  * @returns {Promise<Object>} Signed event
  */
 export async function signEvent(eventTemplate) {
-    // Check if user is using browser extension (nos2x, Alby, etc.)
-    if (State.privateKey === 'extension') {
-        // Use browser extension's signing
+    // Check if user is using browser extension (nos2x, Alby, etc.) or nsec.app
+    if (State.privateKey === 'extension' || State.privateKey === 'nsec-app') {
+        // Use window.nostr for signing (provided by extension or nostr-login)
         if (!window.nostr) {
-            throw new Error('Browser extension not found. Please ensure your Nostr extension is active.');
+            const source = State.privateKey === 'extension' ? 'Browser extension' : 'nsec.app';
+            throw new Error(`${source} not found. Please ensure your Nostr ${State.privateKey === 'extension' ? 'extension' : 'connection'} is active.`);
         }
         return await window.nostr.signEvent(eventTemplate);
     }
