@@ -167,8 +167,43 @@ async function waitForNostrTools() {
 
 // Check for existing user session
 async function checkExistingSession() {
-    const storedPrivateKey = localStorage.getItem('nostr-private-key');
+    const isEncrypted = localStorage.getItem('encryption-enabled') === 'true';
     const storedPublicKey = localStorage.getItem('nostr-public-key');
+    let storedPrivateKey = null;
+
+    // Check for encrypted key first
+    if (isEncrypted) {
+        console.log('🔐 Found encrypted session, prompting for PIN...');
+
+        try {
+            const Auth = await import('./auth.js');
+
+            // Prompt for PIN to decrypt
+            const pin = await Auth.showPinModal('unlock');
+
+            if (!pin) {
+                console.log('PIN entry cancelled, session not restored');
+                return;
+            }
+
+            // Try to decrypt the key
+            storedPrivateKey = await Auth.getSecurePrivateKey(pin);
+
+            if (!storedPrivateKey) {
+                alert('Incorrect PIN. Please try again or logout and re-login.');
+                return;
+            }
+
+            console.log('✅ Successfully decrypted private key');
+        } catch (error) {
+            console.error('Error decrypting key:', error);
+            alert('Failed to decrypt your private key. You may need to re-login.');
+            return;
+        }
+    } else {
+        // Check for unencrypted key (legacy or extension)
+        storedPrivateKey = localStorage.getItem('nostr-private-key');
+    }
 
     if (storedPrivateKey) {
         console.log('👤 Found existing session, logging in...');
@@ -215,7 +250,12 @@ async function checkExistingSession() {
             } catch (error) {
                 console.error('Failed to derive public key:', error);
                 // Clear invalid session
-                localStorage.removeItem('nostr-private-key');
+                if (isEncrypted) {
+                    localStorage.removeItem('nostr-private-key-encrypted');
+                    localStorage.removeItem('encryption-enabled');
+                } else {
+                    localStorage.removeItem('nostr-private-key');
+                }
                 localStorage.removeItem('nostr-public-key');
             }
         }

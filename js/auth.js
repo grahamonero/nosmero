@@ -230,16 +230,33 @@ export async function loginWithNsec() {
             alert('Invalid private key - cannot generate public key');
             return;
         }
-        
-        // All validation passed, store and login
+
+        // All validation passed - now prompt for PIN to encrypt the key
+        console.log('✅ Private key validated, prompting for PIN...');
+
+        // Show PIN modal and wait for PIN entry
+        const pin = await showPinModal('create');
+        if (!pin) {
+            console.log('PIN entry cancelled');
+            return;
+        }
+
+        console.log('🔐 Encrypting private key with PIN...');
+
+        // Store encrypted private key
+        await storeSecurePrivateKey(normalizedKey, pin);
+
+        // Also store in state for immediate use
         setPrivateKey(normalizedKey);
-        localStorage.setItem('nostr-private-key', normalizedKey);
 
         // Generate and set public key
         const derivedPublicKey = getPublicKey(normalizedKey);
         setPublicKey(derivedPublicKey);
 
-        showNotification('Login successful!', 'success');
+        // Mark login method
+        localStorage.setItem('login-method', 'nsec');
+
+        showNotification('Login successful! Your key is encrypted with your PIN.', 'success');
 
         // Load user's NIP-65 relay list after successful login
         try {
@@ -771,6 +788,112 @@ function updateUIForLogout() {
     }
 }
 
+// ==================== PIN MODAL MANAGEMENT ====================
+
+let pinResolve = null;
+let pinReject = null;
+
+// Show PIN modal and return a Promise that resolves with the PIN
+export function showPinModal(mode = 'create') {
+    return new Promise((resolve, reject) => {
+        pinResolve = resolve;
+        pinReject = reject;
+
+        const modal = document.getElementById('pinModal');
+        const message = document.getElementById('pinModalMessage');
+        const confirmSection = document.getElementById('pinConfirmSection');
+        const pinInput = document.getElementById('pinInput');
+        const pinConfirmInput = document.getElementById('pinConfirmInput');
+
+        if (!modal) {
+            reject(new Error('PIN modal not found'));
+            return;
+        }
+
+        // Reset inputs
+        if (pinInput) pinInput.value = '';
+        if (pinConfirmInput) pinConfirmInput.value = '';
+
+        // Configure modal based on mode
+        if (mode === 'create') {
+            message.textContent = 'Create a PIN to encrypt your private key';
+            confirmSection.style.display = 'block';
+        } else if (mode === 'unlock') {
+            message.textContent = 'Enter your PIN to unlock your account';
+            confirmSection.style.display = 'none';
+        }
+
+        // Show modal
+        modal.style.display = 'flex';
+
+        // Focus on first input
+        setTimeout(() => {
+            if (pinInput) pinInput.focus();
+        }, 100);
+    });
+}
+
+// Handle PIN submission
+export function submitPin() {
+    const pinInput = document.getElementById('pinInput');
+    const pinConfirmInput = document.getElementById('pinConfirmInput');
+    const confirmSection = document.getElementById('pinConfirmSection');
+
+    if (!pinInput) {
+        alert('PIN input not found');
+        return;
+    }
+
+    const pin = pinInput.value.trim();
+
+    // Validate PIN length
+    if (pin.length < 4 || pin.length > 8) {
+        alert('PIN must be 4-8 characters');
+        return;
+    }
+
+    // Check if confirmation is needed
+    if (confirmSection && confirmSection.style.display !== 'none') {
+        if (!pinConfirmInput) {
+            alert('PIN confirmation input not found');
+            return;
+        }
+
+        const confirmPin = pinConfirmInput.value.trim();
+
+        if (pin !== confirmPin) {
+            alert('PINs do not match. Please try again.');
+            pinConfirmInput.value = '';
+            pinConfirmInput.focus();
+            return;
+        }
+    }
+
+    // Hide modal
+    const modal = document.getElementById('pinModal');
+    if (modal) modal.style.display = 'none';
+
+    // Resolve the promise with the PIN
+    if (pinResolve) {
+        pinResolve(pin);
+        pinResolve = null;
+        pinReject = null;
+    }
+}
+
+// Handle PIN cancellation
+export function cancelPin() {
+    const modal = document.getElementById('pinModal');
+    if (modal) modal.style.display = 'none';
+
+    // Resolve with null (cancelled)
+    if (pinResolve) {
+        pinResolve(null);
+        pinResolve = null;
+        pinReject = null;
+    }
+}
+
 // Make functions available globally for window calls
 window.createNewAccount = createNewAccount;
 window.loginWithNsec = loginWithNsec;
@@ -782,3 +905,6 @@ window.connectToNsecApp = connectToNsecApp;
 window.completeNsecAppLogin = completeNsecAppLogin;
 window.logout = logout;
 window.updateUIForLogout = updateUIForLogout;
+window.showPinModal = showPinModal;
+window.submitPin = submitPin;
+window.cancelPin = cancelPin;

@@ -220,6 +220,27 @@
                 <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
                     Your private key starts with "nsec1..."
                 </div>
+
+                <!-- Security warning about PIN encryption -->
+                <div style="margin-bottom: 16px; padding: 14px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
+                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">🔐 Security Notice</div>
+                    <div style="color: #ccc; font-size: 13px; line-height: 1.5;">
+                        Your private key will be encrypted with a PIN and stored in your browser.
+                        <strong style="color: #FF6600;">If you forget your PIN, you'll need to re-login with your nsec.</strong>
+                    </div>
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(139, 92, 246, 0.2);">
+                        <div style="color: #999; font-size: 12px; margin-bottom: 6px;">For better security, consider:</div>
+                        <ul style="margin: 0; padding-left: 20px; color: #999; font-size: 12px;">
+                            <li>Using a browser extension (Alby, nos2x)</li>
+                            <li>Using Amber on Android</li>
+                            <li>Using nsec.app for remote signing</li>
+                        </ul>
+                    </div>
+                    <div style="margin-top: 8px; color: #666; font-size: 11px; font-style: italic;">
+                        ⚠️ Only use this login method on devices you trust
+                    </div>
+                </div>
+
                 <button class="send-btn" onclick="loginWithNsec()">Login</button>
                 <button class="close-btn" onclick="backToLoginOptions()">Back</button>
             </div>
@@ -521,6 +542,44 @@
                     Scan with your Monero wallet
                 </div>
                 <button class="close-btn" onclick="closeZapModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PIN Entry Modal (for encrypted key storage) -->
+    <div class="modal" id="pinModal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">🔐 Secure Your Account</div>
+            <div style="padding: 20px;">
+                <p id="pinModalMessage" style="margin-bottom: 20px; color: #ccc;">Create a PIN to encrypt your private key</p>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999;">Enter PIN (4-8 digits)</label>
+                    <input type="password" id="pinInput"
+                           placeholder="Enter PIN..."
+                           maxlength="8"
+                           style="width: 100%; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 4px;">
+                </div>
+
+                <div id="pinConfirmSection" style="margin-bottom: 20px; display: none;">
+                    <label style="display: block; margin-bottom: 8px; color: #999;">Confirm PIN</label>
+                    <input type="password" id="pinConfirmInput"
+                           placeholder="Confirm PIN..."
+                           maxlength="8"
+                           style="width: 100%; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 4px;">
+                </div>
+
+                <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 6px; padding: 12px; margin-top: 16px;">
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 4px;">⚠️ Important</div>
+                    <div style="color: #999; font-size: 13px;">
+                        Your PIN encrypts your private key in browser storage. Don't forget it - we cannot recover it!
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="send-btn" id="pinSubmitBtn" onclick="submitPin()"
+                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Continue</button>
+                <button class="close-btn" id="pinCancelBtn" onclick="cancelPin()">Cancel</button>
             </div>
         </div>
     </div>
