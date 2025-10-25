@@ -461,6 +461,14 @@
                 </div>
             </div>
 
+            <div class="settings-section">
+                <h3>Muted Users</h3>
+                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Users you've muted won't appear in your feed or tip disclosures</p>
+                <div id="mutedUsersList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
+                    <!-- Muted users will be populated by JavaScript -->
+                </div>
+            </div>
+
             <div class="modal-actions">
                 <button class="close-btn" onclick="closeSettingsModal()">Close</button>
                 <button class="send-btn" onclick="saveSettings()">Save</button>
@@ -503,7 +511,7 @@
     <!-- Zap Modal -->
     <div class="modal" id="zapModal">
         <div class="modal-content">
-            <div class="modal-header">Send Monero Zap</div>
+            <div class="modal-header">Tip with Monero</div>
             <div id="zapDetails"></div>
             <div class="qr-container">
                 <div id="qrCode"></div>
@@ -513,6 +521,28 @@
                     Scan with your Monero wallet
                 </div>
                 <button class="close-btn" onclick="closeZapModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Disclosure Prompt Modal -->
+    <div class="modal" id="disclosurePromptModal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">💰 Did you send a tip?</div>
+            <div style="padding: 20px;">
+                <p style="margin-bottom: 20px; color: #ccc;">You can make your tip public so the community can see your support!</p>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999;">Public Message (optional)</label>
+                    <textarea id="disclosurePromptMessage" rows="3"
+                              placeholder="Add a message with your tip..."
+                              style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; resize: vertical;"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="send-btn" onclick="submitDisclosurePrompt()"
+                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Make It Public</button>
+                <button class="close-btn" onclick="closeDisclosurePromptModal()">Keep it Private</button>
             </div>
         </div>
     </div>
@@ -554,6 +584,6 @@
     <script src="/lib/nostr-tools.bundle.js"></script>
 
     <!-- Load the modular v2 application -->
-    <script type="module" src="/js/app.js?v=2.9.5"></script>
+    <script type="module" src="/js/app.js?v=2.9.12"></script>
 </body>
 </html>

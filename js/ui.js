@@ -3,9 +3,17 @@
 // Functions for modal management, forms, themes, navigation, file uploads, and QR codes
 
 import { showNotification, signEvent } from './utils.js';
+import { wrapGiftMessage } from './crypto.js';
 import { loadNostrLogin } from './nostr-login-loader.js';
 import * as State from './state.js';
 import { zapQueue, privateKey } from './state.js';
+
+// Nosmerotips Bot npub (for receiving disclosure notifications)
+const NOSMEROTIPS_BOT_NPUB = 'npub1fxyuwwup7hh3x4up5tgg9hmflhfzskvkryh236cau4ujkj7wramqzmy9f2';
+const NOSMEROTIPS_BOT_PUBKEY = '4989c73b81f5ef135781a2d082df69fdd2285996192ea8eb1de5792b4bce1f76';
+
+// Tip context storage for disclosure prompt after closing modal
+let lastTipContext = null;
 
 // ==================== WELCOME MODAL ====================
 
@@ -323,7 +331,7 @@ export function closeKeyModal() {
 // ==================== ZAP MODAL ====================
 
 // Open modal with QR code for sending Monero tips (zaps) to post authors
-export function openZapModal(postId, authorName, moneroAddress, mode = 'choose', customAmount = null) {
+export function openZapModal(postId, authorName, moneroAddress, mode = 'choose', customAmount = null, recipientPubkey = null) {
     const modal = document.getElementById('zapModal');
     const details = document.getElementById('zapDetails');
 
@@ -332,7 +340,26 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
     const defaultAmount = localStorage.getItem('default-zap-amount') || '0.00018';
     const amount = customAmount || defaultAmount;
     const truncatedPostId = postId.slice(0, 8);
-    
+
+    // Store data for disclosure - preserve existing recipientPubkey if new one is not provided
+    console.log('📍 openZapModal - recipientPubkey:', recipientPubkey);
+    if (recipientPubkey) {
+        modal.dataset.recipientPubkey = recipientPubkey;
+    } else if (!modal.dataset.recipientPubkey) {
+        modal.dataset.recipientPubkey = '';
+    }
+    modal.dataset.postId = postId;
+    modal.dataset.moneroAddress = moneroAddress;
+
+    // Store tip context for disclosure prompt after modal closes
+    lastTipContext = {
+        postId,
+        authorName,
+        moneroAddress,
+        amount,
+        recipientPubkey: recipientPubkey || modal.dataset.recipientPubkey || ''
+    };
+
     if (mode === 'choose') {
         // Show options to either zap immediately or add to queue
         details.innerHTML = `
@@ -465,7 +492,11 @@ export function zapWithCustomAmount(postId, authorName, moneroAddress) {
         return;
     }
 
-    openZapModal(postId, authorName, moneroAddress, 'immediate', customAmount);
+    // Preserve recipientPubkey from modal dataset
+    const modal = document.getElementById('zapModal');
+    const recipientPubkey = modal?.dataset?.recipientPubkey || null;
+
+    openZapModal(postId, authorName, moneroAddress, 'immediate', customAmount, recipientPubkey);
 }
 
 // Generate QR code for Monero payment
@@ -550,6 +581,262 @@ export function closeZapModal() {
     const modal = document.getElementById('zapModal');
     if (modal) {
         modal.classList.remove('show');
+    }
+
+    // Show disclosure prompt if we have tip context
+    if (lastTipContext) {
+        showDisclosurePromptModal();
+    }
+}
+
+function showDisclosurePromptModal() {
+    const modal = document.getElementById('disclosurePromptModal');
+    const messageInput = document.getElementById('disclosurePromptMessage');
+
+    // Clear message
+    if (messageInput) {
+        messageInput.value = '';
+    }
+
+    modal.classList.add('show');
+}
+
+window.closeDisclosurePromptModal = function() {
+    const modal = document.getElementById('disclosurePromptModal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+    // Clear tip context
+    lastTipContext = null;
+}
+
+window.submitDisclosurePrompt = async function() {
+    if (!lastTipContext) {
+        showNotification('Tip context lost. Please try again.', 'error');
+        return;
+    }
+
+    const messageInput = document.getElementById('disclosurePromptMessage');
+    const message = messageInput?.value?.trim() || '';
+
+    // Use amount from tip context
+    const amount = lastTipContext.amount;
+
+    // Validate amount
+    if (!amount || parseFloat(amount) <= 0) {
+        showNotification('Invalid tip amount', 'error');
+        return;
+    }
+
+    // Save context to local variables before closing modal (which clears lastTipContext)
+    const postId = lastTipContext.postId;
+    const recipientPubkey = lastTipContext.recipientPubkey;
+    const moneroAddress = lastTipContext.moneroAddress;
+
+    // Close the modal (this will clear lastTipContext)
+    closeDisclosurePromptModal();
+
+    // Publish the disclosure using saved variables
+    await handleTipDisclosureFromPrompt(
+        postId,
+        recipientPubkey,
+        moneroAddress,
+        amount,
+        message
+    );
+}
+
+// ==================== TIP DISCLOSURE ====================
+
+// Handle tip disclosure from prompt modal (after closing zap modal)
+async function handleTipDisclosureFromPrompt(postId, recipientPubkey, moneroAddress, amount, message) {
+    try {
+        // Get required data
+        const senderPrivateKey = State.privateKey;
+        const senderPubkey = State.publicKey;
+
+        if (!senderPrivateKey || !senderPubkey) {
+            showNotification('You must be logged in to disclose tips', 'error');
+            return;
+        }
+
+        if (!recipientPubkey) {
+            showNotification('Recipient information missing', 'error');
+            return;
+        }
+
+        // Create kind 9736 Monero Zap Disclosure event
+        const zapEvent = {
+            kind: 9736,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ['p', String(recipientPubkey)],     // recipient
+                ['P', String(senderPubkey)],        // tipper (payer)
+                ['e', String(postId)],              // post being zapped
+                ['amount', String(amount)],         // XMR amount (must be string)
+                ['address', String(moneroAddress)]  // recipient's XMR address
+            ],
+            content: message || '',
+            pubkey: senderPubkey
+        };
+
+        console.log('📍 Creating kind 9736 event:', zapEvent);
+
+        // Sign the event
+        const signedEvent = window.NostrTools.finalizeEvent(zapEvent, senderPrivateKey);
+
+        console.log('📍 Signed event:', signedEvent);
+
+        // Publish directly to Nosmero relay
+        const nosmeroRelay = window.location.port === '8080'
+            ? 'ws://nosmero.com:8080/nip78-relay'
+            : 'wss://nosmero.com/nip78-relay';
+
+        console.log('📍 Publishing to Nosmero relay:', nosmeroRelay);
+
+        if (!State.pool) {
+            showNotification('No relay connection available', 'error');
+            return;
+        }
+
+        // Show notification that we're publishing
+        showNotification('Publishing tip disclosure...', 'info');
+
+        // Publish the event to Nosmero relay
+        const publishPromises = State.pool.publish([nosmeroRelay], signedEvent);
+        console.log('📍 Publish promises:', publishPromises);
+
+        // Wait for publish to complete
+        const results = await Promise.allSettled(publishPromises);
+        console.log('📍 Publish results:', results);
+
+        if (results[0].status === 'fulfilled') {
+            console.log(`  ✅ ${nosmeroRelay}: published successfully`);
+            showNotification('Tip disclosure published!', 'success');
+        } else {
+            console.log(`  ❌ ${nosmeroRelay}: ${results[0].reason?.message}`);
+            throw new Error('Failed to publish to Nosmero relay: ' + results[0].reason?.message);
+        }
+
+    } catch (error) {
+        console.error('❌ Error handling tip disclosure:', error);
+        showNotification(`Failed to publish disclosure: ${error.message}`, 'error');
+    }
+}
+
+// Handle tip disclosure (send notification to bot)
+async function handleTipDisclosure(postId, authorName, moneroAddress, buttonElement) {
+    try {
+        // Get disclosure data from inputs
+        const amountInput = document.getElementById('disclosureAmount');
+        const messageInput = document.getElementById('disclosureMessage');
+
+        const amount = amountInput?.value?.trim();
+        const message = messageInput?.value?.trim() || '';
+
+        // Validate amount
+        if (!amount || parseFloat(amount) <= 0) {
+            showNotification('Please enter a valid amount', 'error');
+            return;
+        }
+
+        // Get required data
+        const senderPrivateKey = State.privateKey;
+        const senderPubkey = State.publicKey;
+
+        if (!senderPrivateKey || !senderPubkey) {
+            showNotification('You must be logged in to disclose tips', 'error');
+            return;
+        }
+
+        // Get recipient pubkey from modal dataset
+        const modal = document.getElementById('zapModal');
+        const recipientPubkey = modal?.dataset?.recipientPubkey || '';
+
+        console.log('📍 handleTipDisclosure - modal.dataset:', modal?.dataset);
+        console.log('📍 handleTipDisclosure - recipientPubkey:', recipientPubkey);
+
+        if (!recipientPubkey) {
+            showNotification('Recipient information missing. Please close and reopen the zap modal.', 'error');
+            return;
+        }
+
+        // Create kind 9736 Monero Zap Disclosure event
+        const zapEvent = {
+            kind: 9736,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ['p', String(recipientPubkey)],     // recipient
+                ['P', String(senderPubkey)],        // tipper (payer)
+                ['e', String(postId)],              // post being zapped
+                ['amount', String(amount)],         // XMR amount (must be string)
+                ['address', String(moneroAddress)]  // recipient's XMR address
+            ],
+            content: message || '',
+            pubkey: senderPubkey
+        };
+
+        console.log('📍 Creating kind 9736 event:', zapEvent);
+
+        // Sign the event
+        const signedEvent = window.NostrTools.finalizeEvent(zapEvent, senderPrivateKey);
+
+        console.log('📍 Signed event:', signedEvent);
+
+        // Publish directly to Nosmero relay
+        const nosmeroRelay = window.location.port === '8080'
+            ? 'ws://nosmero.com:8080/nip78-relay'
+            : 'wss://nosmero.com/nip78-relay';
+
+        console.log('📍 Publishing to Nosmero relay:', nosmeroRelay);
+
+        if (!State.pool) {
+            showNotification('No relay connection available', 'error');
+            return;
+        }
+
+        // Update button to show processing
+        const originalText = buttonElement.textContent;
+        buttonElement.textContent = '📤 Sending...';
+        buttonElement.disabled = true;
+
+        // Publish the event to Nosmero relay
+        const publishPromises = State.pool.publish([nosmeroRelay], signedEvent);
+        console.log('📍 Publish promises:', publishPromises);
+
+        // Wait for publish to complete
+        const results = await Promise.allSettled(publishPromises);
+        console.log('📍 Publish results:', results);
+
+        if (results[0].status === 'fulfilled') {
+            console.log(`  ✅ ${nosmeroRelay}: published successfully`);
+        } else {
+            console.log(`  ❌ ${nosmeroRelay}: ${results[0].reason?.message}`);
+            throw new Error('Failed to publish to Nosmero relay: ' + results[0].reason?.message);
+        }
+
+        // Success feedback
+        buttonElement.textContent = '✅ Disclosed!';
+        buttonElement.style.background = '#10B981'; // Green
+
+        showNotification(`Tip disclosure sent! ${authorName} will be notified.`, 'success');
+
+        // Reset button after 3 seconds
+        setTimeout(() => {
+            buttonElement.textContent = originalText;
+            buttonElement.style.background = 'linear-gradient(135deg, #8B5CF6, #FF6600)';
+            buttonElement.disabled = false;
+        }, 3000);
+
+    } catch (error) {
+        console.error('Failed to send tip disclosure:', error);
+        showNotification('Failed to send disclosure: ' + error.message, 'error');
+
+        // Reset button
+        if (buttonElement) {
+            buttonElement.textContent = '📢 Disclose This Tip';
+            buttonElement.disabled = false;
+        }
     }
 }
 
@@ -1049,6 +1336,14 @@ export async function openThreadView(eventId) {
             );
         }
 
+        // Fetch disclosed tips for all thread posts (pass full post objects for author moderation)
+        if (threadPosts.length > 0) {
+            const disclosedTipsData = await Posts.fetchDisclosedTips(threadPosts);
+            console.log('💰 Fetched disclosed tips for thread:', disclosedTipsData);
+            // Update the cache so renderSinglePost can access it
+            Object.assign(Posts.disclosedTipsCache, disclosedTipsData);
+        }
+
         // Build thread tree structure
         const threadTree = buildThreadTree(threadPosts, eventId);
         
@@ -1185,6 +1480,12 @@ export async function openSingleNoteView(eventId) {
                 }
             }
         }
+
+        // Fetch disclosed tips for this note (pass full post object for author moderation)
+        const disclosedTipsData = await Posts.fetchDisclosedTips([note]);
+        console.log('💰 Fetched disclosed tips for single note:', disclosedTipsData);
+        // Update the cache so renderSinglePost can access it
+        Object.assign(Posts.disclosedTipsCache, disclosedTipsData);
 
         // Render just this single note (highlighted)
         const noteHtml = await Posts.renderSinglePost(note, 'highlight');
@@ -2098,10 +2399,40 @@ export function viewPostSource() {
     copyPostJson(); // For now, just copy to clipboard
 }
 
-export function muteUser() {
+export async function muteUser() {
     if (!currentMenuPostId) return;
-    
-    showNotification('Mute functionality not yet implemented', 'info');
+
+    // Find the post in cache or posts array
+    const State = await import('./state.js');
+    const post = State.eventCache[currentMenuPostId] || State.posts.find(p => p.id === currentMenuPostId);
+
+    if (!post || !post.pubkey) {
+        showNotification('Cannot mute - post author not found', 'error');
+        document.getElementById('postMenu').style.display = 'none';
+        return;
+    }
+
+    // Don't allow muting yourself
+    if (post.pubkey === State.publicKey) {
+        showNotification('You cannot mute yourself', 'error');
+        document.getElementById('postMenu').style.display = 'none';
+        return;
+    }
+
+    // Import posts module and call muteUser
+    const Posts = await import('./posts.js');
+    const success = await Posts.muteUser(post.pubkey);
+
+    if (success) {
+        showNotification('User muted successfully', 'success');
+        // Reload the feed to hide posts from muted user
+        setTimeout(() => {
+            window.location.reload();
+        }, 1000);
+    } else {
+        showNotification('Failed to mute user', 'error');
+    }
+
     document.getElementById('postMenu').style.display = 'none';
 }
 

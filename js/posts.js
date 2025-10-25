@@ -24,6 +24,9 @@ let displayedPostCount = 0;    // How many posts are currently shown
 let isBackgroundFetching = false;
 let oldestCachedTimestamp = null;
 
+// Disclosed tips data cache
+export let disclosedTipsCache = {};
+
 // Clear all home feed state (used when switching users)
 export function clearHomeFeedState() {
     console.log('🧹 Clearing home feed state');
@@ -558,6 +561,192 @@ async function loadFreshFollowingList() {
     }
 }
 
+// ==================== MUTE LIST MANAGEMENT (NIP-51) ====================
+
+// Fetch mute list from relays (kind 10000)
+export async function fetchMuteList() {
+    console.log('🔇 Fetching mute list (kind 10000)...');
+
+    if (!State.publicKey) {
+        console.log('🔇 No publicKey, skipping mute list fetch');
+        return;
+    }
+
+    try {
+        const Relays = await import('./relays.js');
+        const readRelays = Relays.getUserDataRelays();
+
+        await new Promise((resolve) => {
+            const sub = State.pool.subscribeMany(readRelays, [
+                { kinds: [10000], authors: [State.publicKey], limit: 1 }
+            ], {
+                onevent(event) {
+                    try {
+                        const mutedPubkeys = new Set();
+                        event.tags.forEach(tag => {
+                            if (tag[0] === 'p' && tag[1]) {
+                                mutedPubkeys.add(tag[1]);
+                            }
+                        });
+
+                        State.setMutedUsers(mutedPubkeys);
+                        console.log('✅ Mute list loaded:', mutedPubkeys.size, 'users');
+                    } catch (error) {
+                        console.error('Error parsing mute list:', error);
+                    }
+                },
+                oneose: () => {
+                    sub.close();
+                    resolve();
+                }
+            });
+
+            // Timeout after 5 seconds
+            setTimeout(() => {
+                sub.close();
+                console.log('⏰ Mute list fetch timeout');
+                resolve();
+            }, 5000);
+        });
+
+    } catch (error) {
+        console.error('Error fetching mute list:', error);
+    }
+}
+
+// Publish updated mute list to relays (kind 10000)
+export async function publishMuteList() {
+    console.log('📤 Publishing mute list...');
+
+    if (!State.privateKey || !State.publicKey) {
+        console.error('Cannot publish mute list - no keys available');
+        return false;
+    }
+
+    try {
+        const Relays = await import('./relays.js');
+        const writeRelays = Relays.getUserDataRelays();
+
+        // Build tags array from muted users
+        const tags = Array.from(State.mutedUsers).map(pubkey => ['p', pubkey]);
+
+        // Create kind 10000 event
+        const muteListEvent = {
+            kind: 10000,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: tags,
+            content: '', // Public mutes only (no encryption for simplicity)
+            pubkey: State.publicKey
+        };
+
+        // Sign the event
+        const signedEvent = window.NostrTools.finalizeEvent(muteListEvent, State.privateKey);
+
+        // Publish to relays
+        const publishPromises = State.pool.publish(writeRelays, signedEvent);
+        await Promise.allSettled(publishPromises);
+
+        console.log('✅ Mute list published');
+        return true;
+    } catch (error) {
+        console.error('Error publishing mute list:', error);
+        return false;
+    }
+}
+
+// Add user to mute list
+export async function muteUser(pubkey) {
+    if (!pubkey) {
+        console.error('Cannot mute - no pubkey provided');
+        return false;
+    }
+
+    // Add to muted users set
+    State.mutedUsers.add(pubkey);
+
+    // Publish updated mute list
+    const success = await publishMuteList();
+
+    if (success) {
+        console.log('✅ User muted:', pubkey.substring(0, 16) + '...');
+    }
+
+    return success;
+}
+
+// Remove user from mute list
+export async function unmuteUser(pubkey) {
+    if (!pubkey) {
+        console.error('Cannot unmute - no pubkey provided');
+        return false;
+    }
+
+    // Remove from muted users set
+    State.mutedUsers.delete(pubkey);
+
+    // Publish updated mute list
+    const success = await publishMuteList();
+
+    if (success) {
+        console.log('✅ User unmuted:', pubkey.substring(0, 16) + '...');
+    }
+
+    return success;
+}
+
+// Fetch a specific user's public mute list (for author moderation)
+export async function fetchUserMuteList(pubkey) {
+    console.log('🔇 Fetching mute list for user:', pubkey.substring(0, 16) + '...');
+
+    if (!pubkey) {
+        return new Set();
+    }
+
+    try {
+        const Relays = await import('./relays.js');
+        const readRelays = Relays.getActiveRelays(); // Use active relays to fetch other users' data
+
+        const mutedPubkeys = new Set();
+
+        await new Promise((resolve) => {
+            const sub = State.pool.subscribeMany(readRelays, [
+                { kinds: [10000], authors: [pubkey], limit: 1 }
+            ], {
+                onevent(event) {
+                    try {
+                        event.tags.forEach(tag => {
+                            if (tag[0] === 'p' && tag[1]) {
+                                mutedPubkeys.add(tag[1]);
+                            }
+                        });
+                        console.log('✅ Found mute list with', mutedPubkeys.size, 'users');
+                    } catch (error) {
+                        console.error('Error parsing mute list:', error);
+                    }
+                },
+                oneose: () => {
+                    sub.close();
+                    resolve();
+                }
+            });
+
+            // Timeout after 3 seconds
+            setTimeout(() => {
+                sub.close();
+                resolve();
+            }, 3000);
+        });
+
+        return mutedPubkeys;
+
+    } catch (error) {
+        console.error('Error fetching user mute list:', error);
+        return new Set();
+    }
+}
+
+// ==================== END MUTE LIST MANAGEMENT ====================
+
 // Real-time relay post streaming (no cache involved)
 async function prepareProfiles() {
     const followingArray = Array.from(currentFollowingList);
@@ -855,7 +1044,18 @@ async function renderHomeFeedResults() {
     }
     console.log(`🎨 Rendering ${currentHomeFeedResults.length} notes to homeFeedList`);
 
-    let sortedResults = [...currentHomeFeedResults];
+    // Filter out posts from muted users
+    let sortedResults = currentHomeFeedResults.filter(post => {
+        if (State.mutedUsers.has(post.pubkey)) {
+            console.log('🔇 Filtered out post from muted user:', post.pubkey.substring(0, 16) + '...');
+            return false;
+        }
+        return true;
+    });
+
+    if (sortedResults.length < currentHomeFeedResults.length) {
+        console.log(`🔇 Filtered out ${currentHomeFeedResults.length - sortedResults.length} posts from muted users`);
+    }
 
     // Apply sorting based on mode
     switch (currentHomeFeedSortMode) {
@@ -893,11 +1093,25 @@ async function renderHomeFeedResults() {
     resultsEl.innerHTML = renderedPosts.join('');
     console.log('✅ Posts rendered instantly');
 
-    // 3. BACKGROUND: Fetch engagement counts and update DOM as they arrive
+    // 3. BACKGROUND: Fetch engagement counts and disclosed tips, update DOM as they arrive
     const postIds = sortedResults.map(p => p.id);
     fetchEngagementCounts(postIds).then(engagementData => {
         console.log('📊 Updating engagement counts...');
         updateEngagementCounts(engagementData);
+    });
+
+    // 4. BACKGROUND: Fetch disclosed tips (pass full post objects for author moderation)
+    fetchDisclosedTips(sortedResults).then(disclosedTipsData => {
+        console.log('💰 Updating disclosed tips...');
+        Object.assign(disclosedTipsCache, disclosedTipsData);
+        // Re-render posts to show disclosed tips
+        const renderedPostsWithTips = sortedResults.map(post => {
+            return renderSinglePost(post, 'feed', null, null);
+        });
+        Promise.all(renderedPostsWithTips).then(posts => {
+            resultsEl.innerHTML = posts.join('');
+            console.log('✅ Posts re-rendered with disclosed tips');
+        });
     });
 
     // 4. BACKGROUND: Fetch parent posts and insert as they arrive
@@ -1026,6 +1240,12 @@ export async function renderFeed(loadMore = false) {
     const postIds = postsToRender.map(p => p.id);
     const engagementData = await fetchEngagementCounts(postIds);
 
+    // Fetch disclosed tips for posts being rendered (pass full post objects for author moderation)
+    const disclosedTipsData = await fetchDisclosedTips(postsToRender);
+
+    // Cache disclosed tips data for later access
+    Object.assign(disclosedTipsCache, disclosedTipsData);
+
     // Extract all npub and nprofile mentions from posts being rendered and fetch their profiles first
     const allNpubs = new Set();
     postsToRender.forEach(post => {
@@ -1062,7 +1282,8 @@ export async function renderFeed(loadMore = false) {
         const moneroAddress = getMoneroAddress(post);
         const lightningAddress = getLightningAddress(post);
         const engagement = engagementData[post.id] || { reactions: 0, reposts: 0, replies: 0, zaps: 0 };
-        
+        const disclosedTips = disclosedTipsData[post.id] || { totalXMR: 0, count: 0, tips: [] };
+
         // Check if this is a reply and get parent post info
         const parentPost = parentPostsMap[post.id];
         let parentHtml = '';
@@ -1122,11 +1343,21 @@ export async function renderFeed(loadMore = false) {
                         '<button class="action-btn btc-zap" style="opacity: 0.3;" title="No Lightning address">⚡BTC</button>'
                     }
                     ${moneroAddress ?
-                        `<button class="action-btn xmr-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-monero-address="${moneroAddress.replace(/"/g, '&quot;')}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress)" title="Zap with Monero">⚡XMR</button>` :
-                        '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">⚡XMR</button>'
+                        `<button class="action-btn xmr-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-monero-address="${moneroAddress.replace(/"/g, '&quot;')}" data-recipient-pubkey="${post.pubkey}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress, 'choose', null, this.dataset.recipientPubkey)" title="Tip with Monero">💰XMR</button>` :
+                        '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">💰XMR</button>'
                     }
                     <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>
                 </div>
+                ${(disclosedTips.count > 0 || disclosedTips.mutedCount > 0) ? `
+                <div style="padding: 8px 12px; margin-top: 8px; background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border-radius: 8px; border: 1px solid rgba(255, 102, 0, 0.2);">
+                    <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
+                        <div style="color: #FF6600; font-weight: bold;">
+                            💰 Public Tips to this Note: ${disclosedTips.totalXMR.toFixed(4)} XMR (${disclosedTips.count})${disclosedTips.mutedCount > 0 ? ` <span style="color: #999; font-weight: normal; font-size: 12px;">[${disclosedTips.mutedCount} muted by author]</span>` : ''}
+                        </div>
+                        <button onclick="showDisclosedTipDetails('${post.id}', event)" style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">View Details</button>
+                    </div>
+                </div>
+                ` : ''}
                 </div>
             </div>
         `;
@@ -1917,6 +2148,146 @@ export async function fetchEngagementCounts(postIds) {
     }
 }
 
+// Fetch disclosed Monero tips (kind 9736 events)
+// Accepts either array of postIds (legacy) or array of post objects (for author moderation)
+export async function fetchDisclosedTips(postsOrIds) {
+    try {
+        console.log('💰 fetchDisclosedTips called with:', postsOrIds.length, 'items');
+        console.log('  First item type:', typeof postsOrIds[0]);
+        console.log('  First item has id:', postsOrIds[0]?.id ? 'YES' : 'NO');
+        console.log('  First item sample:', postsOrIds[0]);
+
+        // Handle both postIds array and posts array
+        let postIds, authorMuteLists;
+
+        if (postsOrIds.length > 0 && typeof postsOrIds[0] === 'object' && postsOrIds[0].id) {
+            // Array of post objects - extract IDs and fetch author mute lists
+            const posts = postsOrIds;
+            postIds = posts.map(p => p.id);
+
+            // Fetch mute lists for all unique post authors
+            const uniqueAuthors = [...new Set(posts.map(p => p.pubkey))];
+            console.log('🔇 Fetching mute lists for', uniqueAuthors.length, 'post authors...');
+
+            authorMuteLists = {};
+            await Promise.all(
+                uniqueAuthors.map(async (authorPubkey) => {
+                    authorMuteLists[authorPubkey] = await fetchUserMuteList(authorPubkey);
+                })
+            );
+
+            // Create map of postId -> author's mute list
+            const postAuthorMutes = {};
+            posts.forEach(post => {
+                postAuthorMutes[post.id] = authorMuteLists[post.pubkey] || new Set();
+            });
+            authorMuteLists = postAuthorMutes;
+
+        } else {
+            // Array of post IDs only - no author moderation
+            postIds = postsOrIds;
+            authorMuteLists = {}; // Empty - no filtering
+        }
+
+        // Query Nosmero relay for disclosures
+        const nosmeroRelay = window.location.port === '8080'
+            ? 'ws://nosmero.com:8080/nip78-relay'
+            : 'wss://nosmero.com/nip78-relay';
+
+        console.log('🔍 Fetching disclosed tips for', postIds.length, 'posts from', nosmeroRelay);
+
+        const disclosures = {};
+
+        // Initialize disclosures for all post IDs
+        postIds.forEach(id => {
+            disclosures[id] = { totalXMR: 0, count: 0, mutedCount: 0, tips: [] };
+        });
+
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                console.log('⏱️ Disclosure fetch timeout (2s), returning current data');
+                resolve(disclosures);
+            }, 2000);
+
+            const sub = State.pool.subscribeMany([nosmeroRelay], [
+                {
+                    kinds: [9736], // Monero Zap Disclosure
+                    '#e': postIds
+                }
+            ], {
+                onevent(event) {
+                    try {
+                        console.log('📨 Received kind 9736 event:', event.id.substring(0, 16) + '...', event);
+
+                        // Find which post this disclosure references
+                        const referencedPostId = event.tags.find(tag =>
+                            tag[0] === 'e' && postIds.includes(tag[1])
+                        )?.[1];
+
+                        console.log('  Referenced post:', referencedPostId);
+
+                        if (!referencedPostId || !disclosures[referencedPostId]) {
+                            console.log('  ⚠️ Post not found in current list');
+                            return;
+                        }
+
+                        // Extract amount from tags
+                        const amountTag = event.tags.find(tag => tag[0] === 'amount');
+                        const amount = amountTag ? parseFloat(amountTag[1]) : 0;
+
+                        // Extract tipper pubkey (P tag)
+                        const tipperTag = event.tags.find(tag => tag[0] === 'P');
+                        const tipperPubkey = tipperTag ? tipperTag[1] : null;
+
+                        // Check if tip is muted by POST AUTHOR (not viewer)
+                        const authorMuteList = authorMuteLists[referencedPostId] || new Set();
+                        const mutedByAuthor = tipperPubkey && authorMuteList.has(tipperPubkey);
+
+                        if (mutedByAuthor) {
+                            console.log('  🔇 Tip muted by post author:', tipperPubkey.substring(0, 16) + '...');
+                        }
+
+                        if (amount > 0) {
+                            // Always add tip to list, but mark if muted by author
+                            disclosures[referencedPostId].tips.push({
+                                amount,
+                                tipper: tipperPubkey,
+                                message: event.content,
+                                timestamp: event.created_at,
+                                mutedByAuthor: mutedByAuthor
+                            });
+
+                            // Only include non-muted tips in totals
+                            if (!mutedByAuthor) {
+                                disclosures[referencedPostId].totalXMR += amount;
+                                disclosures[referencedPostId].count++;
+                            } else {
+                                disclosures[referencedPostId].mutedCount++;
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error processing disclosure event:', error);
+                    }
+                },
+                oneose() {
+                    clearTimeout(timeout);
+                    sub.close();
+                    console.log('✅ Disclosed tips fetch complete:', disclosures);
+                    resolve(disclosures);
+                }
+            });
+        });
+
+    } catch (error) {
+        console.error('Error fetching disclosed tips:', error);
+        const disclosures = {};
+        postIds.forEach(id => {
+            disclosures[id] = { totalXMR: 0, count: 0, tips: [] };
+        });
+        return disclosures;
+    }
+}
+
 // Fetch profiles from major public relays (fast, non-blocking)
 export async function fetchProfiles(pubkeys) {
     if (!pubkeys || pubkeys.length === 0) return;
@@ -2138,6 +2509,9 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
             // DO NOT fallback fetch - streaming render will update counts in background
         }
 
+        // Get disclosed tips from cache
+        const disclosedTips = disclosedTipsCache[post.id] || { totalXMR: 0, count: 0, tips: [] };
+
         // Check if this is a reply and get parent post info (only for feed context)
         let parentHtml = '';
         if (context === 'feed') {
@@ -2206,11 +2580,21 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                         '<button class="action-btn btc-zap" style="opacity: 0.3;" title="No Lightning address">⚡BTC</button>'
                     }
                     ${moneroAddress ?
-                        `<button class="action-btn xmr-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-monero-address="${moneroAddress.replace(/"/g, '&quot;')}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress)" title="Zap with Monero">⚡XMR</button>` :
-                        '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">⚡XMR</button>'
+                        `<button class="action-btn xmr-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-monero-address="${moneroAddress.replace(/"/g, '&quot;')}" data-recipient-pubkey="${post.pubkey}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress, 'choose', null, this.dataset.recipientPubkey)" title="Tip with Monero">💰XMR</button>` :
+                        '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">💰XMR</button>'
                     }
                     <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>
                 </div>
+                ${(disclosedTips.count > 0 || disclosedTips.mutedCount > 0) ? `
+                <div style="padding: 8px 12px; margin-top: 8px; background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border-radius: 8px; border: 1px solid rgba(255, 102, 0, 0.2);">
+                    <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
+                        <div style="color: #FF6600; font-weight: bold;">
+                            💰 Public Tips to this Note: ${disclosedTips.totalXMR.toFixed(4)} XMR (${disclosedTips.count})${disclosedTips.mutedCount > 0 ? ` <span style="color: #999; font-weight: normal; font-size: 12px;">[${disclosedTips.mutedCount} muted by author]</span>` : ''}
+                        </div>
+                        <button onclick="showDisclosedTipDetails('${post.id}', event)" style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">View Details</button>
+                    </div>
+                </div>
+                ` : ''}
                 </div>
             </div>
         `;
@@ -2845,6 +3229,146 @@ export function closeNewPostModal() {
     }
 }
 
+// Show disclosed tip details modal
+export async function showDisclosedTipDetails(postId, event) {
+    if (event) event.stopPropagation();
+
+    const disclosedTips = disclosedTipsCache[postId];
+    // Check if there are ANY tips (including muted ones)
+    if (!disclosedTips || disclosedTips.tips.length === 0) {
+        Utils.showNotification('No disclosed tips found', 'error');
+        return;
+    }
+
+    // Fetch profiles for all tippers
+    const tipperPubkeys = [...new Set(disclosedTips.tips.map(tip => tip.tipper).filter(Boolean))];
+    if (tipperPubkeys.length > 0) {
+        console.log('🔍 Fetching profiles for', tipperPubkeys.length, 'tippers...');
+        await fetchProfiles(tipperPubkeys);
+    }
+
+    // Sort tips by timestamp (newest first)
+    const sortedTips = [...disclosedTips.tips].sort((a, b) => b.timestamp - a.timestamp);
+
+    // Build tips list HTML
+    const tipsListHtml = sortedTips.map(tip => {
+        const tipperProfile = State.profileCache[tip.tipper] || {};
+        const tipperName = tipperProfile.name || 'Anonymous';
+
+        // Generate handle: NIP-05 (already has @) or npub (shortened)
+        let tipperHandle;
+        if (tipperProfile.nip05) {
+            tipperHandle = tipperProfile.nip05; // info@nosmero.com
+        } else if (tip.tipper) {
+            // Convert to npub and shorten: npub1abc...xyz
+            const npub = window.NostrTools.nip19.npubEncode(tip.tipper);
+            tipperHandle = npub.substring(0, 12) + '...' + npub.substring(npub.length - 4);
+        } else {
+            tipperHandle = 'unknown';
+        }
+
+        const timeAgo = Utils.formatTime(tip.timestamp);
+        const isOwnTip = tip.tipper === State.publicKey;
+        const isMuted = tip.mutedByAuthor || false;
+
+        // Different styling for muted tips
+        const bgColor = isMuted ? 'rgba(100, 100, 100, 0.1)' : 'rgba(0, 0, 0, 0.2)';
+        const textColor = isMuted ? '#666' : '#fff';
+        const amountColor = isMuted ? '#999' : '#FF6600';
+
+        return `
+            <div style="padding: 12px; border-bottom: 1px solid #333; background: ${bgColor}; ${isMuted ? 'opacity: 0.6;' : ''}">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap;">
+                        <div onclick="closeDisclosedTipsModal(); showUserProfile('${tip.tipper}');" style="font-weight: bold; color: ${textColor}; cursor: pointer; text-decoration: underline;">${tipperName}</div>
+                        <div style="font-size: 12px; color: #999;">${tipperHandle}</div>
+                        ${isMuted ? `
+                            <span style="background: rgba(255, 68, 68, 0.2); border: 1px solid #ff4444; color: #ff4444; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold;">
+                                MUTED BY AUTHOR
+                            </span>
+                        ` : (!isOwnTip ? `
+                            <button onclick="muteTipperFromDetails('${tip.tipper}', event)"
+                                    style="background: rgba(255, 68, 68, 0.2); border: 1px solid #ff4444; color: #ff4444; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold;">
+                                🔇 Mute
+                            </button>
+                        ` : '')}
+                    </div>
+                    <div style="color: ${amountColor}; font-weight: bold; white-space: nowrap; margin-left: 12px;">${tip.amount} XMR</div>
+                </div>
+                ${tip.message ? `<div style="color: ${isMuted ? '#555' : '#ccc'}; font-size: 13px; margin-bottom: 4px;">${tip.message}</div>` : ''}
+                <div style="color: #666; font-size: 11px;">${timeAgo}</div>
+            </div>
+        `;
+    }).join('');
+
+    // Create modal
+    const modalHtml = `
+        <div id="disclosedTipsModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="closeDisclosedTipsModal()">
+            <div style="background: #1a1a1a; border-radius: 16px; max-width: 600px; width: 90%; max-height: 80vh; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid #333;" onclick="event.stopPropagation()">
+                <div style="padding: 20px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: space-between;">
+                    <div>
+                        <h2 style="margin: 0; color: #FF6600;">💰 Disclosed Tips</h2>
+                        <div style="font-size: 14px; color: #999; margin-top: 4px;">
+                            Total: ${disclosedTips.totalXMR.toFixed(4)} XMR from ${disclosedTips.count} ${disclosedTips.count === 1 ? 'tipper' : 'tippers'}
+                        </div>
+                    </div>
+                    <button onclick="closeDisclosedTipsModal()" style="background: none; border: none; color: #999; font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px;">&times;</button>
+                </div>
+                <div style="max-height: 60vh; overflow-y: auto;">
+                    ${tipsListHtml}
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Add modal to page
+    const existingModal = document.getElementById('disclosedTipsModal');
+    if (existingModal) existingModal.remove();
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+// Close disclosed tips modal
+export function closeDisclosedTipsModal() {
+    const modal = document.getElementById('disclosedTipsModal');
+    if (modal) modal.remove();
+}
+
+// Mute a tipper from the tip details modal
+window.muteTipperFromDetails = async function(pubkey, event) {
+    if (event) event.stopPropagation();
+
+    if (!pubkey) {
+        Utils.showNotification('Invalid user', 'error');
+        return;
+    }
+
+    // Don't allow muting yourself
+    if (pubkey === State.publicKey) {
+        Utils.showNotification('You cannot mute yourself', 'error');
+        return;
+    }
+
+    // Close the tip details modal
+    closeDisclosedTipsModal();
+
+    // Show muting notification
+    Utils.showNotification('Muting user...', 'info');
+
+    // Mute the user
+    const success = await muteUser(pubkey);
+
+    if (success) {
+        Utils.showNotification('User muted. Their tips will no longer appear.', 'success');
+        // Reload page after a short delay to update feed and tip totals
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
+    } else {
+        Utils.showNotification('Failed to mute user', 'error');
+    }
+}
+
 // Make functions globally available for HTML onclick handlers
 window.sendReply = sendReplyToCurrentPost; // Use the wrapper function
 window.sendReplyToCurrentPost = sendReplyToCurrentPost; // Also export directly
@@ -2854,6 +3378,8 @@ window.removeMedia = removeMedia;
 window.publishNewPost = publishNewPost;
 window.closeNewPostModal = closeNewPostModal;
 window.loadStreamingHomeFeed = loadStreamingHomeFeed;
+window.showDisclosedTipDetails = showDisclosedTipDetails;
+window.closeDisclosedTipsModal = closeDisclosedTipsModal;
 
 // Wrapper functions for onclick handlers (since they can't await)
 window.reloadHomeFeed = () => {

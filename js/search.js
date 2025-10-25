@@ -1302,8 +1302,8 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
                     '<button class="action-btn btc-zap" style="background: none; border: none; color: #333; cursor: not-allowed; font-size: 14px; opacity: 0.3;" title="No Lightning address">⚡BTC</button>'
                 }
                 ${moneroAddress ?
-                    `<button class="action-btn xmr-zap" onclick="openZapModal('${post.id}', '${author.name}', '${moneroAddress}')" style="background: none; border: none; color: #FF6600; cursor: pointer; font-size: 14px;" title="Zap with Monero">⚡XMR</button>` :
-                    '<button class="action-btn xmr-zap" style="background: none; border: none; color: #333; cursor: not-allowed; font-size: 14px; opacity: 0.3;" title="No Monero address">⚡XMR</button>'
+                    `<button class="action-btn xmr-zap" onclick="openZapModal('${post.id}', '${author.name}', '${moneroAddress}', 'choose', null, '${post.pubkey}')" style="background: none; border: none; color: #FF6600; cursor: pointer; font-size: 14px;" title="Tip with Monero">💰XMR</button>` :
+                    '<button class="action-btn xmr-zap" style="background: none; border: none; color: #333; cursor: not-allowed; font-size: 14px; opacity: 0.3;" title="No Monero address">💰XMR</button>'
                 }
                 <button class="action-btn" onclick="showNoteMenu('${post.id}', event)" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">⋯</button>
             </div>

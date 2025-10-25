@@ -257,6 +257,14 @@ async function startApplication() {
             // Continue with localStorage defaults
         }
 
+        // Load mute list from relays (NIP-51 kind 10000)
+        try {
+            await NostrPosts.fetchMuteList();
+        } catch (error) {
+            console.error('❌ Error loading mute list from relay:', error);
+            // Continue without mute list
+        }
+
         // Load home feed (will fetch fresh following list internally)
         if (directNoteId) {
             console.log('⏭️ Skipping feed load, going directly to single note:', directNoteId);
@@ -1002,6 +1010,11 @@ function displayUserPosts(posts) {
                     })
                 );
             }
+
+            // Fetch disclosed tips for profile posts (pass full post objects for author moderation)
+            console.log('💰 Fetching disclosed tips for profile posts...');
+            const disclosedTipsData = await Posts.fetchDisclosedTips(posts);
+            Object.assign(Posts.disclosedTipsCache, disclosedTipsData);
 
             const renderedPosts = await Promise.all(posts.map(async post => {
                 try {
@@ -3384,6 +3397,9 @@ async function populateSettingsForm() {
         // Populate relay lists
         await populateRelayLists();
 
+        // Populate muted users list
+        await populateMutedUsersList();
+
         console.log('✅ Settings form populated successfully');
 
     } catch (error) {
@@ -3800,6 +3816,60 @@ async function populateRelayLists() {
     }
 
     console.log('✅ Relay lists populated');
+}
+
+// Populate muted users list in Settings modal
+async function populateMutedUsersList() {
+    console.log('🔇 Populating muted users list...');
+
+    const mutedUsersList = document.getElementById('mutedUsersList');
+    if (!mutedUsersList) return;
+
+    if (State.mutedUsers.size === 0) {
+        mutedUsersList.innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">No muted users</div>';
+        return;
+    }
+
+    // Fetch profiles for muted users
+    const mutedPubkeys = Array.from(State.mutedUsers);
+    await NostrPosts.fetchProfiles(mutedPubkeys);
+
+    // Build the HTML
+    mutedUsersList.innerHTML = mutedPubkeys.map(pubkey => {
+        const profile = State.profileCache[pubkey] || {};
+        const displayName = profile.name || profile.display_name || pubkey.substring(0, 16) + '...';
+
+        return `
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: rgba(255, 68, 68, 0.1); border-radius: 6px; margin-bottom: 8px;">
+                <div style="flex: 1;">
+                    <div style="color: #fff; font-weight: bold;">${displayName}</div>
+                    <div style="color: #666; font-family: monospace; font-size: 11px;">${pubkey.substring(0, 16)}...</div>
+                </div>
+                <button onclick="unmutePubkey('${pubkey}')"
+                        style="background: #4CAF50; border: none; border-radius: 4px; color: white; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: bold;">
+                    Unmute
+                </button>
+            </div>
+        `;
+    }).join('');
+
+    console.log('✅ Muted users list populated with', mutedPubkeys.length, 'users');
+}
+
+// Unmute a user from settings page
+window.unmutePubkey = async function(pubkey) {
+    const success = await NostrPosts.unmuteUser(pubkey);
+    if (success) {
+        Utils.showNotification('User unmuted', 'success');
+        // Refresh the muted users list
+        await populateMutedUsersList();
+        // Reload page after a short delay
+        setTimeout(() => {
+            window.location.reload();
+        }, 1000);
+    } else {
+        Utils.showNotification('Failed to unmute user', 'error');
+    }
 }
 
 // Add read relay from Settings modal
