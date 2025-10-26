@@ -3,7 +3,7 @@
 // Functions for direct messages, conversations, notifications, and real-time subscriptions
 
 import { showNotification, escapeHtml, parseContent, signEvent } from './utils.js';
-import { encryptMessage, decryptMessage, wrapGiftMessage, unwrapGiftMessage } from './crypto.js';
+import { encryptMessage, decryptMessage, wrapGiftMessage, wrapGiftMessageWithRecipient, unwrapGiftMessage } from './crypto.js';
 import * as State from './state.js';
 import * as Relays from './relays.js';
 
@@ -12,7 +12,8 @@ const {
     setCurrentPage,
     currentPage,
     notifications,
-    lastViewedNotificationTime
+    lastViewedNotificationTime,
+    lastViewedMessagesTime
 } = State;
 
 // ==================== GLOBAL VARIABLES ====================
@@ -101,9 +102,87 @@ async function fetchConversationProfiles(pubkeys) {
 // ==================== DIRECT MESSAGES ====================
 
 // Load messages page and fetch DMs
+// Fetch messages in background without changing UI (for badge updates)
+export async function fetchMessagesInBackground() {
+    // Check if user is logged in
+    if (!State.publicKey) {
+        return;
+    }
+
+    // Close any existing subscription
+    if (messagesSubscription) {
+        messagesSubscription.close();
+    }
+
+    // Fetch all DMs (kind 4 events)
+    try {
+        const dmEvents = [];
+        const processedIds = new Set();
+        let hasProcessed = false;
+        console.log('Fetching messages in background for pubkey:', State.publicKey);
+
+        // Check if pool is initialized
+        if (!State.pool) {
+            console.error('Pool not initialized when loading messages');
+            return;
+        }
+
+        // Subscribe to encrypted DMs (both NIP-04 and NIP-17)
+        const readRelays = Relays.getReadRelays();
+        let relaysToUse = readRelays.length > 0 ? readRelays : State.relays;
+
+        // Always include Nosmero relay for NIP-17 DMs
+        // Use wss:// for production and dev (both HTTPS), ws:// only for localhost
+        const nosmeroRelay = window.location.protocol === 'https:'
+            ? 'wss://nosmero.com/nip78-relay'
+            : 'ws://nosmero.com:8080/nip78-relay';
+
+        if (!relaysToUse.includes(nosmeroRelay)) {
+            relaysToUse = [...relaysToUse, nosmeroRelay];
+        }
+
+        // Get timestamp for messages from last 30 days
+        const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+
+        messagesSubscription = State.pool.subscribeMany(relaysToUse, [
+            // NIP-04 (legacy encrypted DMs)
+            { kinds: [4], authors: [State.publicKey], limit: 500 },  // Sent NIP-04
+            { kinds: [4], '#p': [State.publicKey], limit: 500 },      // Received NIP-04
+            // NIP-17 (modern gift-wrapped DMs) - Hybrid approach:
+            { kinds: [1059], authors: [State.publicKey], limit: 500 }, // All sent NIP-17 (efficient)
+            { kinds: [1059], since: thirtyDaysAgo, limit: 100 }        // Recent received NIP-17
+        ], {
+            onevent(event) {
+                if (!processedIds.has(event.id)) {
+                    dmEvents.push(event);
+                    processedIds.add(event.id);
+
+                    if (hasProcessed) {
+                        processSingleMessage(event);
+                    }
+                }
+            },
+            oneose() {
+                console.log('Background DM fetch complete:', dmEvents.length, 'events');
+            }
+        });
+
+        // Process all messages after timeout
+        setTimeout(() => {
+            if (!hasProcessed) {
+                hasProcessed = true;
+                processMessages(dmEvents);
+            }
+        }, 3000);
+
+    } catch (error) {
+        console.error('Error fetching messages in background:', error);
+    }
+}
+
 export async function loadMessages() {
     setCurrentPage('messages');
-    
+
     // Check if user is logged in
     if (!State.publicKey) {
         document.getElementById('messagesPage').style.display = 'none';
@@ -145,7 +224,7 @@ export async function loadMessages() {
     // Hide feed and show messages page
     document.getElementById('feed').style.display = 'none';
     document.getElementById('messagesPage').style.display = 'block';
-    
+
     // Close any existing subscription
     if (messagesSubscription) {
         messagesSubscription.close();
@@ -171,9 +250,10 @@ export async function loadMessages() {
         let relaysToUse = readRelays.length > 0 ? readRelays : State.relays;
 
         // Always include Nosmero relay for NIP-17 DMs
-        const nosmeroRelay = window.location.port === '8080'
-            ? 'ws://nosmero.com:8080/nip78-relay'
-            : 'wss://nosmero.com/nip78-relay';
+        // Use wss:// for production and dev (both HTTPS), ws:// only for localhost
+        const nosmeroRelay = window.location.protocol === 'https:'
+            ? 'wss://nosmero.com/nip78-relay'
+            : 'ws://nosmero.com:8080/nip78-relay';
 
         if (!relaysToUse.includes(nosmeroRelay)) {
             relaysToUse = [...relaysToUse, nosmeroRelay];
@@ -192,10 +272,13 @@ export async function loadMessages() {
             // NIP-04 (legacy encrypted DMs)
             { kinds: [4], authors: [State.publicKey], limit: 500 }, // Sent NIP-04 messages
             { kinds: [4], '#p': [State.publicKey], limit: 500 },     // Received NIP-04 messages
-            // NIP-17 (modern gift-wrapped DMs)
-            // NOTE: NIP-17 messages don't have #p tags (recipient is hidden for privacy)
+            // NIP-17 (modern gift-wrapped DMs) - Hybrid approach:
+            // 1. Fetch ALL our sent messages (sender backup copies) by authors filter
+            { kinds: [1059], authors: [State.publicKey], limit: 500 }, // All sent NIP-17 messages (efficient)
+            // 2. Fetch recent messages from anyone (includes received messages for us)
+            // NOTE: NIP-17 gift wraps don't have #p tags (recipient is hidden for privacy)
             // We must fetch recent kind 1059 and try unwrapping each one (silently ignore failures)
-            { kinds: [1059], since: thirtyDaysAgo, limit: 100 }   // Recent NIP-17 messages only
+            { kinds: [1059], since: thirtyDaysAgo, limit: 100 }   // Recent NIP-17 received messages
         ], {
             onevent(event) {
                 if (!processedIds.has(event.id)) {
@@ -236,6 +319,8 @@ export async function loadMessages() {
 // Process and decrypt messages
 export async function processMessages(events) {
     console.log('Processing', events.length, 'message events');
+
+    // Reset conversations - we'll recalculate unread counts from timestamps
     conversations = {};
     const participantPubkeys = new Set();
 
@@ -243,7 +328,7 @@ export async function processMessages(events) {
         try {
             console.log('Processing event:', event.id, 'kind:', event.kind, 'from:', event.pubkey);
 
-            let otherPubkey, decryptedContent, encryptionMethod, realTimestamp;
+            let otherPubkey, decryptedContent, encryptionMethod, realTimestamp, messageSent;
 
             // Handle NIP-17 gift-wrapped messages (kind 1059)
             if (event.kind === 1059) {
@@ -257,11 +342,27 @@ export async function processMessages(events) {
 
                     // The unwrapped message contains the actual content and sender info
                     decryptedContent = unwrapped.content;
-                    otherPubkey = unwrapped.pubkey;
                     encryptionMethod = 'NIP-17';
                     realTimestamp = unwrapped.created_at; // Use real timestamp from unwrapped rumor
 
-                    console.log('✅ Unwrapped NIP-17 message from:', otherPubkey);
+                    // Determine conversation partner:
+                    // If unwrapped.pubkey is ME, this is my sent message backup - get recipient from 'p' tag
+                    // If unwrapped.pubkey is someone else, this is a received message - they are the other person
+                    if (unwrapped.pubkey === State.publicKey) {
+                        // This is MY sent message backup copy
+                        otherPubkey = unwrapped.tags?.find(t => t[0] === 'p')?.[1];
+                        if (!otherPubkey) {
+                            console.warn('No recipient found in NIP-17 sent message:', event.id);
+                            continue;
+                        }
+                        messageSent = true;
+                    } else {
+                        // This is a received message from someone else
+                        otherPubkey = unwrapped.pubkey;
+                        messageSent = false;
+                    }
+
+                    console.log('✅ Unwrapped NIP-17 message, conversation with:', otherPubkey, 'sent:', messageSent);
                 } catch (error) {
                     // Not for us (invalid MAC/base64), silently skip
                     continue;
@@ -269,10 +370,16 @@ export async function processMessages(events) {
             }
             // Handle NIP-04 encrypted messages (kind 4)
             else if (event.kind === 4) {
-                // Determine the other party's pubkey
-                otherPubkey = event.pubkey === State.publicKey ?
-                    event.tags.find(t => t[0] === 'p')?.[1] :
-                    event.pubkey;
+                // Determine the other party's pubkey and whether this is sent or received
+                if (event.pubkey === State.publicKey) {
+                    // I sent this message
+                    otherPubkey = event.tags.find(t => t[0] === 'p')?.[1];
+                    messageSent = true;
+                } else {
+                    // I received this message
+                    otherPubkey = event.pubkey;
+                    messageSent = false;
+                }
 
                 if (!otherPubkey) {
                     console.warn('No recipient found for NIP-04 message:', event.id);
@@ -312,13 +419,17 @@ export async function processMessages(events) {
                 id: event.id,
                 content: decryptedContent,
                 timestamp: realTimestamp,
-                // For NIP-17, check the unwrapped otherPubkey; for NIP-04, check event.pubkey
-                sent: encryptionMethod === 'NIP-17' ? otherPubkey !== State.publicKey : event.pubkey === State.publicKey,
+                sent: messageSent, // Determined during unwrapping/decryption above
                 encryptionMethod: encryptionMethod, // Store which encryption was used
                 event: event
             };
 
             conversations[otherPubkey].messages.push(message);
+
+            // Count as unread if it's a received message newer than last viewed time
+            if (!message.sent && message.timestamp > lastViewedMessagesTime) {
+                conversations[otherPubkey].unread = (conversations[otherPubkey].unread || 0) + 1;
+            }
 
             // Update last message if this is newer
             if (!conversations[otherPubkey].lastMessage ||
@@ -337,12 +448,12 @@ export async function processMessages(events) {
     });
     
     console.log('Processed conversations:', Object.keys(conversations).length);
-    
+
     // Fetch profiles for conversation participants
     if (participantPubkeys.size > 0) {
         await fetchConversationProfiles(Array.from(participantPubkeys));
     }
-    
+
     renderConversations();
 }
 
@@ -351,7 +462,7 @@ export async function processSingleMessage(event) {
     try {
         console.log('Processing single message:', event.id, 'kind:', event.kind);
 
-        let otherPubkey, decryptedContent, encryptionMethod, realTimestamp;
+        let otherPubkey, decryptedContent, encryptionMethod, realTimestamp, messageSent;
 
         // Handle NIP-17 gift-wrapped messages (kind 1059)
         if (event.kind === 1059) {
@@ -364,11 +475,27 @@ export async function processSingleMessage(event) {
                 }
 
                 decryptedContent = unwrapped.content;
-                otherPubkey = unwrapped.pubkey;
                 encryptionMethod = 'NIP-17';
                 realTimestamp = unwrapped.created_at; // Use real timestamp from unwrapped rumor
 
-                console.log('✅ Unwrapped real-time NIP-17 message from:', otherPubkey);
+                // Determine conversation partner:
+                // If unwrapped.pubkey is ME, this is my sent message backup - get recipient from 'p' tag
+                // If unwrapped.pubkey is someone else, this is a received message - they are the other person
+                if (unwrapped.pubkey === State.publicKey) {
+                    // This is MY sent message backup copy
+                    otherPubkey = unwrapped.tags?.find(t => t[0] === 'p')?.[1];
+                    if (!otherPubkey) {
+                        console.warn('No recipient found in NIP-17 real-time sent message:', event.id);
+                        return;
+                    }
+                    messageSent = true;
+                } else {
+                    // This is a received message from someone else
+                    otherPubkey = unwrapped.pubkey;
+                    messageSent = false;
+                }
+
+                console.log('✅ Unwrapped real-time NIP-17 message, conversation with:', otherPubkey, 'sent:', messageSent);
             } catch (error) {
                 // Not for us (invalid MAC/base64), silently skip
                 return;
@@ -376,9 +503,16 @@ export async function processSingleMessage(event) {
         }
         // Handle NIP-04 encrypted messages (kind 4)
         else if (event.kind === 4) {
-            otherPubkey = event.pubkey === State.publicKey ?
-                event.tags.find(t => t[0] === 'p')?.[1] :
-                event.pubkey;
+            // Determine the other party's pubkey and whether this is sent or received
+            if (event.pubkey === State.publicKey) {
+                // I sent this message
+                otherPubkey = event.tags.find(t => t[0] === 'p')?.[1];
+                messageSent = true;
+            } else {
+                // I received this message
+                otherPubkey = event.pubkey;
+                messageSent = false;
+            }
 
             if (!otherPubkey) return;
 
@@ -416,8 +550,7 @@ export async function processSingleMessage(event) {
             id: event.id,
             content: decryptedContent,
             timestamp: realTimestamp,
-            // For NIP-17, check the unwrapped otherPubkey; for NIP-04, check event.pubkey
-            sent: encryptionMethod === 'NIP-17' ? otherPubkey !== State.publicKey : event.pubkey === State.publicKey,
+            sent: messageSent, // Determined during unwrapping/decryption above
             encryptionMethod: encryptionMethod,
             event: event
         };
@@ -426,8 +559,8 @@ export async function processSingleMessage(event) {
         conversations[otherPubkey].messages.sort((a, b) => a.timestamp - b.timestamp);
         conversations[otherPubkey].lastMessage = message;
 
-        // Increment unread count if it's a received message and not currently viewing this conversation
-        if (!message.sent && currentConversation !== otherPubkey) {
+        // Increment unread count if it's a received message, newer than last viewed time, and not currently viewing this conversation
+        if (!message.sent && message.timestamp > lastViewedMessagesTime && currentConversation !== otherPubkey) {
             conversations[otherPubkey].unread = (conversations[otherPubkey].unread || 0) + 1;
         }
 
@@ -448,9 +581,14 @@ export async function processSingleMessage(event) {
 // Render conversations in the sidebar
 export function renderConversations() {
     console.log('Rendering conversations:', Object.keys(conversations).length, 'conversations');
+
+    // Update messages badge in nav menu (do this even if not on messages page)
+    updateMessagesBadge();
+
+    // If not on messages page, just update badge and return
     const conversationsList = document.getElementById('conversationsList');
     if (!conversationsList) return;
-    
+
     if (Object.keys(conversations).length === 0) {
         conversationsList.innerHTML = `
             <div style="padding: 20px; color: #666; text-align: center;">
@@ -502,9 +640,11 @@ export function renderConversations() {
 export function selectConversation(pubkey, clickedElement = null) {
     currentConversation = pubkey;
 
-    // Clear unread count when opening conversation
+    // Clear unread count when opening conversation (but don't update global lastViewedMessagesTime)
     if (conversations[pubkey]) {
         conversations[pubkey].unread = 0;
+        // Update badge after clearing unread
+        updateMessagesBadge();
     }
 
     // Update active state in sidebar
@@ -608,7 +748,7 @@ export async function sendMessage() {
     if (!content) return;
 
     try {
-        let signedEvent, encryptionMethod;
+        let signedEvent, encryptionMethod, recipientWrap, senderWrap;
 
         // Check if pool is initialized
         if (!State.pool) {
@@ -625,11 +765,20 @@ export async function sendMessage() {
             console.log('Sending NIP-17 gift-wrapped message to:', currentConversation);
 
             try {
-                // Create NIP-17 gift-wrapped message
-                signedEvent = wrapGiftMessage(content, State.privateKey, currentConversation);
-                encryptionMethod = 'NIP-17';
+                // Create TWO NIP-17 gift-wrapped messages per spec:
+                // 1. Recipient copy (they can decrypt)
+                recipientWrap = wrapGiftMessage(content, State.privateKey, currentConversation);
+                // 2. Sender backup copy (for retrieval after reload)
+                // Use custom function that preserves the conversation partner in the rumor's 'p' tag
+                senderWrap = wrapGiftMessageWithRecipient(content, State.privateKey, State.publicKey, currentConversation);
 
-                console.log('Created NIP-17 gift-wrapped event:', signedEvent.id);
+                encryptionMethod = 'NIP-17';
+                // Use sender wrap ID for local storage (this is what we'll retrieve on reload)
+                signedEvent = senderWrap;
+
+                console.log('Created NIP-17 dual gift-wraps:');
+                console.log('  - Recipient wrap:', recipientWrap.id);
+                console.log('  - Sender wrap (backup):', senderWrap.id);
             } catch (error) {
                 console.error('NIP-17 wrapping failed, falling back to NIP-04:', error);
                 // Fallback to NIP-04 if NIP-17 fails
@@ -693,11 +842,30 @@ export async function sendMessage() {
         }
 
         try {
-            const publishPromises = State.pool.publish(relaysToUse, signedEvent);
-            console.log('Publishing to relays:', relaysToUse);
-            console.log('Event kind:', signedEvent.kind, 'ID:', signedEvent.id);
-            await Promise.any(publishPromises);
-            console.log('Successfully published to at least one relay');
+            // For NIP-17, publish BOTH gift wraps (recipient + sender backup)
+            if (encryptionMethod === 'NIP-17' && recipientWrap && senderWrap) {
+                console.log('Publishing dual NIP-17 gift-wraps to relays:', relaysToUse);
+
+                // Publish recipient wrap
+                const recipientPromises = State.pool.publish(relaysToUse, recipientWrap);
+                // Publish sender backup wrap
+                const senderPromises = State.pool.publish(relaysToUse, senderWrap);
+
+                // Wait for at least one of each to succeed
+                await Promise.all([
+                    Promise.any(recipientPromises),
+                    Promise.any(senderPromises)
+                ]);
+
+                console.log('✅ Successfully published both NIP-17 gift-wraps');
+            } else {
+                // For NIP-04 or single event, publish normally
+                const publishPromises = State.pool.publish(relaysToUse, signedEvent);
+                console.log('Publishing to relays:', relaysToUse);
+                console.log('Event kind:', signedEvent.kind, 'ID:', signedEvent.id);
+                await Promise.any(publishPromises);
+                console.log('Successfully published to at least one relay');
+            }
         } catch (publishError) {
             console.error('Failed to publish event:', publishError);
 
@@ -903,24 +1071,60 @@ export async function fetchNotifications() {
         console.log('Fetching notifications for user:', State.publicKey);
         const notificationEvents = [];
         const processedIds = new Set();
-        
+
         if (!State.pool) {
             console.error('Pool not initialized when loading notifications');
             showNotification('Connection error: Pool not ready', 'error');
             return;
         }
-        
-        // Subscribe to various notification types
-        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
-            // Replies to our posts
-            { kinds: [1], '#p': [State.publicKey], limit: 100 },
-            // Likes on our posts  
-            { kinds: [7], '#p': [State.publicKey], limit: 100 },
-            // Reposts of our posts
-            { kinds: [6], '#p': [State.publicKey], limit: 100 },
-            // Zaps to our posts
-            { kinds: [9735], '#p': [State.publicKey], limit: 100 }
-        ], {
+
+        // Build filters based on enabled notification settings
+        const filters = [];
+
+        // Replies and mentions (kind 1) - check both settings
+        if (State.notificationSettings.replies || State.notificationSettings.mentions) {
+            filters.push({ kinds: [1], '#p': [State.publicKey], limit: 100 });
+        }
+
+        // Likes (kind 7)
+        if (State.notificationSettings.likes) {
+            filters.push({ kinds: [7], '#p': [State.publicKey], limit: 100 });
+        }
+
+        // Reposts (kind 6)
+        if (State.notificationSettings.reposts) {
+            filters.push({ kinds: [6], '#p': [State.publicKey], limit: 100 });
+        }
+
+        // Zaps & Tips (kind 9735 Lightning + kind 9736 Monero)
+        if (State.notificationSettings.zaps) {
+            filters.push({ kinds: [9735], '#p': [State.publicKey], limit: 100 });
+            filters.push({ kinds: [9736], '#p': [State.publicKey], limit: 100 });
+        }
+
+        // Follows (kind 3)
+        if (State.notificationSettings.follows) {
+            filters.push({ kinds: [3], '#p': [State.publicKey], limit: 100 });
+        }
+
+        // Skip subscription if no filters enabled
+        if (filters.length === 0) {
+            console.log('No notification types enabled');
+            renderNotifications([]);
+            return;
+        }
+
+        // Include Nosmero relay for kind 9736 tip disclosures
+        const relaysToQuery = [...Relays.getActiveRelays()];
+        const nosmeroRelay = window.location.protocol === 'https:'
+            ? 'wss://nosmero.com/nip78-relay'     // Production & Dev (both HTTPS)
+            : 'ws://nosmero.com:8080/nip78-relay'; // Localhost only
+        if (!relaysToQuery.includes(nosmeroRelay)) {
+            relaysToQuery.push(nosmeroRelay);
+        }
+
+        // Subscribe to enabled notification types
+        const sub = State.pool.subscribeMany(relaysToQuery, filters, {
             onevent(event) {
                 if (!processedIds.has(event.id) && event.pubkey !== State.publicKey) {
                     // Extract original note ID from e tags
@@ -1022,13 +1226,42 @@ async function processNotifications(events) {
                     };
                     break;
                     
-                case 9735: // Zap
+                case 9735: // Lightning Zap
                     interaction = {
                         id: event.id,
                         type: 'zap',
                         timestamp: event.created_at,
                         pubkey: event.pubkey,
-                        content: 'Zap',
+                        content: 'Lightning Zap',
+                        profile: State.profileCache[event.pubkey] || null
+                    };
+                    break;
+
+                case 9736: // Monero Tip
+                    // Extract amount and sender from tags
+                    const amountTag = event.tags?.find(tag => tag[0] === 'amount');
+                    const senderTag = event.tags?.find(tag => tag[0] === 'P');
+                    const amount = amountTag ? amountTag[1] : '?';
+                    const senderPubkey = senderTag ? senderTag[1] : event.pubkey;
+
+                    interaction = {
+                        id: event.id,
+                        type: 'tip',
+                        timestamp: event.created_at,
+                        pubkey: senderPubkey,
+                        content: `Monero Tip: ${amount} XMR`,
+                        message: event.content || '',
+                        profile: State.profileCache[senderPubkey] || null
+                    };
+                    break;
+
+                case 3: // Follow
+                    interaction = {
+                        id: event.id,
+                        type: 'follow',
+                        timestamp: event.created_at,
+                        pubkey: event.pubkey,
+                        content: 'followed you',
                         profile: State.profileCache[event.pubkey] || null
                     };
                     break;
@@ -1221,11 +1454,55 @@ async function fetchNotificationProfiles(pubkeys, groupedNotifications) {
     }
 }
 
+// Update notification badge in nav menu
+export function updateNotificationBadge() {
+    const badge = document.getElementById('notificationBadge');
+    if (!badge) return;
+
+    if (State.unreadNotifications > 0) {
+        const displayCount = State.unreadNotifications > 99 ? '99+' : State.unreadNotifications;
+        badge.textContent = displayCount;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+// Update messages badge in nav menu
+export function updateMessagesBadge() {
+    const badge = document.getElementById('messagesBadge');
+    if (!badge) return;
+
+    // Calculate total unread messages across all conversations
+    const totalUnread = Object.values(conversations).reduce((sum, conv) => {
+        return sum + (conv.unread || 0);
+    }, 0);
+
+    State.setUnreadMessages(totalUnread);
+
+    if (totalUnread > 0) {
+        const displayCount = totalUnread > 99 ? '99+' : totalUnread;
+        badge.textContent = displayCount;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
 // Render notifications list
 export function renderNotifications(groupedNotifications = []) {
+    // Count unread notifications (newer than last viewed time)
+    const unreadCount = groupedNotifications.filter(noteData => {
+        return noteData.latestTimestamp > State.lastViewedNotificationTime;
+    }).length;
+
+    State.setUnreadNotifications(unreadCount);
+    updateNotificationBadge();
+
+    // If not on notifications page, just update badge and return
     const notificationsList = document.getElementById('notificationsList');
     if (!notificationsList) return;
-    
+
     if (groupedNotifications.length === 0) {
         notificationsList.innerHTML = `
             <div style="text-align: center; color: #666; padding: 40px;">
@@ -1269,7 +1546,9 @@ export function renderNotifications(groupedNotifications = []) {
             likes: noteData.interactions.filter(i => i.type === 'like'),
             reposts: noteData.interactions.filter(i => i.type === 'repost'),
             replies: noteData.interactions.filter(i => i.type === 'reply'),
-            zaps: noteData.interactions.filter(i => i.type === 'zap')
+            zaps: noteData.interactions.filter(i => i.type === 'zap'),
+            tips: noteData.interactions.filter(i => i.type === 'tip'),
+            follows: noteData.interactions.filter(i => i.type === 'follow')
         };
         
         // Get most recent interaction for timestamp
@@ -1301,14 +1580,36 @@ export function renderNotifications(groupedNotifications = []) {
         if (interactionGroups.zaps.length > 0) {
             summaryParts.push(`⚡ ${interactionGroups.zaps.length} zap${interactionGroups.zaps.length > 1 ? 's' : ''}`);
         }
-        
+
+        if (interactionGroups.tips.length > 0) {
+            const tipAuthors = interactionGroups.tips.slice(0, 3).map(i => {
+                const profile = i.profile || {};
+                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
+                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
+            });
+            const moreCount = Math.max(0, interactionGroups.tips.length - 3);
+            summaryParts.push(`💰 ${tipAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} sent Monero tips`);
+        }
+
+        if (interactionGroups.follows.length > 0) {
+            const followAuthors = interactionGroups.follows.slice(0, 3).map(i => {
+                const profile = i.profile || {};
+                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
+                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
+            });
+            const moreCount = Math.max(0, interactionGroups.follows.length - 3);
+            summaryParts.push(`👥 ${followAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} followed you`);
+        }
+
         if (interactionGroups.replies.length > 0) {
             summaryParts.push(`💬 ${interactionGroups.replies.length} repl${interactionGroups.replies.length > 1 ? 'ies' : 'y'}`);
         }
         
         // Handle original note content
-        const originalContent = originalNote.content.substring(0, 200) + (originalNote.content.length > 200 ? '...' : '');
-        const isNoteFound = !originalNote.notFound;
+        const originalContent = originalNote?.content
+            ? originalNote.content.substring(0, 200) + (originalNote.content.length > 200 ? '...' : '')
+            : '[Note not found]';
+        const isNoteFound = originalNote && !originalNote.notFound;
         const clickHandler = isNoteFound ? `openThreadView('${originalNote.id}')` : '';
         
         return `

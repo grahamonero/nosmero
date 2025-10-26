@@ -315,6 +315,35 @@ async function startApplication() {
             // Continue without mute list
         }
 
+        // Fetch notifications and messages in background to populate badges
+        // Add small delays to avoid competing with home feed loading
+        setTimeout(() => {
+            Messages.fetchNotifications().catch(err => {
+                console.error('❌ Error fetching notifications:', err);
+            });
+        }, 2000); // 2 second delay
+
+        setTimeout(() => {
+            Messages.fetchMessagesInBackground().catch(err => {
+                console.error('❌ Error fetching messages:', err);
+            });
+        }, 3000); // 3 second delay
+
+        // Set up periodic background refresh for notifications and messages (every 3 minutes)
+        const notificationRefreshInterval = setInterval(() => {
+            if (State.publicKey) {
+                Messages.fetchNotifications().catch(err => {
+                    console.error('❌ Background notification fetch failed:', err);
+                });
+                Messages.fetchMessagesInBackground().catch(err => {
+                    console.error('❌ Background message fetch failed:', err);
+                });
+            }
+        }, 3 * 60 * 1000); // 3 minutes
+
+        // Clear interval on logout (store in global for cleanup)
+        window.notificationRefreshInterval = notificationRefreshInterval;
+
         // Load home feed (will fetch fresh following list internally)
         if (directNoteId) {
             console.log('⏭️ Skipping feed load, going directly to single note:', directNoteId);
@@ -412,9 +441,14 @@ async function handleNavigation(event) {
             break;
         case 'messages':
             await Messages.loadMessages();
+            // Messages badge will be cleared by selectConversation() when a conversation is opened
             break;
         case 'notifications':
             await Messages.loadNotifications();
+            // Clear unread notifications counter and update last viewed time
+            State.setUnreadNotifications(0);
+            State.setLastViewedNotificationTime(Math.floor(Date.now() / 1000));
+            Messages.updateNotificationBadge();
             break;
         case 'profile':
             await loadUserProfile();
@@ -3444,6 +3478,15 @@ async function populateSettingsForm() {
             console.log('📨 NIP-17 DMs enabled:', useNip17);
         }
 
+        // Populate notification settings
+        Object.keys(State.notificationSettings).forEach(key => {
+            const checkbox = document.getElementById(`notif_${key}`);
+            if (checkbox) {
+                checkbox.checked = State.notificationSettings[key];
+                console.log(`🔔 Notification setting ${key}:`, State.notificationSettings[key]);
+            }
+        });
+
         // Populate relay lists
         await populateRelayLists();
 
@@ -3640,6 +3683,17 @@ async function saveSettings() {
             localStorage.setItem('use-nip17-dms', useNip17Checkbox.checked.toString());
             console.log('📨 NIP-17 DMs preference saved:', useNip17Checkbox.checked);
         }
+
+        // Save notification settings
+        const notificationSettings = {};
+        ['replies', 'mentions', 'likes', 'reposts', 'zaps', 'follows'].forEach(key => {
+            const checkbox = document.getElementById(`notif_${key}`);
+            if (checkbox) {
+                notificationSettings[key] = checkbox.checked;
+            }
+        });
+        State.setNotificationSettings(notificationSettings);
+        console.log('🔔 Notification settings saved:', notificationSettings);
 
         // Publish NIP-65 relay list to network (kind 10002)
         try {

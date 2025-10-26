@@ -628,6 +628,10 @@ export function logout() {
         window.NIP46.disconnect();
     }
 
+    // Update last viewed messages time before logout
+    // This marks current session as "viewed" so next login only shows new messages
+    State.setLastViewedMessagesTime(Math.floor(Date.now() / 1000));
+
     // Clear stored keys
     localStorage.removeItem('nostr-private-key');
     localStorage.removeItem('nostr-public-key');
@@ -647,6 +651,12 @@ export function logout() {
     }
     if (trendingFeedCache) {
         Object.assign(trendingFeedCache, { posts: [], timestamp: 0, isLoading: false });
+    }
+
+    // Clear notification refresh interval
+    if (window.notificationRefreshInterval) {
+        clearInterval(window.notificationRefreshInterval);
+        window.notificationRefreshInterval = null;
     }
 
     // Update UI elements immediately
