@@ -86,11 +86,11 @@ export async function signEvent(eventTemplate) {
         }
         return await window.nostr.signEvent(eventTemplate);
     }
-    // Check if user is using NIP-46 remote signer (Amber)
+    // Check if user is using NIP-46 remote signer (nsec.app)
     else if (State.privateKey === 'nip46') {
         // Use NIP-46 remote signing
         if (!window.NIP46) {
-            throw new Error('NIP-46 not initialized. Please reconnect to Amber.');
+            throw new Error('NIP-46 not initialized. Please reconnect to your remote signer.');
         }
 
         // NIP-46 requires the full event template including pubkey

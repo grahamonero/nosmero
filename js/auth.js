@@ -310,7 +310,18 @@ export async function loginWithExtension() {
         clearUserSettings();
 
         const pubKey = await window.nostr.getPublicKey();
+        console.log('🔑 Got public key from extension:', pubKey);
+
+        if (!pubKey) {
+            alert('Extension did not provide a public key. Please:\n\n1. Make sure you have approved the connection request\n2. Check your extension settings\n3. Try refreshing the page and logging in again');
+            return;
+        }
+
         setPublicKey(pubKey);
+        console.log('✅ Set public key in State');
+        console.log('✅ State.publicKey is now:', State.publicKey);
+        console.log('✅ publicKey (direct import) is now:', publicKey);
+
         setPrivateKey('extension'); // Special marker for extension users
         localStorage.setItem('nostr-private-key', 'extension');
         localStorage.setItem('nostr-public-key', pubKey);
@@ -319,7 +330,11 @@ export async function loginWithExtension() {
 
         // Load user's NIP-65 relay list after successful login
         try {
+            console.log('📡 About to import relay list...');
+            console.log('📡 State.publicKey before import:', State.publicKey);
             const Relays = await import('./relays.js');
+            console.log('📡 Relays module imported');
+            console.log('📡 State.publicKey after module import:', State.publicKey);
             await Relays.importRelayList();
         } catch (error) {
             console.error('Error loading NIP-65 relay list:', error);
@@ -341,132 +356,6 @@ export async function loginWithExtension() {
     } catch (error) {
         alert('Failed to connect to extension: ' + error.message);
     }
-}
-
-// Temporary storage for public key from Amber
-let amberPublicKey = null;
-
-// Step 1: Connect to Amber (establish bunker connection and get public key)
-export async function connectToAmber() {
-    try {
-        const bunkerInput = document.getElementById('bunkerInput');
-        if (!bunkerInput) {
-            alert('Bunker URI input field not found');
-            return;
-        }
-
-        const bunkerURI = bunkerInput.value.trim();
-        if (!bunkerURI) {
-            alert('Please enter your bunker connection URI from Amber');
-            return;
-        }
-
-        // Basic validation - should start with bunker://
-        if (!bunkerURI.startsWith('bunker://')) {
-            alert('Invalid bunker URI format. Should start with "bunker://"');
-            return;
-        }
-
-        showNotification('Requesting connection approval on Amber...', 'info');
-
-        // Import NIP-46 module
-        const NIP46 = await import('./nip46.js');
-
-        // Connect to Amber (user will approve on Amber - this returns "ack")
-        await NIP46.connect(bunkerURI);
-
-        // Now get the actual public key with a separate request
-        showNotification('Getting your public key from Amber...', 'info');
-        const userPubkey = await NIP46.getPublicKey();
-
-        if (!userPubkey || userPubkey.length !== 64) {
-            throw new Error('Failed to get valid public key from Amber');
-        }
-
-        // Store the public key temporarily
-        amberPublicKey = userPubkey;
-
-        showNotification('Connection established! Now click Login.', 'success');
-
-        // Show step 2 UI
-        const step1 = document.getElementById('nip46Step1');
-        const step2 = document.getElementById('nip46Step2');
-        if (step1) step1.style.display = 'none';
-        if (step2) step2.style.display = 'block';
-
-    } catch (error) {
-        console.error('Amber connection error:', error);
-        showNotification('Failed to connect: ' + error.message, 'error');
-    }
-}
-
-// Step 2: Complete login (use the public key from step 1)
-export async function completeAmberLogin() {
-    // Abort any ongoing home feed loading
-    State.abortHomeFeedLoading();
-
-    try {
-        // Check if we have the public key from connect step
-        if (!amberPublicKey) {
-            throw new Error('Connection not established. Please connect first.');
-        }
-
-        // NOTE: Don't call clearUserSettings() for NIP-46 login!
-        // We're logging into an existing account, not creating a new one.
-        // clearUserSettings() would remove the following list and make it look anonymous.
-
-        showNotification('Completing login...', 'info');
-
-        const userPubkey = amberPublicKey;
-
-        setPublicKey(userPubkey);
-        setPrivateKey('nip46'); // Special marker for NIP-46 users
-
-        localStorage.setItem('nostr-private-key', 'nip46');
-        localStorage.setItem('nostr-public-key', userPubkey);
-
-        showNotification('Login successful!', 'success');
-
-        // Load user's NIP-65 relay list after successful login
-        try {
-            const Relays = await import('./relays.js');
-            await Relays.importRelayList();
-        } catch (error) {
-            console.error('Error loading NIP-65 relay list:', error);
-        }
-
-        // Clear the login UI display before starting authenticated session
-        const feed = document.getElementById('feed');
-        const homeFeedList = document.getElementById('homeFeedList');
-        if (feed) {
-            feed.innerHTML = '<div class="loading">Loading your feed...</div>';
-        }
-        if (homeFeedList) {
-            homeFeedList.innerHTML = '';
-        }
-
-        // Clear all home feed state to prevent anonymous posts from persisting
-        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
-            window.NostrPosts.clearHomeFeedState();
-        }
-
-        // Start the application with the new session
-        if (window.startApplication) {
-            await window.startApplication();
-        } else {
-            // Fallback: reload the page
-            window.location.reload();
-        }
-
-    } catch (error) {
-        console.error('Amber login error:', error);
-        showNotification('Login failed: ' + error.message, 'error');
-    }
-}
-
-// Legacy function for backward compatibility
-export async function loginWithNIP46() {
-    await connectToAmber();
 }
 
 // ==================== NSEC.APP LOGIN (NIP-46) ====================
@@ -898,9 +787,6 @@ export function cancelPin() {
 window.createNewAccount = createNewAccount;
 window.loginWithNsec = loginWithNsec;
 window.loginWithExtension = loginWithExtension;
-window.loginWithNIP46 = loginWithNIP46;
-window.connectToAmber = connectToAmber;
-window.completeAmberLogin = completeAmberLogin;
 window.connectToNsecApp = connectToNsecApp;
 window.completeNsecAppLogin = completeNsecAppLogin;
 window.logout = logout;

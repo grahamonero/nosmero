@@ -69,11 +69,8 @@
             <button class="login-option-btn" onclick="loginWithExtension()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
                 🔌 Use Extension
             </button>
-            <button class="login-option-btn" onclick="showLoginWithNIP46()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
-                📱 Use Amber (NIP-46)
-            </button>
             <button class="login-option-btn" onclick="showLoginWithNsecApp()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
-                🌐 Use nsec.app (NIP-46)
+                🌐 Use nsec.app
             </button>
         </div>
         
@@ -194,11 +191,8 @@
                 <button class="login-option-btn" onclick="loginWithExtension()">
                     🔌 Login with Browser Extension
                 </button>
-                <button class="login-option-btn" onclick="showLoginWithNIP46()">
-                    📱 Login with Amber (NIP-46)
-                </button>
                 <button class="login-option-btn" onclick="showLoginWithNsecApp()">
-                    🌐 Login with nsec.app (NIP-46)
+                    🌐 Login with nsec.app
                 </button>
             </div>
 
@@ -232,7 +226,6 @@
                         <div style="color: #999; font-size: 12px; margin-bottom: 6px;">For better security, consider:</div>
                         <ul style="margin: 0; padding-left: 20px; color: #999; font-size: 12px;">
                             <li>Using a browser extension (Alby, nos2x)</li>
-                            <li>Using Amber on Android</li>
                             <li>Using nsec.app for remote signing</li>
                         </ul>
                     </div>
@@ -245,30 +238,7 @@
                 <button class="close-btn" onclick="backToLoginOptions()">Back</button>
             </div>
 
-            <!-- Login with NIP-46 (Amber) Section -->
-            <div id="loginWithNIP46Section" style="display: none;">
-                <div style="margin-bottom: 16px;">
-                    <input type="text" id="bunkerInput" placeholder="Enter bunker URI from Amber..."
-                           style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
-                </div>
-                <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
-                    Get your bunker connection URI from the Amber app (Settings → Nostr Connect)
-                </div>
-                <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
-                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">📱 How to get bunker URI:</div>
-                    <ol style="color: #ccc; font-size: 13px; margin: 0; padding-left: 20px;">
-                        <li>Open Amber app on your Android device</li>
-                        <li>Go to Settings → Nostr Connect</li>
-                        <li>Tap "Create Connection"</li>
-                        <li>Copy the bunker URI starting with "bunker://"</li>
-                        <li>Paste it here</li>
-                    </ol>
-                </div>
-                <button class="send-btn" onclick="loginWithNIP46()">Connect to Amber</button>
-                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
-            </div>
-
-            <!-- Login with NIP-46 (nsec.app) Section -->
+            <!-- Login with nsec.app Section -->
             <div id="loginWithNsecAppSection" style="display: none;">
                 <div style="margin-bottom: 16px;">
                     <input type="text" id="nsecAppUsernameInput" placeholder="Paste your nsec.app connection string..."

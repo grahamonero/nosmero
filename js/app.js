@@ -222,7 +222,7 @@ async function checkExistingSession() {
             }
             console.log('🌐 nsec.app session detected, nostr-login should auto-restore');
         } else if (storedPrivateKey === 'nip46') {
-            // NIP-46 (Amber) user - restore remote signer connection
+            // NIP-46 (nsec.app) user - restore remote signer connection
             console.log('📱 Restoring NIP-46 connection...');
             if (storedPublicKey) {
                 State.setPublicKey(storedPublicKey);
@@ -1291,7 +1291,7 @@ async function loadSettings_OLD_DISABLED() {
                                 State.privateKey === 'nsec-app' ?
                                 '🌐 Using nsec.app OAuth (most secure)' :
                                 State.privateKey === 'nip46' ?
-                                '📱 Using Amber remote signer (most secure)' :
+                                '📱 Using nsec.app remote signer (most secure)' :
                                 '💾 Stored locally (encrypted recommended)'
                             }
                         </p>
@@ -1780,7 +1780,7 @@ function exportPrivateKey() {
     }
 
     if (State.privateKey === 'nip46') {
-        alert('Cannot export private key from Amber. Your keys are managed by your Amber signer.');
+        alert('Cannot export private key from remote signer. Your keys are managed by your nsec.app remote signer.');
         return;
     }
 

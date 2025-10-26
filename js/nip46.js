@@ -480,6 +480,15 @@ export async function signEventRemote(eventTemplate) {
             throw new Error('Cannot sign: Amber connection lost. Please re-login with Amber.');
         }
 
+        // CRITICAL: After Amber responds to connect, it closes its subscription
+        // We need to recreate OUR subscription so Amber can establish a fresh connection
+        console.log('🔄 Recreating subscription after connect response...');
+        await subscribeToResponses();
+        console.log('✅ Fresh subscription created, Amber should now be listening');
+
+        // Give Amber a moment to establish its subscription
+        await new Promise(resolve => setTimeout(resolve, 500));
+
         // Per NIP-46 spec, sign_event params should NOT include pubkey
         // Amber will add the pubkey when signing
         // Only send: content, kind, tags, created_at

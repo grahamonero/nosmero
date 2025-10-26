@@ -153,74 +153,7 @@ export function showLoginWithNsec() {
     }
 }
 
-// Show NIP-46 (Amber) login interface
-export function showLoginWithNIP46() {
-    hideLoginModal();
-
-    // Create a simple input modal for bunker URI
-    const feed = document.getElementById('feed');
-    if (feed) {
-        feed.innerHTML = `
-            <div id="nip46LoginContainer" style="padding: 40px; text-align: center; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #FF6600; margin-bottom: 30px;">📱 Login with Amber (NIP-46)</h2>
-                <p style="color: #ccc; margin-bottom: 30px;">
-                    Connect to your Amber signer app for secure remote signing
-                </p>
-
-                <div id="nip46Step1" style="margin-bottom: 30px;">
-                    <input type="text" id="bunkerInput" placeholder="bunker://..."
-                           style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 13px; margin-bottom: 20px; font-family: monospace;"
-                           onkeypress="if(event.key==='Enter') connectToAmber()">
-
-                    <div style="display: flex; gap: 12px; justify-content: center;">
-                        <button id="connectBtn" onclick="connectToAmber()"
-                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold;">
-                            📱 Connect to Amber
-                        </button>
-                        <button onclick="showAuthUI()"
-                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
-                            ← Back
-                        </button>
-                    </div>
-                </div>
-
-                <div id="nip46Step2" style="display: none; margin-bottom: 30px;">
-                    <div style="background: rgba(76, 175, 80, 0.1); padding: 20px; border-radius: 12px; border-left: 3px solid #4CAF50; margin-bottom: 20px;">
-                        <p style="color: #4CAF50; font-weight: bold; margin-bottom: 8px;">✅ Amber Approved Connection</p>
-                        <p style="color: #ccc; font-size: 14px;">Click the Login button below to complete your login</p>
-                    </div>
-
-                    <button id="loginBtn" onclick="completeAmberLogin()"
-                            style="padding: 16px 32px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #4CAF50, #45a049); color: #000; font-weight: bold; font-size: 16px; width: 100%; max-width: 300px;">
-                        🔓 Complete Login
-                    </button>
-                </div>
-
-                <div style="font-size: 13px; color: #666; text-align: left; background: rgba(255, 102, 0, 0.1); padding: 20px; border-radius: 12px; border-left: 3px solid #FF6600; margin-top: 30px;">
-                    <p style="color: #FF6600; font-weight: bold; margin-bottom: 12px;">📱 How to get your bunker URI from Amber:</p>
-                    <ol style="text-align: left; margin: 0; padding-left: 20px; line-height: 1.8;">
-                        <li>Open the <strong>Amber app</strong> on your Android device</li>
-                        <li>Go to <strong>Settings → Nostr Connect</strong></li>
-                        <li>Tap <strong>"Create Connection"</strong> or <strong>"Add"</strong></li>
-                        <li>Copy the connection URI (starts with <code style="background: #000; padding: 2px 6px; border-radius: 4px; color: #FF6600;">bunker://</code>)</li>
-                        <li>Paste it in the field above</li>
-                    </ol>
-                    <p style="margin-top: 16px; color: #ccc;">
-                        <strong>Note:</strong> Keep Amber running on your phone. You'll need to approve each request on your device.
-                    </p>
-                </div>
-            </div>
-        `;
-
-        // Focus the input field
-        setTimeout(() => {
-            const input = document.getElementById('bunkerInput');
-            if (input) input.focus();
-        }, 100);
-    }
-}
-
-// Show NIP-46 (nsec.app) login interface using nostr-login library
+// Show nsec.app login interface using nostr-login library
 export async function showLoginWithNsecApp() {
     hideLoginModal();
 
@@ -3076,7 +3009,6 @@ window.showLoginModal = showLoginModal;
 window.hideLoginModal = hideLoginModal;
 window.showCreateAccount = showCreateAccount;
 window.showLoginWithNsec = showLoginWithNsec;
-window.showLoginWithNIP46 = showLoginWithNIP46;
 window.showLoginWithNsecApp = showLoginWithNsecApp;
 window.showGeneratedKeyModal = showGeneratedKeyModal;
 window.closeKeyModal = closeKeyModal;
