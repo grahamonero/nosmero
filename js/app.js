@@ -173,13 +173,20 @@ async function checkExistingSession() {
 
     // Check for encrypted key first
     if (isEncrypted) {
-        console.log('🔐 Found encrypted session, prompting for PIN...');
+        // Verify that encrypted key actually exists
+        const encryptedKey = localStorage.getItem('nostr-private-key-encrypted');
+        if (!encryptedKey) {
+            console.warn('⚠️ encryption-enabled flag set but no encrypted key found, clearing flag');
+            localStorage.removeItem('encryption-enabled');
+            // Fall through to check for unencrypted key
+        } else {
+            console.log('🔐 Found encrypted session, prompting for PIN...');
 
-        try {
-            const Auth = await import('./auth.js');
+            try {
+                const Auth = await import('./auth.js');
 
-            // Prompt for PIN to decrypt
-            const pin = await Auth.showPinModal('unlock');
+                // Prompt for PIN to decrypt
+                const pin = await Auth.showPinModal('unlock');
 
             if (!pin) {
                 console.log('PIN entry cancelled, session not restored');
@@ -195,13 +202,16 @@ async function checkExistingSession() {
             }
 
             console.log('✅ Successfully decrypted private key');
-        } catch (error) {
-            console.error('Error decrypting key:', error);
-            alert('Failed to decrypt your private key. You may need to re-login.');
-            return;
+            } catch (error) {
+                console.error('Error decrypting key:', error);
+                alert('Failed to decrypt your private key. You may need to re-login.');
+                return;
+            }
         }
-    } else {
-        // Check for unencrypted key (legacy or extension)
+    }
+
+    // Check for unencrypted key if no encrypted session found
+    if (!storedPrivateKey) {
         storedPrivateKey = localStorage.getItem('nostr-private-key');
     }
 
@@ -3865,7 +3875,7 @@ async function populateMutedUsersList() {
     const mutedUsersList = document.getElementById('mutedUsersList');
     if (!mutedUsersList) return;
 
-    if (State.mutedUsers.size === 0) {
+    if (!State.mutedUsers || State.mutedUsers.size === 0) {
         mutedUsersList.innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">No muted users</div>';
         return;
     }

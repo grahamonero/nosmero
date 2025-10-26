@@ -43,6 +43,10 @@ function clearUserSettings() {
     localStorage.removeItem('homeFeedCache');
     localStorage.removeItem('trendingFeedCache');
 
+    // Clear encryption-related items (PIN-encrypted keys)
+    localStorage.removeItem('encryption-enabled');
+    localStorage.removeItem('nostr-private-key-encrypted');
+
     // Reset relay configuration to defaults for new users
     if (window.NostrRelays && window.NostrRelays.forceResetToDefaultRelays) {
         window.NostrRelays.forceResetToDefaultRelays();
@@ -627,6 +631,8 @@ export function logout() {
     // Clear stored keys
     localStorage.removeItem('nostr-private-key');
     localStorage.removeItem('nostr-public-key');
+    localStorage.removeItem('encryption-enabled');
+    localStorage.removeItem('nostr-private-key-encrypted');
 
     // Use comprehensive settings clearing function
     clearUserSettings();
