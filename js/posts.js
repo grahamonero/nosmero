@@ -628,7 +628,7 @@ export async function publishMuteList() {
         const writeRelays = Relays.getUserDataRelays();
 
         // Build tags array from muted users
-        const tags = Array.from(State.mutedUsers).map(pubkey => ['p', pubkey]);
+        const tags = Array.from(State.mutedUsers || new Set()).map(pubkey => ['p', pubkey]);
 
         // Create kind 10000 event
         const muteListEvent = {
@@ -661,6 +661,11 @@ export async function muteUser(pubkey) {
         return false;
     }
 
+    // Ensure mutedUsers is initialized
+    if (!State.mutedUsers) {
+        State.setMutedUsers(new Set());
+    }
+
     // Add to muted users set
     State.mutedUsers.add(pubkey);
 
@@ -679,6 +684,11 @@ export async function unmuteUser(pubkey) {
     if (!pubkey) {
         console.error('Cannot unmute - no pubkey provided');
         return false;
+    }
+
+    // Ensure mutedUsers is initialized
+    if (!State.mutedUsers) {
+        State.setMutedUsers(new Set());
     }
 
     // Remove from muted users set
@@ -1046,7 +1056,7 @@ async function renderHomeFeedResults() {
 
     // Filter out posts from muted users
     let sortedResults = currentHomeFeedResults.filter(post => {
-        if (State.mutedUsers.has(post.pubkey)) {
+        if (State.mutedUsers?.has(post.pubkey)) {
             console.log('🔇 Filtered out post from muted user:', post.pubkey.substring(0, 16) + '...');
             return false;
         }

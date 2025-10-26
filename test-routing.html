@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Route Test</title>
+</head>
+<body>
+    <h1>Testing /n/{noteId} Routing</h1>
+    <div id="result"></div>
+
+    <script>
+        // Test the routing logic
+        function testPathRouting() {
+            const pathname = window.location.pathname;
+            const notePathMatch = pathname.match(/^\/n\/([a-f0-9]{64})$/i);
+
+            const result = document.getElementById('result');
+
+            if (notePathMatch) {
+                const noteId = notePathMatch[1];
+                result.innerHTML = `
+                    <p style="color: green;">✅ Route matched!</p>
+                    <p>Note ID: ${noteId}</p>
+                    <p>Would redirect to: ${window.location.origin}/#note:${noteId}</p>
+                    <p><a href="${window.location.origin}/#note:${noteId}">Go to note →</a></p>
+                `;
+            } else {
+                result.innerHTML = `
+                    <p style="color: red;">❌ No route match</p>
+                    <p>Current path: ${pathname}</p>
+                    <p>Expected format: /n/{64-char-hex-id}</p>
+                    <hr>
+                    <p>Test with a sample note ID:</p>
+                    <p><a href="/n/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2">Test route →</a></p>
+                `;
+            }
+        }
+
+        testPathRouting();
+    </script>
+</body>
+</html>
