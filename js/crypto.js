@@ -210,6 +210,48 @@ export function wrapGiftMessage(content, senderPrivateKey, recipientPubkey) {
     }
 }
 
+// Create a gift-wrapped NIP-17 message with explicit conversation partner
+// Used for sender backup copies where the gift wrap recipient differs from the conversation partner
+export function wrapGiftMessageWithRecipient(content, senderPrivateKey, wrapRecipientPubkey, conversationPartnerPubkey) {
+    try {
+        const { nip44, getPublicKey, finalizeEvent } = window.NostrTools;
+
+        // Get sender's public key
+        const senderPubkey = getPublicKey(senderPrivateKey);
+
+        // Step 1: Create the rumor (unsigned kind 14 event) with correct 'p' tag
+        const rumor = {
+            kind: 14,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [['p', conversationPartnerPubkey]], // Conversation partner (actual recipient of message)
+            content: content,
+            pubkey: senderPubkey
+        };
+
+        // Step 2: Encrypt the rumor for the gift wrap recipient using NIP-44
+        const conversationKey = nip44.getConversationKey(senderPrivateKey, wrapRecipientPubkey);
+        const encryptedRumor = nip44.encrypt(JSON.stringify(rumor), conversationKey);
+
+        // Step 3: Create the gift wrap (kind 1059) with randomized timestamp (±2 days)
+        const randomOffset = Math.floor(Math.random() * 4 * 24 * 60 * 60) - (2 * 24 * 60 * 60); // ±2 days in seconds
+        const giftWrap = {
+            kind: 1059,
+            created_at: Math.floor(Date.now() / 1000) + randomOffset,
+            tags: [['p', wrapRecipientPubkey]], // Who can decrypt the gift wrap
+            content: encryptedRumor,
+            pubkey: senderPubkey
+        };
+
+        // Step 4: Sign the gift wrap
+        const signedGiftWrap = finalizeEvent(giftWrap, senderPrivateKey);
+
+        return signedGiftWrap;
+    } catch (error) {
+        console.error('Failed to wrap gift message with explicit recipient:', error);
+        throw error;
+    }
+}
+
 // Unwrap a NIP-17 gift-wrapped message
 export function unwrapGiftMessage(wrappedEvent, recipientPrivateKey) {
     try {

@@ -6,6 +6,10 @@
     <title>nosmero - Nostr + Monero</title>
     <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
     <link rel="stylesheet" href="/styles.css?v=1.8.2">
+
+    <!-- Eruda mobile debugging console (DEV ONLY) -->
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>eruda.init();</script>
 </head>
 <body>
     <!-- Mobile menu toggle button -->
@@ -36,15 +40,16 @@
             <span>Search</span>
         </div>
         
-        <div class="nav-item" data-tab="messages" onclick="handleNavItemClick('messages')">
+        <div class="nav-item" data-tab="messages" onclick="handleNavItemClick('messages')" style="position: relative;">
             <span>✉️</span>
             <span>Messages</span>
+            <span id="messagesBadge" style="position: absolute; top: 8px; right: 8px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
         </div>
-        
+
         <div class="nav-item" data-tab="notifications" onclick="handleNavItemClick('notifications')" style="position: relative;">
             <span>🔔</span>
             <span>Notifications</span>
-            <span class="notification-indicator" style="position: absolute; top: 8px; right: 8px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: white; border-radius: 50%; width: 12px; height: 12px; font-size: 8px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
+            <span id="notificationBadge" style="position: absolute; top: 8px; right: 8px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
         </div>
         
         <div class="nav-item" data-tab="profile" onclick="handleNavItemClick('profile')">
@@ -458,6 +463,40 @@
                 <div id="mutedUsersList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
                     <!-- Muted users will be populated by JavaScript -->
                 </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Notifications</h3>
+                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Choose which types of notifications to receive</p>
+                <div style="display: grid; gap: 12px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_replies" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>💬 Replies to my posts</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_mentions" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>📢 Mentions of me</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_likes" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>❤️ Likes on my posts</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_reposts" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>🔄 Reposts of my posts</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_zaps" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>⚡ Zaps & Tips (Lightning + Monero)</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_follows" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>👥 New followers</span>
+                    </label>
+                </div>
+                <p style="color: #666; font-size: 11px; margin-top: 12px;">
+                    Disabled notification types won't be fetched from relays. Changes take effect on next notification refresh.
+                </p>
             </div>
 
             <div class="modal-actions">

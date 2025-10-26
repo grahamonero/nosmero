@@ -27,7 +27,20 @@ export let mutedUsers = new Set();  // Track users muted by current user (NIP-51
 export let notifications = [];  // Array of notification objects
 export let lastNotificationCheck = 0;  // Timestamp of last notification check
 export let lastViewedNotificationTime = parseInt(localStorage.getItem('lastViewedNotificationTime') || '0');  // Track last viewed notification time
+export let lastViewedMessagesTime = parseInt(localStorage.getItem('lastViewedMessagesTime') || '0');  // Track last time user viewed messages
+export let unreadNotifications = 0;  // Count of unread notifications
+export let unreadMessages = 0;  // Count of unread messages across all conversations
 export let zapQueue = [];  // Array of queued zap objects for batch payments (max 5)
+
+// Notification type settings - which notification types to subscribe to
+export let notificationSettings = {
+    replies: JSON.parse(localStorage.getItem('notif_replies') ?? 'true'),
+    mentions: JSON.parse(localStorage.getItem('notif_mentions') ?? 'true'),
+    likes: JSON.parse(localStorage.getItem('notif_likes') ?? 'true'),
+    reposts: JSON.parse(localStorage.getItem('notif_reposts') ?? 'true'),
+    zaps: JSON.parse(localStorage.getItem('notif_zaps') ?? 'true'),  // Includes both Lightning (9735) and Monero tips (9736)
+    follows: JSON.parse(localStorage.getItem('notif_follows') ?? 'true')
+};
 
 // Feed caching and performance optimization
 export let homeFeedCache = { posts: [], timestamp: 0, isLoading: false };  // Cached home feed with metadata
@@ -54,9 +67,22 @@ export function setFollowingUsers(following) { followingUsers = following; }
 export function setMutedUsers(muted) { mutedUsers = muted; }
 export function setNotifications(notifs) { notifications = notifs; }
 export function setLastNotificationCheck(time) { lastNotificationCheck = time; }
-export function setLastViewedNotificationTime(time) { 
-    lastViewedNotificationTime = time; 
+export function setLastViewedNotificationTime(time) {
+    lastViewedNotificationTime = time;
     localStorage.setItem('lastViewedNotificationTime', time.toString());
+}
+export function setLastViewedMessagesTime(time) {
+    lastViewedMessagesTime = time;
+    localStorage.setItem('lastViewedMessagesTime', time.toString());
+}
+export function setUnreadNotifications(count) { unreadNotifications = count; }
+export function setUnreadMessages(count) { unreadMessages = count; }
+export function setNotificationSettings(settings) {
+    notificationSettings = settings;
+    // Save each setting to localStorage
+    Object.keys(settings).forEach(key => {
+        localStorage.setItem(`notif_${key}`, JSON.stringify(settings[key]));
+    });
 }
 export function setZapQueue(queue) { zapQueue = queue; }
 export function setHomeFeedCache(cache) { homeFeedCache = cache; }
