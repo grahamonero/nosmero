@@ -731,6 +731,24 @@ export function showPinModal(mode = 'create') {
         // Show modal
         modal.style.display = 'flex';
 
+        // Add Enter key listeners to both inputs
+        const handleEnterKey = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitPin();
+            }
+        };
+
+        if (pinInput) {
+            pinInput.removeEventListener('keypress', handleEnterKey);
+            pinInput.addEventListener('keypress', handleEnterKey);
+        }
+
+        if (pinConfirmInput) {
+            pinConfirmInput.removeEventListener('keypress', handleEnterKey);
+            pinConfirmInput.addEventListener('keypress', handleEnterKey);
+        }
+
         // Focus on first input
         setTimeout(() => {
             if (pinInput) pinInput.focus();
