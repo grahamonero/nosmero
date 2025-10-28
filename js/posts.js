@@ -1110,24 +1110,22 @@ async function renderHomeFeedResults() {
         updateEngagementCounts(engagementData);
     });
 
-    // 4. BACKGROUND: Fetch disclosed tips (pass full post objects for author moderation)
-    fetchDisclosedTips(sortedResults).then(disclosedTipsData => {
-        console.log('💰 Updating disclosed tips...');
+    // 4. BACKGROUND: Fetch disclosed tips and parent posts together, then re-render once
+    Promise.all([
+        fetchDisclosedTips(sortedResults),
+        fetchParentPosts(sortedResults)
+    ]).then(([disclosedTipsData, parentPostsMap]) => {
+        console.log('💰 Disclosed tips and 👨‍👩‍👧 parent posts loaded');
         Object.assign(disclosedTipsCache, disclosedTipsData);
-        // Re-render posts to show disclosed tips
-        const renderedPostsWithTips = sortedResults.map(post => {
-            return renderSinglePost(post, 'feed', null, null);
-        });
-        Promise.all(renderedPostsWithTips).then(posts => {
-            resultsEl.innerHTML = posts.join('');
-            console.log('✅ Posts re-rendered with disclosed tips');
-        });
-    });
 
-    // 4. BACKGROUND: Fetch parent posts and insert as they arrive
-    fetchParentPosts(sortedResults).then(parentPostsMap => {
-        console.log('👨‍👩‍👧 Updating parent posts...');
-        updateParentPosts(parentPostsMap);
+        // Re-render posts with both disclosed tips and parent posts
+        const renderedPostsComplete = sortedResults.map(post => {
+            return renderSinglePost(post, 'feed', null, parentPostsMap);
+        });
+        Promise.all(renderedPostsComplete).then(posts => {
+            resultsEl.innerHTML = posts.join('');
+            console.log('✅ Posts re-rendered with disclosed tips and parent context');
+        });
     });
 
     // Process any embedded notes after rendering
@@ -1985,9 +1983,20 @@ export async function fetchParentPosts(posts) {
     // Extract parent post IDs from reply posts
     for (const post of posts) {
         if (post.tags) {
-            const eTag = post.tags.find(tag => tag[0] === 'e' && tag[1]);
-            if (eTag) {
-                const parentId = eTag[1];
+            // Per NIP-10: Look for 'e' tag with 'reply' marker first
+            // If not found, use last 'e' tag (positional fallback)
+            const eTags = post.tags.filter(tag => tag[0] === 'e' && tag[1]);
+
+            if (eTags.length > 0) {
+                // Try to find tag with 'reply' marker (4th element)
+                let replyTag = eTags.find(tag => tag[3] === 'reply');
+
+                // Fallback: Use last 'e' tag (positional method)
+                if (!replyTag) {
+                    replyTag = eTags[eTags.length - 1];
+                }
+
+                const parentId = replyTag[1];
                 if (parentId && !State.eventCache[parentId]) {
                     parentIdsToFetch.push(parentId);
                 }
