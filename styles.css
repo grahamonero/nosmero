@@ -108,17 +108,27 @@
             flex: 1;
             padding: 12px;
             text-align: center;
-            background: none;
-            border: none;
-            color: #666;
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            color: #A78BFA;
             cursor: pointer;
             font-size: 15px;
             border-radius: 20px;
+            transition: all 0.2s ease;
+            font-weight: 500;
+        }
+
+        .tab:hover {
+            color: #FFFFFF;
+            background: rgba(139, 92, 246, 0.2);
+            border-color: rgba(139, 92, 246, 0.5);
         }
 
         .tab.active {
-            background: #f5f5f5;
-            color: #000;
+            background: linear-gradient(135deg, #FF6600, #FF8533);
+            color: #FFFFFF;
+            font-weight: bold;
+            border: 1px solid transparent;
         }
 
         /* Main feed container for posts */
@@ -406,12 +416,18 @@
 
         .close-btn {
             background: #333;
-            border: none;
-            color: #fff;
+            border: 1px solid #666;
+            color: #FFFFFF;
             padding: 12px 24px;
             border-radius: 8px;
             cursor: pointer;
             margin-top: 16px;
+            transition: all 0.2s ease;
+        }
+
+        .close-btn:hover {
+            background: #444;
+            border-color: #888;
         }
 
         .login-option-btn {
@@ -544,16 +560,18 @@
 
         .cancel-btn {
             background: #333;
-            border: 1px solid #555;
-            color: #fff;
+            border: 1px solid #666;
+            color: #FFFFFF;
             padding: 8px 16px;
             border-radius: 16px;
             font-weight: bold;
             cursor: pointer;
+            transition: all 0.2s ease;
         }
 
         .cancel-btn:hover {
             background: #444;
+            border-color: #888;
         }
 
         .send-btn:hover {
@@ -877,7 +895,15 @@
             background: #333;
             color: white;
         }
-        
+
+        .message-content {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            max-width: 100%;
+        }
+
         .message-time {
             font-size: 11px;
             color: rgba(255, 255, 255, 0.6);
