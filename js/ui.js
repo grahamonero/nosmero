@@ -14,6 +14,7 @@ const NOSMEROTIPS_BOT_PUBKEY = '4989c73b81f5ef135781a2d082df69fdd2285996192ea8eb
 
 // Tip context storage for disclosure prompt after closing modal
 let lastTipContext = null;
+let userInitiatedTip = false; // Track if user clicked "Tip Now" or "Add to Queue"
 
 // ==================== WELCOME MODAL ====================
 
@@ -316,7 +317,7 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
             <div style="display: flex; gap: 12px; justify-content: center;">
                 <button id="zapNowBtn"
                         style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
-                    Zap Now
+                    Tip Now
                 </button>
                 <button id="addToQueueBtn"
                         style="background: #6B73FF; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
@@ -425,6 +426,9 @@ export function zapWithCustomAmount(postId, authorName, moneroAddress) {
         return;
     }
 
+    // Mark that user initiated a tip
+    userInitiatedTip = true;
+
     // Preserve recipientPubkey from modal dataset
     const modal = document.getElementById('zapModal');
     const recipientPubkey = modal?.dataset?.recipientPubkey || null;
@@ -505,6 +509,9 @@ export function addToQueueAndClose(postId, authorName, moneroAddress) {
     const amountInput = document.getElementById('moneroZapAmount');
     const customAmount = amountInput ? parseFloat(amountInput.value) : null;
 
+    // Mark that user initiated a tip
+    userInitiatedTip = true;
+
     if (addToZapQueue(postId, authorName, moneroAddress, customAmount)) {
         closeZapModal();
     }
@@ -516,9 +523,16 @@ export function closeZapModal() {
         modal.classList.remove('show');
     }
 
-    // Show disclosure prompt if we have tip context
-    if (lastTipContext) {
-        showDisclosurePromptModal();
+    // Only show disclosure prompt if user actually clicked "Tip Now" or "Add to Queue"
+    if (lastTipContext && userInitiatedTip) {
+        // Brief delay to let modal close animation complete
+        setTimeout(() => {
+            showDisclosurePromptModal();
+        }, 300);
+    } else {
+        // User just closed without initiating tip, clear context
+        lastTipContext = null;
+        userInitiatedTip = false;
     }
 }
 
@@ -541,6 +555,50 @@ window.closeDisclosurePromptModal = function() {
     }
     // Clear tip context
     lastTipContext = null;
+    userInitiatedTip = false;
+
+    // Reset to default option (secret)
+    const secretRadio = document.querySelector('input[name="disclosureOption"][value="secret"]');
+    if (secretRadio) secretRadio.checked = true;
+
+    // Hide sections
+    const messageSection = document.getElementById('messageSection');
+    const verificationFields = document.getElementById('verificationFields');
+    if (messageSection) messageSection.style.display = 'none';
+    if (verificationFields) verificationFields.style.display = 'none';
+
+    // Clear inputs
+    const messageInput = document.getElementById('disclosurePromptMessage');
+    const txidInput = document.getElementById('verificationTxid');
+    const txKeyInput = document.getElementById('verificationTxKey');
+    if (messageInput) messageInput.value = '';
+    if (txidInput) txidInput.value = '';
+    if (txKeyInput) txKeyInput.value = '';
+}
+
+// Update UI based on selected disclosure option
+window.updateDisclosureOption = function() {
+    const selectedOption = document.querySelector('input[name="disclosureOption"]:checked');
+    if (!selectedOption) return;
+
+    const value = selectedOption.value;
+    const messageSection = document.getElementById('messageSection');
+    const verificationFields = document.getElementById('verificationFields');
+
+    // Show/hide sections based on selection
+    if (value === 'secret') {
+        // Option A: Keep it secret - hide everything
+        messageSection.style.display = 'none';
+        verificationFields.style.display = 'none';
+    } else if (value === 'disclose') {
+        // Option B: Disclose without verification
+        messageSection.style.display = 'block';
+        verificationFields.style.display = 'none';
+    } else if (value === 'verify') {
+        // Option C: Disclose with verification (DM proofs)
+        messageSection.style.display = 'block';
+        verificationFields.style.display = 'block';
+    }
 }
 
 window.submitDisclosurePrompt = async function() {
@@ -549,40 +607,93 @@ window.submitDisclosurePrompt = async function() {
         return;
     }
 
+    // Get selected disclosure option
+    const selectedOption = document.querySelector('input[name="disclosureOption"]:checked');
+    if (!selectedOption) {
+        showNotification('Please select an option', 'error');
+        return;
+    }
+
+    const disclosureType = selectedOption.value;
+
+    // Path A: Keep it secret - just close modal, don't publish
+    if (disclosureType === 'secret') {
+        closeDisclosurePromptModal();
+        return;
+    }
+
+    // For all public paths, get message and validate amount
     const messageInput = document.getElementById('disclosurePromptMessage');
     const message = messageInput?.value?.trim() || '';
 
-    // Use amount from tip context
     const amount = lastTipContext.amount;
-
-    // Validate amount
     if (!amount || parseFloat(amount) <= 0) {
         showNotification('Invalid tip amount', 'error');
         return;
     }
 
-    // Save context to local variables before closing modal (which clears lastTipContext)
+    // Save context before closing modal
     const postId = lastTipContext.postId;
     const recipientPubkey = lastTipContext.recipientPubkey;
     const moneroAddress = lastTipContext.moneroAddress;
 
-    // Close the modal (this will clear lastTipContext)
+    let verificationData = null;
+
+    // Option C: Verification required (proofs sent via DM)
+    if (disclosureType === 'verify') {
+        const txidInput = document.getElementById('verificationTxid');
+        const txKeyInput = document.getElementById('verificationTxKey');
+
+        const txid = txidInput?.value?.trim() || '';
+        const txKey = txKeyInput?.value?.trim() || '';
+
+        // Validate both fields provided
+        if (!txid || !txKey) {
+            showNotification('Both TXID and tx_key are required for verification', 'error');
+            return;
+        }
+
+        // Basic format validation
+        if (txid.length !== 64) {
+            showNotification('Invalid TXID format (must be 64 characters)', 'error');
+            return;
+        }
+
+        if (txKey.length !== 64) {
+            showNotification('Invalid tx_key format (must be 64 characters)', 'error');
+            return;
+        }
+
+        verificationData = {
+            txid: txid,
+            txKey: txKey
+        };
+
+        console.log('✓ Verification data provided:', {
+            txid: txid.substring(0, 16) + '...'
+        });
+    }
+
+    // Close the modal
     closeDisclosurePromptModal();
 
-    // Publish the disclosure using saved variables
+    // Handle tip disclosure:
+    // Option B: Disclose without verification (honor system)
+    // Option C: Disclose with verification (backend verifies, DM proofs to recipient)
     await handleTipDisclosureFromPrompt(
         postId,
         recipientPubkey,
         moneroAddress,
         amount,
-        message
+        message,
+        verificationData
     );
 }
 
 // ==================== TIP DISCLOSURE ====================
 
 // Handle tip disclosure from prompt modal (after closing zap modal)
-async function handleTipDisclosureFromPrompt(postId, recipientPubkey, moneroAddress, amount, message) {
+async function handleTipDisclosureFromPrompt(postId, recipientPubkey, moneroAddress, amount, message, verificationData = null) {
     try {
         // Get required data
         const senderPrivateKey = State.privateKey;
@@ -598,62 +709,167 @@ async function handleTipDisclosureFromPrompt(postId, recipientPubkey, moneroAddr
             return;
         }
 
-        // Create kind 9736 Monero Zap Disclosure event
+        // Option B: Unverified disclosure (honor system)
+        if (!verificationData) {
+            await publishUnverifiedDisclosure(postId, recipientPubkey, moneroAddress, amount, message, senderPubkey, senderPrivateKey);
+            return;
+        }
+
+        // Option C: Verified disclosure (backend verification)
+        await publishVerifiedDisclosure(postId, recipientPubkey, moneroAddress, amount, message, verificationData, senderPubkey, senderPrivateKey);
+
+    } catch (error) {
+        console.error('Error handling tip disclosure:', error);
+        showNotification('Failed to publish tip disclosure', 'error');
+    }
+}
+
+// Publish unverified tip disclosure (Option B: Honor system)
+async function publishUnverifiedDisclosure(postId, recipientPubkey, moneroAddress, amount, message, senderPubkey, senderPrivateKey) {
+    // Create kind 9736 Monero Zap Disclosure event (unverified)
+    const zapEvent = {
+        kind: 9736,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+            ['p', String(recipientPubkey)],     // recipient
+            ['P', String(senderPubkey)],        // tipper (payer)
+            ['e', String(postId)],              // post being zapped
+            ['amount', String(amount)],         // XMR amount (must be string)
+            ['address', String(moneroAddress)]  // recipient's XMR address
+        ],
+        content: message || '',
+        pubkey: senderPubkey
+    };
+
+    console.log('📍 Creating unverified kind 9736 event:', zapEvent);
+
+    // Sign the event
+    const signedEvent = window.NostrTools.finalizeEvent(zapEvent, senderPrivateKey);
+
+    console.log('📍 Signed event:', signedEvent);
+
+    // Publish to Nosmero relay
+    await publishToNosmeroRelay(signedEvent, 'Tip disclosure published!');
+}
+
+// Publish verified tip disclosure (Option C: Backend verification with proof hash)
+async function publishVerifiedDisclosure(postId, recipientPubkey, moneroAddress, amount, message, verificationData, senderPubkey, senderPrivateKey) {
+    try {
+        // Show verification progress
+        showNotification('Verifying transaction on Monero blockchain...', 'info');
+
+        // Call backend verification API
+        const apiUrl = window.location.port === '8443'
+            ? 'https://nosmero.com:8443/api/verify-and-publish'
+            : 'https://nosmero.com/api/verify-and-publish';
+
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                txid: verificationData.txid,
+                tx_key: verificationData.txKey,
+                recipient_address: moneroAddress,
+                amount: parseFloat(amount),
+                recipient_pubkey: recipientPubkey,
+                note_id: postId,
+                message: message,
+                tipper_pubkey: senderPubkey
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Verification failed');
+        }
+
+        const result = await response.json();
+
+        if (!result.success || !result.verified) {
+            throw new Error('Transaction verification failed');
+        }
+
+        console.log('✓ Backend verification successful:', {
+            proof_hash: result.proof_hash?.substring(0, 16) + '...',
+            verified_amount: result.verified_amount,
+            confirmations: result.confirmations
+        });
+
+        // Create kind 9736 event with proof hash (Option 4B)
         const zapEvent = {
             kind: 9736,
             created_at: Math.floor(Date.now() / 1000),
             tags: [
-                ['p', String(recipientPubkey)],     // recipient
-                ['P', String(senderPubkey)],        // tipper (payer)
-                ['e', String(postId)],              // post being zapped
-                ['amount', String(amount)],         // XMR amount (must be string)
-                ['address', String(moneroAddress)]  // recipient's XMR address
+                ['p', String(recipientPubkey)],
+                ['P', String(senderPubkey)],
+                ['e', String(postId)],
+                ['amount', String(result.verified_amount)], // Use backend-verified amount
+                ['address', String(moneroAddress)],
+                ['verified', 'true'],
+                ['proof_hash', String(result.proof_hash)],
+                ['verified_at', String(Math.floor(Date.now() / 1000))],
+                ['confirmations', String(result.confirmations)]
             ],
             content: message || '',
             pubkey: senderPubkey
         };
 
-        console.log('📍 Creating kind 9736 event:', zapEvent);
+        console.log('📍 Creating verified kind 9736 event with proof hash');
 
-        // Sign the event
+        // Sign the event with user's key (not backend)
         const signedEvent = window.NostrTools.finalizeEvent(zapEvent, senderPrivateKey);
 
-        console.log('📍 Signed event:', signedEvent);
+        // Publish to Nosmero relay
+        await publishToNosmeroRelay(signedEvent, 'Verified tip disclosure published!');
 
-        // Publish directly to Nosmero relay
-        const nosmeroRelay = window.location.port === '8080'
-            ? 'ws://nosmero.com:8080/nip78-relay'
-            : 'wss://nosmero.com/nip78-relay';
-
-        console.log('📍 Publishing to Nosmero relay:', nosmeroRelay);
-
-        if (!State.pool) {
-            showNotification('No relay connection available', 'error');
-            return;
-        }
-
-        // Show notification that we're publishing
-        showNotification('Publishing tip disclosure...', 'info');
-
-        // Publish the event to Nosmero relay
-        const publishPromises = State.pool.publish([nosmeroRelay], signedEvent);
-        console.log('📍 Publish promises:', publishPromises);
-
-        // Wait for publish to complete
-        const results = await Promise.allSettled(publishPromises);
-        console.log('📍 Publish results:', results);
-
-        if (results[0].status === 'fulfilled') {
-            console.log(`  ✅ ${nosmeroRelay}: published successfully`);
-            showNotification('Tip disclosure published!', 'success');
-        } else {
-            console.log(`  ❌ ${nosmeroRelay}: ${results[0].reason?.message}`);
-            throw new Error('Failed to publish to Nosmero relay: ' + results[0].reason?.message);
-        }
+        showNotification('Transaction verified and published!', 'success');
 
     } catch (error) {
-        console.error('❌ Error handling tip disclosure:', error);
-        showNotification(`Failed to publish disclosure: ${error.message}`, 'error');
+        console.error('Verification error:', error);
+        showNotification(`Verification failed: ${error.message}`, 'error');
+        throw error;
+    }
+}
+
+// Helper: Publish event to Nosmero relay
+async function publishToNosmeroRelay(signedEvent, successMessage) {
+    const nosmeroRelay = window.location.port === '8080'
+        ? 'ws://nosmero.com:8080/nip78-relay'
+        : 'wss://nosmero.com/nip78-relay';
+
+    console.log('📍 Publishing to Nosmero relay:', nosmeroRelay);
+
+    if (!State.pool) {
+        throw new Error('No relay connection available');
+    }
+
+    // Publish the event to Nosmero relay
+    const publishPromises = State.pool.publish([nosmeroRelay], signedEvent);
+    console.log('📍 Publish promises:', publishPromises);
+
+    // Wait for publish to complete
+    const results = await Promise.allSettled(publishPromises);
+    console.log('📍 Publish results:', results);
+
+    if (results[0].status === 'fulfilled') {
+        console.log(`  ✅ ${nosmeroRelay}: published successfully`);
+        showNotification(successMessage, 'success');
+
+        // Refresh widget after brief delay to ensure relay has persisted event
+        setTimeout(async () => {
+            try {
+                const Posts = await import('./posts.js');
+                await Posts.fetchWidgetNetworkStats();
+                await Posts.fetchWidgetPersonalStats();
+                await Posts.fetchWidgetSentStats();
+                await Posts.updateWidgetDisplay();
+            } catch (widgetError) {
+                console.error('Error refreshing widget:', widgetError);
+            }
+        }, 500); // 500ms delay to let relay persist the event
+    } else {
+        console.log(`  ❌ ${nosmeroRelay}: ${results[0].reason?.message}`);
+        throw new Error('Failed to publish to Nosmero relay: ' + results[0].reason?.message);
     }
 }
 
@@ -1627,7 +1843,13 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false) {
         if (parentAuthors.length > 0) {
             await PostsModule.fetchProfiles([...new Set(parentAuthors)]);
         }
-        
+
+        // Fetch disclosed tips for posts (pass full post objects for author moderation)
+        const disclosedTipsData = await PostsModule.fetchDisclosedTips(posts);
+
+        // Cache disclosed tips data for later access
+        Object.assign(PostsModule.disclosedTipsCache, disclosedTipsData);
+
         // Render each post using the proper renderSinglePost function
         const renderedPosts = await Promise.all(posts.map(async post => {
             try {

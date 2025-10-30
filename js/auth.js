@@ -270,6 +270,14 @@ export async function loginWithNsec() {
             console.error('Error loading NIP-65 relay list:', error);
         }
 
+        // Update disclosed tips widget for logged-in state
+        try {
+            const Posts = await import('./posts.js');
+            await Posts.updateWidgetForAuthState();
+        } catch (error) {
+            console.error('Error updating disclosed tips widget:', error);
+        }
+
         // Clear the anonymous feed display before starting authenticated session
         const feed = document.getElementById('feed');
         const homeFeedList = document.getElementById('homeFeedList');
@@ -342,6 +350,14 @@ export async function loginWithExtension() {
             await Relays.importRelayList();
         } catch (error) {
             console.error('Error loading NIP-65 relay list:', error);
+        }
+
+        // Update disclosed tips widget for logged-in state
+        try {
+            const Posts = await import('./posts.js');
+            await Posts.updateWidgetForAuthState();
+        } catch (error) {
+            console.error('Error updating disclosed tips widget:', error);
         }
 
         // Clear all home feed state to prevent anonymous posts from persisting
@@ -661,6 +677,11 @@ export function logout() {
 
     // Update UI elements immediately
     updateUIForLogout();
+
+    // Update disclosed tips widget for anonymous state
+    if (window.Posts && Posts.updateWidgetForAuthState) {
+        Posts.updateWidgetForAuthState();
+    }
 
     showNotification('Logged out successfully', 'success');
 
