@@ -62,7 +62,10 @@ async function initializeApp() {
         // Initialize posts system
         Posts.initializePosts();
         console.log('✓ Posts system initialized');
-        
+
+        // Initialize disclosed tips widget
+        Posts.initDisclosedTipsWidget();
+
         // Set up navigation
         setupNavigation();
         console.log('✓ Navigation setup complete');
@@ -269,6 +272,16 @@ async function checkExistingSession() {
                 localStorage.removeItem('nostr-public-key');
             }
         }
+
+        // Update disclosed tips widget after session restoration
+        if (State.publicKey) {
+            try {
+                const Posts = await import('./posts.js');
+                await Posts.updateWidgetForAuthState();
+            } catch (error) {
+                console.error('Error updating disclosed tips widget:', error);
+            }
+        }
     }
 }
 
@@ -323,21 +336,17 @@ async function startApplication() {
             });
         }, 2000); // 2 second delay
 
-        setTimeout(() => {
-            Messages.fetchMessagesInBackground().catch(err => {
-                console.error('❌ Error fetching messages:', err);
-            });
-        }, 3000); // 3 second delay
+        // DM loading removed - only loads when user clicks Messages tab
+        // This reduces relay load and improves privacy
 
-        // Set up periodic background refresh for notifications and messages (every 3 minutes)
+        // Set up periodic background refresh for notifications only (every 3 minutes)
+        // Messages are NOT refreshed in background - only when user opens Messages page
         const notificationRefreshInterval = setInterval(() => {
             if (State.publicKey) {
                 Messages.fetchNotifications().catch(err => {
                     console.error('❌ Background notification fetch failed:', err);
                 });
-                Messages.fetchMessagesInBackground().catch(err => {
-                    console.error('❌ Background message fetch failed:', err);
-                });
+                // Messages.fetchMessagesInBackground() - REMOVED: only fetch when user opens Messages
             }
         }, 3 * 60 * 1000); // 3 minutes
 
@@ -4138,12 +4147,37 @@ document.addEventListener('DOMContentLoaded', function() {
             tabButtons.forEach(btn => btn.classList.remove('active'));
             this.classList.add('active');
 
+            // Hide all other pages and show feed
+            const messagesPage = document.getElementById('messagesPage');
+            const threadPage = document.getElementById('threadPage');
+            const profilePage = document.getElementById('profilePage');
+            const feed = document.getElementById('feed');
+
+            if (messagesPage) messagesPage.style.display = 'none';
+            if (threadPage) threadPage.style.display = 'none';
+            if (profilePage) profilePage.style.display = 'none';
+            if (feed) {
+                feed.style.display = 'block';
+
+                // Restore proper feed structure if it was destroyed (e.g., by Tip Activity)
+                // Check if homeFeedList exists, if not, recreate the structure
+                if (!document.getElementById('homeFeedList')) {
+                    feed.innerHTML = `
+                        <div id="homeFeedHeader" style="display: none;"></div>
+                        <div id="homeFeedList"></div>
+                        <div id="loadMoreContainer" style="display: none;"></div>
+                    `;
+                }
+            }
+
             // Load appropriate feed
             const Posts = await import('./posts.js');
             if (feedType === 'home') {
                 await Posts.loadStreamingHomeFeed();
             } else if (feedType === 'trending') {
                 await Posts.loadTrendingFeed();
+            } else if (feedType === 'tipactivity') {
+                await Posts.loadTipActivityFeed();
             }
         });
     });

@@ -6,6 +6,10 @@
     <title>nosmero - Nostr + Monero</title>
     <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
     <link rel="stylesheet" href="/styles.css?v=1.8.2">
+
+    <!-- Eruda mobile debugging console (DEV ONLY) -->
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>eruda.init();</script>
 </head>
 <body>
     <!-- Mobile menu toggle button -->
@@ -83,13 +87,12 @@
         </div>
         
         <button class="post-button" onclick="toggleCompose()">✏️ Create Note</button>
-        
-        <div class="nav-item" onclick="showZapQueue()" style="position: relative; margin-top: 10px;">
-            <span>💰</span>
-            <span>XMR Queue</span>
+
+        <button class="post-button" onclick="showZapQueue()" style="position: relative; margin-top: 10px;">
+            💰 XMR Queue
             <span class="zap-queue-indicator" style="position: absolute; top: -5px; right: -5px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; font-weight: bold; display: none; justify-content: center; align-items: center;">0</span>
-        </div>
-        
+        </button>
+
         <div class="nav-item" onclick="logout()" style="margin-top: 10px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border-radius: 12px; color: #fff;">
             <span>🚪</span>
             <span style="color: #fff; font-weight: bold;">Logout</span>
@@ -100,6 +103,7 @@
         <div class="header">
             <div class="tab-bar">
                 <button class="tab active" data-feed="home">Home</button>
+                <button class="tab" data-feed="tipactivity">Tip Activity</button>
                 <button class="tab" data-feed="trending">Trending Monero Notes</button>
             </div>
         </div>
@@ -591,22 +595,96 @@
 
     <!-- Disclosure Prompt Modal -->
     <div class="modal" id="disclosurePromptModal">
-        <div class="modal-content" style="max-width: 500px;">
-            <div class="modal-header">💰 Did you send a tip?</div>
+        <div class="modal-content" style="max-width: 650px;">
+            <div class="modal-header">💰 Tip Disclosure Options</div>
             <div style="padding: 20px;">
-                <p style="margin-bottom: 20px; color: #ccc;">You can make your tip public so the community can see your support!</p>
+                <p style="margin-bottom: 20px; color: #ccc;">Choose how you want to handle this tip:</p>
 
-                <div style="margin-bottom: 20px;">
-                    <label style="display: block; margin-bottom: 8px; color: #999;">Public Message (optional)</label>
+                <!-- Option A: Keep it Secret -->
+                <label style="display: block; padding: 14px; margin-bottom: 12px; background: rgba(100, 100, 100, 0.1); border: 2px solid #444; border-radius: 8px; cursor: pointer; transition: all 0.2s;"
+                       onmouseover="this.style.background='rgba(100,100,100,0.15)'; this.style.borderColor='#666';"
+                       onmouseout="this.style.background='rgba(100,100,100,0.1)'; this.style.borderColor='#444';">
+                    <div style="display: flex; align-items: start;">
+                        <input type="radio" name="disclosureOption" value="secret" checked onchange="updateDisclosureOption()"
+                               style="margin-right: 12px; margin-top: 4px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; font-size: 15px; color: #fff; margin-bottom: 4px;">🔒 Keep it Secret</div>
+                            <div style="font-size: 13px; color: #999;">No public record of this tip</div>
+                        </div>
+                    </div>
+                </label>
+
+                <!-- Option B: Disclose (No Verification) -->
+                <label style="display: block; padding: 14px; margin-bottom: 12px; background: rgba(255, 102, 0, 0.1); border: 2px solid rgba(255, 102, 0, 0.3); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
+                       onmouseover="this.style.background='rgba(255,102,0,0.15)'; this.style.borderColor='rgba(255,102,0,0.5)';"
+                       onmouseout="this.style.background='rgba(255,102,0,0.1)'; this.style.borderColor='rgba(255,102,0,0.3)';">
+                    <div style="display: flex; align-items: start;">
+                        <input type="radio" name="disclosureOption" value="disclose" onchange="updateDisclosureOption()"
+                               style="margin-right: 12px; margin-top: 4px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; font-size: 15px; color: #FF6600; margin-bottom: 4px;">💰 Disclose (No Verification)</div>
+                            <div style="font-size: 13px; color: #999;">Honor system, no cryptographic proof</div>
+                        </div>
+                    </div>
+                </label>
+
+                <!-- Option C: Disclose + Verify -->
+                <label style="display: block; padding: 14px; margin-bottom: 20px; background: rgba(16, 185, 129, 0.1); border: 2px solid rgba(16, 185, 129, 0.3); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
+                       onmouseover="this.style.background='rgba(16,185,129,0.15)'; this.style.borderColor='rgba(16,185,129,0.5)';"
+                       onmouseout="this.style.background='rgba(16,185,129,0.1)'; this.style.borderColor='rgba(16,185,129,0.3)';">
+                    <div style="display: flex; align-items: start;">
+                        <input type="radio" name="disclosureOption" value="verify" onchange="updateDisclosureOption()"
+                               style="margin-right: 12px; margin-top: 4px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; font-size: 15px; color: #10B981; margin-bottom: 4px;">✓ Disclose + Verify</div>
+                            <div style="font-size: 13px; color: #999;">Cryptographically verified with blockchain proof. Transaction details sent privately to recipient via encrypted DM.</div>
+                        </div>
+                    </div>
+                </label>
+
+                <!-- Message Field (shown for all public options) -->
+                <div id="messageSection" style="display: none; margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Message (optional)</label>
                     <textarea id="disclosurePromptMessage" rows="3"
                               placeholder="Add a message with your tip..."
                               style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; resize: vertical;"></textarea>
                 </div>
+
+                <!-- Verification Fields (shown only for verify options) -->
+                <div id="verificationFields" style="display: none; padding: 16px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; margin-bottom: 16px;">
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 6px; color: #aaa; font-size: 13px;">Transaction ID (TXID)</label>
+                        <input type="text" id="verificationTxid"
+                               placeholder="Get from your wallet's transaction history..."
+                               style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-family: monospace; font-size: 12px;">
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 6px; color: #aaa; font-size: 13px;">Transaction Key (tx_key)</label>
+                        <input type="text" id="verificationTxKey"
+                               placeholder="Run: get_tx_key <txid> in your wallet..."
+                               style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-family: monospace; font-size: 12px;">
+                        <div style="font-size: 11px; color: #666; margin-top: 4px;">
+                            CLI: get_tx_key &lt;txid&gt; | GUI: Right-click transaction → Get transaction key
+                        </div>
+                    </div>
+
+                    <div style="padding: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px;">
+                        <div style="font-size: 12px; color: #aaa; line-height: 1.6;">
+                            <strong style="color: #10B981;">🔐 Privacy-First Verification</strong><br>
+                            Your transaction details (TXID & tx_key) will be:<br>
+                            • Verified instantly against the Monero blockchain<br>
+                            • Sent privately to the recipient via encrypted DM (NIP-17)<br>
+                            • Never stored in logs or published publicly<br>
+                            • Discarded immediately after verification
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="send-btn" onclick="submitDisclosurePrompt()"
-                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Make It Public</button>
-                <button class="close-btn" onclick="closeDisclosurePromptModal()">Keep it Private</button>
+                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Confirm</button>
+                <button class="close-btn" onclick="closeDisclosurePromptModal()">Cancel</button>
             </div>
         </div>
     </div>

@@ -1290,7 +1290,12 @@ export async function renderFeed(loadMore = false) {
         const moneroAddress = getMoneroAddress(post);
         const lightningAddress = getLightningAddress(post);
         const engagement = engagementData[post.id] || { reactions: 0, reposts: 0, replies: 0, zaps: 0 };
-        const disclosedTips = disclosedTipsData[post.id] || { totalXMR: 0, count: 0, tips: [] };
+        const disclosedTips = disclosedTipsData[post.id] || {
+            disclosed: { totalXMR: 0, count: 0, tips: [] },
+            verified: { totalXMR: 0, count: 0, tips: [] },
+            mutedCount: 0,
+            tips: []
+        };
 
         // Check if this is a reply and get parent post info
         const parentPost = parentPostsMap[post.id];
@@ -1356,14 +1361,32 @@ export async function renderFeed(loadMore = false) {
                     }
                     <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>
                 </div>
-                ${(disclosedTips.count > 0 || disclosedTips.mutedCount > 0) ? `
+                ${(disclosedTips.disclosed.count > 0 || disclosedTips.verified.count > 0 || disclosedTips.mutedCount > 0) ? `
                 <div style="padding: 8px 12px; margin-top: 8px; background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border-radius: 8px; border: 1px solid rgba(255, 102, 0, 0.2);">
+                    ${disclosedTips.verified.count > 0 ? `
+                    <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px; margin-bottom: ${disclosedTips.disclosed.count > 0 ? '6px' : '0'};">
+                        <div style="color: #10B981; font-weight: bold;">
+                            ✓ Verified Tips: ${disclosedTips.verified.totalXMR.toFixed(4)} XMR (${disclosedTips.verified.count})
+                        </div>
+                    </div>
+                    ` : ''}
+                    ${disclosedTips.disclosed.count > 0 ? `
                     <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
                         <div style="color: #FF6600; font-weight: bold;">
-                            💰 Public Tips to this Note: ${disclosedTips.totalXMR.toFixed(4)} XMR (${disclosedTips.count})${disclosedTips.mutedCount > 0 ? ` <span style="color: #999; font-weight: normal; font-size: 12px;">[${disclosedTips.mutedCount} muted by author]</span>` : ''}
+                            💰 Disclosed Tips: ${disclosedTips.disclosed.totalXMR.toFixed(4)} XMR (${disclosedTips.disclosed.count})
                         </div>
+                    </div>
+                    ` : ''}
+                    ${disclosedTips.mutedCount > 0 ? `
+                    <div style="font-size: 12px; color: #999; margin-top: 4px;">
+                        [${disclosedTips.mutedCount} muted by author]
+                    </div>
+                    ` : ''}
+                    ${(disclosedTips.disclosed.count > 0 || disclosedTips.verified.count > 0) ? `
+                    <div style="margin-top: 6px;">
                         <button onclick="showDisclosedTipDetails('${post.id}', event)" style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">View Details</button>
                     </div>
+                    ` : ''}
                 </div>
                 ` : ''}
                 </div>
@@ -2217,9 +2240,14 @@ export async function fetchDisclosedTips(postsOrIds) {
 
         const disclosures = {};
 
-        // Initialize disclosures for all post IDs
+        // Initialize disclosures for all post IDs with separate verified/disclosed tracking
         postIds.forEach(id => {
-            disclosures[id] = { totalXMR: 0, count: 0, mutedCount: 0, tips: [] };
+            disclosures[id] = {
+                disclosed: { totalXMR: 0, count: 0, tips: [] },  // Unverified tips
+                verified: { totalXMR: 0, count: 0, tips: [] },    // Verified tips
+                mutedCount: 0,
+                tips: []  // All tips (for backward compatibility)
+            };
         });
 
         return new Promise((resolve) => {
@@ -2258,6 +2286,15 @@ export async function fetchDisclosedTips(postsOrIds) {
                         const tipperTag = event.tags.find(tag => tag[0] === 'P');
                         const tipperPubkey = tipperTag ? tipperTag[1] : null;
 
+                        // Check if tip is verified
+                        const verifiedTag = event.tags.find(tag => tag[0] === 'verified');
+                        const isVerified = verifiedTag && verifiedTag[1] === 'true';
+
+                        // Extract verification data if present
+                        const txidTag = event.tags.find(tag => tag[0] === 'txid');
+                        const txKeyTag = event.tags.find(tag => tag[0] === 'tx_key');
+                        const verifiedByTag = event.tags.find(tag => tag[0] === 'verified_by');
+
                         // Check if tip is muted by POST AUTHOR (not viewer)
                         const authorMuteList = authorMuteLists[referencedPostId] || new Set();
                         const mutedByAuthor = tipperPubkey && authorMuteList.has(tipperPubkey);
@@ -2266,20 +2303,39 @@ export async function fetchDisclosedTips(postsOrIds) {
                             console.log('  🔇 Tip muted by post author:', tipperPubkey.substring(0, 16) + '...');
                         }
 
+                        if (isVerified) {
+                            console.log('  ✓ Verified tip:', amount, 'XMR', txidTag ? `(TXID: ${txidTag[1].substring(0, 16)}...)` : '');
+                        }
+
                         if (amount > 0) {
-                            // Always add tip to list, but mark if muted by author
-                            disclosures[referencedPostId].tips.push({
+                            const tipData = {
                                 amount,
                                 tipper: tipperPubkey,
                                 message: event.content,
                                 timestamp: event.created_at,
-                                mutedByAuthor: mutedByAuthor
-                            });
+                                mutedByAuthor: mutedByAuthor,
+                                verified: isVerified,
+                                txid: txidTag ? txidTag[1] : null,
+                                txKey: txKeyTag ? txKeyTag[1] : null,
+                                verifiedBy: verifiedByTag ? verifiedByTag[1] : null
+                            };
+
+                            // Add to all tips list (backward compatibility)
+                            disclosures[referencedPostId].tips.push(tipData);
 
                             // Only include non-muted tips in totals
                             if (!mutedByAuthor) {
-                                disclosures[referencedPostId].totalXMR += amount;
-                                disclosures[referencedPostId].count++;
+                                if (isVerified) {
+                                    // Add to verified category
+                                    disclosures[referencedPostId].verified.totalXMR += amount;
+                                    disclosures[referencedPostId].verified.count++;
+                                    disclosures[referencedPostId].verified.tips.push(tipData);
+                                } else {
+                                    // Add to unverified (disclosed) category
+                                    disclosures[referencedPostId].disclosed.totalXMR += amount;
+                                    disclosures[referencedPostId].disclosed.count++;
+                                    disclosures[referencedPostId].disclosed.tips.push(tipData);
+                                }
                             } else {
                                 disclosures[referencedPostId].mutedCount++;
                             }
@@ -2301,7 +2357,12 @@ export async function fetchDisclosedTips(postsOrIds) {
         console.error('Error fetching disclosed tips:', error);
         const disclosures = {};
         postIds.forEach(id => {
-            disclosures[id] = { totalXMR: 0, count: 0, tips: [] };
+            disclosures[id] = {
+                disclosed: { totalXMR: 0, count: 0, tips: [] },
+                verified: { totalXMR: 0, count: 0, tips: [] },
+                mutedCount: 0,
+                tips: []
+            };
         });
         return disclosures;
     }
@@ -2528,8 +2589,13 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
             // DO NOT fallback fetch - streaming render will update counts in background
         }
 
-        // Get disclosed tips from cache
-        const disclosedTips = disclosedTipsCache[post.id] || { totalXMR: 0, count: 0, tips: [] };
+        // Get disclosed tips from cache (with new structure)
+        const disclosedTips = disclosedTipsCache[post.id] || {
+            disclosed: { totalXMR: 0, count: 0, tips: [] },
+            verified: { totalXMR: 0, count: 0, tips: [] },
+            mutedCount: 0,
+            tips: []
+        };
 
         // Check if this is a reply and get parent post info (only for feed context)
         let parentHtml = '';
@@ -2604,14 +2670,32 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                     }
                     <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>
                 </div>
-                ${(disclosedTips.count > 0 || disclosedTips.mutedCount > 0) ? `
+                ${(disclosedTips.disclosed.count > 0 || disclosedTips.verified.count > 0 || disclosedTips.mutedCount > 0) ? `
                 <div style="padding: 8px 12px; margin-top: 8px; background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border-radius: 8px; border: 1px solid rgba(255, 102, 0, 0.2);">
+                    ${disclosedTips.verified.count > 0 ? `
+                    <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px; margin-bottom: ${disclosedTips.disclosed.count > 0 ? '6px' : '0'};">
+                        <div style="color: #10B981; font-weight: bold;">
+                            ✓ Verified Tips: ${disclosedTips.verified.totalXMR.toFixed(4)} XMR (${disclosedTips.verified.count})
+                        </div>
+                    </div>
+                    ` : ''}
+                    ${disclosedTips.disclosed.count > 0 ? `
                     <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
                         <div style="color: #FF6600; font-weight: bold;">
-                            💰 Public Tips to this Note: ${disclosedTips.totalXMR.toFixed(4)} XMR (${disclosedTips.count})${disclosedTips.mutedCount > 0 ? ` <span style="color: #999; font-weight: normal; font-size: 12px;">[${disclosedTips.mutedCount} muted by author]</span>` : ''}
+                            💰 Disclosed Tips: ${disclosedTips.disclosed.totalXMR.toFixed(4)} XMR (${disclosedTips.disclosed.count})
                         </div>
+                    </div>
+                    ` : ''}
+                    ${disclosedTips.mutedCount > 0 ? `
+                    <div style="font-size: 12px; color: #999; margin-top: 4px;">
+                        [${disclosedTips.mutedCount} muted by author]
+                    </div>
+                    ` : ''}
+                    ${(disclosedTips.disclosed.count > 0 || disclosedTips.verified.count > 0) ? `
+                    <div style="margin-top: 6px;">
                         <button onclick="showDisclosedTipDetails('${post.id}', event)" style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">View Details</button>
                     </div>
+                    ` : ''}
                 </div>
                 ` : ''}
                 </div>
@@ -3293,7 +3377,7 @@ export async function showDisclosedTipDetails(postId, event) {
         // Different styling for muted tips
         const bgColor = isMuted ? 'rgba(100, 100, 100, 0.1)' : 'rgba(0, 0, 0, 0.2)';
         const textColor = isMuted ? '#666' : '#fff';
-        const amountColor = isMuted ? '#999' : '#FF6600';
+        const amountColor = isMuted ? '#999' : (tip.verified ? '#10B981' : '#FF6600');
 
         return `
             <div style="padding: 12px; border-bottom: 1px solid #333; background: ${bgColor}; ${isMuted ? 'opacity: 0.6;' : ''}">
@@ -3301,6 +3385,11 @@ export async function showDisclosedTipDetails(postId, event) {
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap;">
                         <div onclick="closeDisclosedTipsModal(); showUserProfile('${tip.tipper}');" style="font-weight: bold; color: ${textColor}; cursor: pointer; text-decoration: underline;">${tipperName}</div>
                         <div style="font-size: 12px; color: #999;">${tipperHandle}</div>
+                        ${tip.verified ? `
+                            <span style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10B981; color: #10B981; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold;" title="Verified by Nosmero. Transaction details sent to recipient via encrypted DM.">
+                                ✓ VERIFIED
+                            </span>
+                        ` : ''}
                         ${isMuted ? `
                             <span style="background: rgba(255, 68, 68, 0.2); border: 1px solid #ff4444; color: #ff4444; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold;">
                                 MUTED BY AUTHOR
@@ -3315,10 +3404,22 @@ export async function showDisclosedTipDetails(postId, event) {
                     <div style="color: ${amountColor}; font-weight: bold; white-space: nowrap; margin-left: 12px;">${tip.amount} XMR</div>
                 </div>
                 ${tip.message ? `<div style="color: ${isMuted ? '#555' : '#ccc'}; font-size: 13px; margin-bottom: 4px;">${tip.message}</div>` : ''}
-                <div style="color: #666; font-size: 11px;">${timeAgo}</div>
+                ${tip.verified ? `
+                    <div style="margin-top: 6px; font-size: 11px; color: #10B981; font-style: italic;">
+                        🔐 Cryptographically verified. Transaction details sent to recipient via encrypted DM.
+                    </div>
+                ` : ''}
+                <div style="color: #666; font-size: 11px; margin-top: 4px;">${timeAgo}</div>
             </div>
         `;
     }).join('');
+
+    // Calculate totals for header
+    const verifiedTotal = disclosedTips.verified.totalXMR || 0;
+    const verifiedCount = disclosedTips.verified.count || 0;
+    const disclosedTotal = disclosedTips.disclosed.totalXMR || 0;
+    const disclosedCount = disclosedTips.disclosed.count || 0;
+    const totalCount = verifiedCount + disclosedCount;
 
     // Create modal
     const modalHtml = `
@@ -3326,9 +3427,11 @@ export async function showDisclosedTipDetails(postId, event) {
             <div style="background: #1a1a1a; border-radius: 16px; max-width: 600px; width: 90%; max-height: 80vh; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid #333;" onclick="event.stopPropagation()">
                 <div style="padding: 20px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <h2 style="margin: 0; color: #FF6600;">💰 Disclosed Tips</h2>
-                        <div style="font-size: 14px; color: #999; margin-top: 4px;">
-                            Total: ${disclosedTips.totalXMR.toFixed(4)} XMR from ${disclosedTips.count} ${disclosedTips.count === 1 ? 'tipper' : 'tippers'}
+                        <h2 style="margin: 0; color: #FF6600;">💰 Tips for this Note</h2>
+                        <div style="font-size: 14px; color: #999; margin-top: 8px;">
+                            ${verifiedCount > 0 ? `<div style="color: #10B981; margin-bottom: 4px;">✓ Verified: ${verifiedTotal.toFixed(4)} XMR (${verifiedCount})</div>` : ''}
+                            ${disclosedCount > 0 ? `<div style="color: #FF6600;">💰 Disclosed: ${disclosedTotal.toFixed(4)} XMR (${disclosedCount})</div>` : ''}
+                            <div style="margin-top: 4px; font-size: 12px; color: #666;">Total: ${totalCount} ${totalCount === 1 ? 'tip' : 'tips'}</div>
                         </div>
                     </div>
                     <button onclick="closeDisclosedTipsModal()" style="background: none; border: none; color: #999; font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px;">&times;</button>
@@ -3351,6 +3454,23 @@ export async function showDisclosedTipDetails(postId, event) {
 export function closeDisclosedTipsModal() {
     const modal = document.getElementById('disclosedTipsModal');
     if (modal) modal.remove();
+}
+
+// Copy text to clipboard with visual feedback
+window.copyToClipboard = function(text, buttonElement) {
+    navigator.clipboard.writeText(text).then(() => {
+        const originalText = buttonElement.textContent;
+        buttonElement.textContent = 'Copied!';
+        buttonElement.style.opacity = '0.7';
+
+        setTimeout(() => {
+            buttonElement.textContent = originalText;
+            buttonElement.style.opacity = '1';
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+    });
 }
 
 // Mute a tipper from the tip details modal
@@ -3388,11 +3508,666 @@ window.muteTipperFromDetails = async function(pubkey, event) {
     }
 }
 
+// ==================== DISCLOSED TIPS WIDGET ====================
+
+// Widget state
+let widgetReceivedExpanded = false;
+let widgetSentExpanded = false;
+let widgetSubscription = null;
+let widgetNetworkStats = { totalXMR: 0, count: 0, tips: [] };
+let widgetPersonalStats = {
+    verified: { totalXMR: 0, count: 0, tips: [] },
+    disclosed: { totalXMR: 0, count: 0, tips: [] }
+};
+let widgetSentStats = { totalXMR: 0, count: 0, tips: [] }; // Tips sent by the user
+
+// Toggle received tips expand/collapse
+window.toggleWidgetReceivedTips = function() {
+    widgetReceivedExpanded = !widgetReceivedExpanded;
+    const expandedView = document.getElementById('widgetReceivedExpanded');
+    const arrow = document.getElementById('widgetReceivedArrow');
+
+    if (widgetReceivedExpanded) {
+        expandedView.style.display = 'block';
+        arrow.textContent = '▲';
+        updateWidgetReceivedTips(); // Show user's received tips
+    } else {
+        expandedView.style.display = 'none';
+        arrow.textContent = '▼';
+    }
+}
+
+// Toggle sent tips expand/collapse
+window.toggleWidgetSentTips = function() {
+    widgetSentExpanded = !widgetSentExpanded;
+    const expandedView = document.getElementById('widgetSentExpanded');
+    const arrow = document.getElementById('widgetSentArrow');
+
+    if (widgetSentExpanded) {
+        expandedView.style.display = 'block';
+        arrow.textContent = '▲';
+        updateWidgetSentTips(); // Show user's sent tips
+    } else {
+        expandedView.style.display = 'none';
+        arrow.textContent = '▼';
+    }
+}
+
+// Manual refresh widget data
+window.refreshDisclosedTipsWidget = async function(event) {
+    if (event) event.stopPropagation(); // Don't trigger toggle
+
+    try {
+        await fetchWidgetNetworkStats();
+        await fetchWidgetPersonalStats();
+        await fetchWidgetSentStats();
+        await updateWidgetDisplay();
+
+        if (widgetReceivedExpanded) {
+            await updateWidgetReceivedTips();
+        }
+        if (widgetSentExpanded) {
+            await updateWidgetSentTips();
+        }
+    } catch (error) {
+        console.error('Error refreshing widget:', error);
+    }
+}
+
+// Fetch network-wide stats (all-time)
+export async function fetchWidgetNetworkStats() {
+    try {
+        // Query from Nosmero relay where tips are published
+        const nosmeroRelay = window.location.port === '8080'
+            ? 'ws://nosmero.com:8080/nip78-relay'
+            : 'wss://nosmero.com/nip78-relay';
+
+        // Query kind 9736 events (all-time)
+        const events = await State.pool.querySync([nosmeroRelay], {
+            kinds: [9736],
+            limit: 1000
+        });
+
+        let totalXMR = 0;
+        let count = 0;
+        const tips = [];
+
+        for (const event of events) {
+            const amountTag = event.tags.find(tag => tag[0] === 'amount');
+            const amount = amountTag ? parseFloat(amountTag[1]) : 0;
+
+            if (amount > 0) {
+                totalXMR += amount;
+                count++;
+
+                const verifiedTag = event.tags.find(tag => tag[0] === 'verified');
+                const isVerified = verifiedTag && verifiedTag[1] === 'true';
+
+                tips.push({
+                    amount,
+                    tipper: event.pubkey,
+                    timestamp: event.created_at,
+                    verified: isVerified
+                });
+            }
+        }
+
+        // Sort tips by timestamp (newest first)
+        tips.sort((a, b) => b.timestamp - a.timestamp);
+
+        widgetNetworkStats = { totalXMR, count, tips: tips.slice(0, 10) };
+
+        return widgetNetworkStats;
+    } catch (error) {
+        console.error('Error fetching widget network stats:', error);
+        return { totalXMR: 0, count: 0, tips: [] };
+    }
+}
+
+// Fetch personal received tips
+export async function fetchWidgetPersonalStats() {
+    if (!State.publicKey) {
+        return { verified: { totalXMR: 0, count: 0 }, disclosed: { totalXMR: 0, count: 0 } };
+    }
+
+    try {
+        // Query from Nosmero relay where tips are published
+        const nosmeroRelay = window.location.port === '8080'
+            ? 'ws://nosmero.com:8080/nip78-relay'
+            : 'wss://nosmero.com/nip78-relay';
+
+        // Query tips where user is recipient
+        const events = await State.pool.querySync([nosmeroRelay], {
+            kinds: [9736],
+            '#p': [State.publicKey],
+            limit: 200
+        });
+
+        let verifiedTotal = 0;
+        let verifiedCount = 0;
+        let disclosedTotal = 0;
+        let disclosedCount = 0;
+        const verifiedTips = [];
+        const disclosedTips = [];
+
+        for (const event of events) {
+            const amountTag = event.tags.find(tag => tag[0] === 'amount');
+            const amount = amountTag ? parseFloat(amountTag[1]) : 0;
+
+            if (amount > 0) {
+                const verifiedTag = event.tags.find(tag => tag[0] === 'verified');
+                const isVerified = verifiedTag && verifiedTag[1] === 'true';
+
+                const noteTag = event.tags.find(tag => tag[0] === 'e');
+                const noteId = noteTag ? noteTag[1] : null;
+
+                const tipData = {
+                    amount,
+                    tipper: event.pubkey,
+                    noteId,
+                    timestamp: event.created_at,
+                    verified: isVerified
+                };
+
+                if (isVerified) {
+                    verifiedTotal += amount;
+                    verifiedCount++;
+                    verifiedTips.push(tipData);
+                } else {
+                    disclosedTotal += amount;
+                    disclosedCount++;
+                    disclosedTips.push(tipData);
+                }
+            }
+        }
+
+        // Sort tips by timestamp (newest first)
+        verifiedTips.sort((a, b) => b.timestamp - a.timestamp);
+        disclosedTips.sort((a, b) => b.timestamp - a.timestamp);
+
+        widgetPersonalStats = {
+            verified: { totalXMR: verifiedTotal, count: verifiedCount, tips: verifiedTips },
+            disclosed: { totalXMR: disclosedTotal, count: disclosedCount, tips: disclosedTips }
+        };
+
+        return widgetPersonalStats;
+    } catch (error) {
+        console.error('Error fetching widget personal stats:', error);
+        return { verified: { totalXMR: 0, count: 0, tips: [] }, disclosed: { totalXMR: 0, count: 0, tips: [] } };
+    }
+}
+
+// Fetch tips sent by the user
+export async function fetchWidgetSentStats() {
+    if (!State.publicKey) {
+        return { totalXMR: 0, count: 0, tips: [] };
+    }
+
+    try {
+        // Query from Nosmero relay where tips are published
+        const nosmeroRelay = window.location.port === '8080'
+            ? 'ws://nosmero.com:8080/nip78-relay'
+            : 'wss://nosmero.com/nip78-relay';
+
+        // Query tips where user is sender (author of the event)
+        const events = await State.pool.querySync([nosmeroRelay], {
+            kinds: [9736],
+            authors: [State.publicKey],
+            limit: 200
+        });
+
+        let totalXMR = 0;
+        let count = 0;
+        const tips = [];
+
+        for (const event of events) {
+            const amountTag = event.tags.find(tag => tag[0] === 'amount');
+            const amount = amountTag ? parseFloat(amountTag[1]) : 0;
+
+            if (amount > 0) {
+                totalXMR += amount;
+                count++;
+
+                const recipientTag = event.tags.find(tag => tag[0] === 'p');
+                const recipient = recipientTag ? recipientTag[1] : null;
+
+                const noteTag = event.tags.find(tag => tag[0] === 'e');
+                const noteId = noteTag ? noteTag[1] : null;
+
+                const verifiedTag = event.tags.find(tag => tag[0] === 'verified');
+                const isVerified = verifiedTag && verifiedTag[1] === 'true';
+
+                tips.push({
+                    amount,
+                    recipient,
+                    noteId,
+                    timestamp: event.created_at,
+                    verified: isVerified
+                });
+            }
+        }
+
+        // Sort tips by timestamp (newest first)
+        tips.sort((a, b) => b.timestamp - a.timestamp);
+
+        widgetSentStats = { totalXMR, count, tips };
+
+        return widgetSentStats;
+    } catch (error) {
+        console.error('Error fetching widget sent stats:', error);
+        return { totalXMR: 0, count: 0, tips: [] };
+    }
+}
+
+// Update widget display
+export async function updateWidgetDisplay() {
+    // Update network stats
+    const networkTotalEl = document.getElementById('widgetNetworkTotal');
+    const networkCountEl = document.getElementById('widgetNetworkCount');
+
+    if (networkTotalEl) {
+        networkTotalEl.textContent = `${widgetNetworkStats.totalXMR.toFixed(5)} XMR`;
+    }
+    if (networkCountEl) {
+        networkCountEl.textContent = `${widgetNetworkStats.count}`;
+    }
+
+    // Update personal stats (if logged in)
+    const personalStatsEl = document.getElementById('widgetPersonalStats');
+    const sentStatsEl = document.getElementById('widgetSentStats');
+
+    if (State.publicKey) {
+        // Show "You Received" section
+        if (personalStatsEl) {
+            personalStatsEl.style.display = 'block';
+
+            const personalVerifiedEl = document.getElementById('widgetPersonalVerified');
+            const personalDisclosedEl = document.getElementById('widgetPersonalDisclosed');
+
+            if (personalVerifiedEl) {
+                personalVerifiedEl.textContent = `${widgetPersonalStats.verified.totalXMR.toFixed(4)} XMR`;
+            }
+            if (personalDisclosedEl) {
+                personalDisclosedEl.textContent = `${widgetPersonalStats.disclosed.totalXMR.toFixed(4)} XMR`;
+            }
+        }
+
+        // Show "You Sent" section
+        if (sentStatsEl) {
+            sentStatsEl.style.display = 'block';
+
+            const sentTotalEl = document.getElementById('widgetSentTotal');
+            const sentCountEl = document.getElementById('widgetSentCount');
+
+            if (sentTotalEl) {
+                sentTotalEl.textContent = `${widgetSentStats.totalXMR.toFixed(4)} XMR`;
+            }
+            if (sentCountEl) {
+                sentCountEl.textContent = `${widgetSentStats.count}`;
+            }
+        }
+    } else {
+        // Hide both sections when logged out
+        if (personalStatsEl) personalStatsEl.style.display = 'none';
+        if (sentStatsEl) sentStatsEl.style.display = 'none';
+    }
+}
+
+// Update received tips in expanded view
+async function updateWidgetReceivedTips() {
+    const receivedTipsEl = document.getElementById('widgetReceivedTips');
+    if (!receivedTipsEl) return;
+
+    // Combine verified and disclosed tips
+    const allReceivedTips = [
+        ...widgetPersonalStats.verified.tips,
+        ...widgetPersonalStats.disclosed.tips
+    ].sort((a, b) => b.timestamp - a.timestamp);
+
+    if (allReceivedTips.length === 0) {
+        receivedTipsEl.innerHTML = '<div style="font-size: 11px; color: #666; font-style: italic;">No tips received yet</div>';
+        return;
+    }
+
+    // Fetch profiles for tippers
+    const tipperPubkeys = allReceivedTips.map(tip => tip.tipper).filter(Boolean);
+    if (tipperPubkeys.length > 0) {
+        await fetchProfiles(tipperPubkeys);
+    }
+
+    const tipsHtml = allReceivedTips.map(tip => {
+        const profile = State.profileCache[tip.tipper] || {};
+        const name = profile.name || 'Anonymous';
+        const timeAgo = Utils.formatTime(tip.timestamp);
+        const badge = tip.verified ? '<span style="color: #10B981;">✓</span>' : '<span style="color: #FF6600;">💰</span>';
+
+        // Make clickable if noteId exists
+        const clickHandler = tip.noteId ? `onclick="openThreadView('${tip.noteId}')"` : '';
+        const cursorStyle = tip.noteId ? 'cursor: pointer;' : '';
+
+        return `
+            <div ${clickHandler} style="padding: 6px 0; border-bottom: 1px solid rgba(255, 102, 0, 0.1); ${cursorStyle}">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 11px; color: #ccc; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        ${badge} From: ${name}
+                    </div>
+                    <div style="font-size: 11px; color: #FF6600; font-weight: bold; margin-left: 8px;">
+                        ${tip.amount.toFixed(4)} XMR
+                    </div>
+                </div>
+                <div style="font-size: 10px; color: #666; margin-top: 2px;">${timeAgo}</div>
+            </div>
+        `;
+    }).join('');
+
+    receivedTipsEl.innerHTML = tipsHtml;
+}
+
+// Update sent tips in expanded view
+async function updateWidgetSentTips() {
+    const sentTipsEl = document.getElementById('widgetSentTipsList');
+    if (!sentTipsEl) return;
+
+    if (widgetSentStats.tips.length === 0) {
+        sentTipsEl.innerHTML = '<div style="font-size: 11px; color: #666; font-style: italic;">No tips sent yet</div>';
+        return;
+    }
+
+    // Fetch profiles for recipients
+    const recipientPubkeys = widgetSentStats.tips.map(tip => tip.recipient).filter(Boolean);
+    if (recipientPubkeys.length > 0) {
+        await fetchProfiles(recipientPubkeys);
+    }
+
+    const tipsHtml = widgetSentStats.tips.map(tip => {
+        const profile = State.profileCache[tip.recipient] || {};
+        const name = profile.name || 'Anonymous';
+        const timeAgo = Utils.formatTime(tip.timestamp);
+        const badge = tip.verified ? '<span style="color: #10B981;">✓</span>' : '<span style="color: #FF6600;">💰</span>';
+
+        // Make clickable if noteId exists
+        const clickHandler = tip.noteId ? `onclick="openThreadView('${tip.noteId}')"` : '';
+        const cursorStyle = tip.noteId ? 'cursor: pointer;' : '';
+
+        return `
+            <div ${clickHandler} style="padding: 6px 0; border-bottom: 1px solid rgba(255, 102, 0, 0.1); ${cursorStyle}">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 11px; color: #ccc; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        ${badge} To: ${name}
+                    </div>
+                    <div style="font-size: 11px; color: #FF6600; font-weight: bold; margin-left: 8px;">
+                        ${tip.amount.toFixed(4)} XMR
+                    </div>
+                </div>
+                <div style="font-size: 10px; color: #666; margin-top: 2px;">${timeAgo}</div>
+            </div>
+        `;
+    }).join('');
+
+    sentTipsEl.innerHTML = tipsHtml;
+}
+
+// Initialize widget
+export async function initDisclosedTipsWidget() {
+    // Initial fetch
+    await fetchWidgetNetworkStats();
+    await fetchWidgetPersonalStats();
+    await fetchWidgetSentStats();
+    await updateWidgetDisplay();
+
+    // Subscribe to real-time updates
+    subscribeToDisclosedTipsWidget();
+}
+
+// Subscribe to real-time updates
+async function subscribeToDisclosedTipsWidget() {
+    // Unsubscribe from previous subscription if it exists
+    if (widgetSubscription) {
+        widgetSubscription.close();
+    }
+
+    try {
+        // Subscribe to Nosmero relay where tips are published
+        const nosmeroRelay = window.location.port === '8080'
+            ? 'ws://nosmero.com:8080/nip78-relay'
+            : 'wss://nosmero.com/nip78-relay';
+
+        const now = Math.floor(Date.now() / 1000);
+
+        // Subscribe to new tips from now onwards
+        widgetSubscription = State.pool.subscribeMany([nosmeroRelay], [
+            {
+                kinds: [9736],
+                since: now
+            }
+        ], {
+            onevent(event) {
+
+                const amountTag = event.tags.find(tag => tag[0] === 'amount');
+                const amount = amountTag ? parseFloat(amountTag[1]) : 0;
+
+                if (amount > 0) {
+                    const verifiedTag = event.tags.find(tag => tag[0] === 'verified');
+                    const isVerified = verifiedTag && verifiedTag[1] === 'true';
+
+                    // Update network stats
+                    widgetNetworkStats.totalXMR += amount;
+                    widgetNetworkStats.count++;
+                    widgetNetworkStats.tips.unshift({
+                        amount,
+                        tipper: event.pubkey,
+                        timestamp: event.created_at,
+                        verified: isVerified
+                    });
+
+                    // Keep only last 10 tips
+                    widgetNetworkStats.tips = widgetNetworkStats.tips.slice(0, 10);
+
+                    // Update personal stats if logged in
+                    if (State.publicKey) {
+                        const recipientTag = event.tags.find(tag => tag[0] === 'p');
+                        const recipient = recipientTag ? recipientTag[1] : null;
+                        const noteTag = event.tags.find(tag => tag[0] === 'e');
+                        const noteId = noteTag ? noteTag[1] : null;
+
+                        // Update "You Received" if this tip is for the logged-in user
+                        if (recipient === State.publicKey) {
+                            const tipData = {
+                                amount,
+                                tipper: event.pubkey,
+                                noteId,
+                                timestamp: event.created_at,
+                                verified: isVerified
+                            };
+
+                            if (isVerified) {
+                                widgetPersonalStats.verified.totalXMR += amount;
+                                widgetPersonalStats.verified.count++;
+                                widgetPersonalStats.verified.tips.unshift(tipData);
+                            } else {
+                                widgetPersonalStats.disclosed.totalXMR += amount;
+                                widgetPersonalStats.disclosed.count++;
+                                widgetPersonalStats.disclosed.tips.unshift(tipData);
+                            }
+                        }
+
+                        // Update "You Sent" if this tip is from the logged-in user
+                        if (event.pubkey === State.publicKey) {
+                            widgetSentStats.totalXMR += amount;
+                            widgetSentStats.count++;
+                            widgetSentStats.tips.unshift({
+                                amount,
+                                recipient,
+                                noteId,
+                                timestamp: event.created_at,
+                                verified: isVerified
+                            });
+                        }
+                    }
+
+                    // Update display
+                    updateWidgetDisplay();
+                    if (widgetReceivedExpanded) {
+                        updateWidgetReceivedTips();
+                    }
+                    if (widgetSentExpanded) {
+                        updateWidgetSentTips();
+                    }
+                }
+            },
+            oneose() {
+                // Subscription established
+            }
+        });
+    } catch (error) {
+        console.error('Error subscribing to widget updates:', error);
+    }
+}
+
+// Update widget when user logs in/out
+export function updateWidgetForAuthState() {
+    if (State.publicKey) {
+        // User logged in - fetch personal and sent stats
+        Promise.all([
+            fetchWidgetPersonalStats(),
+            fetchWidgetSentStats()
+        ]).then(() => {
+            updateWidgetDisplay();
+        });
+    } else {
+        // User logged out - clear personal and sent stats
+        widgetPersonalStats = { verified: { totalXMR: 0, count: 0, tips: [] }, disclosed: { totalXMR: 0, count: 0, tips: [] } };
+        widgetSentStats = { totalXMR: 0, count: 0, tips: [] };
+        updateWidgetDisplay();
+    }
+}
+
 // Make functions globally available for HTML onclick handlers
 window.sendReply = sendReplyToCurrentPost; // Use the wrapper function
 window.sendReplyToCurrentPost = sendReplyToCurrentPost; // Also export directly
 window.replyToPost = replyToPost;
 window.handleMediaUpload = handleMediaUpload;
+// Load Monero Notes feed (same as trending but clearer name)
+export async function loadMoneroNotesFeed() {
+    return await loadTrendingFeed();
+}
+
+// Load Tip Activity feed - Shows the same widget content that was in sidebar
+export async function loadTipActivityFeed() {
+    try {
+        State.setCurrentPage('tipactivity');
+
+        // Hide home feed header/controls
+        const homeFeedHeader = document.getElementById('homeFeedHeader');
+        if (homeFeedHeader) {
+            homeFeedHeader.style.display = 'none';
+        }
+
+        // Hide Load More button
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        if (loadMoreContainer) {
+            loadMoreContainer.style.display = 'none';
+        }
+
+        // Show loading state
+        const feed = document.getElementById('feed');
+        if (feed) {
+            feed.innerHTML = '<div class="loading">Loading tip activity...</div>';
+        }
+
+        // Fetch all widget stats (from Nosmero relay only)
+        await fetchWidgetNetworkStats();
+        if (State.publicKey) {
+            await fetchWidgetPersonalStats();
+            await fetchWidgetSentStats();
+        }
+
+        // Render the widget content in the feed area
+        renderTipActivityWidget();
+
+    } catch (error) {
+        console.error('Error loading tip activity feed:', error);
+        const feed = document.getElementById('feed');
+        if (feed) {
+            feed.innerHTML = '<div class="error-state">Error loading tip activity. Please try again.</div>';
+        }
+    }
+}
+
+// Render tip activity widget in the main feed area
+function renderTipActivityWidget() {
+    const feed = document.getElementById('feed');
+    if (!feed) return;
+
+    // Create widget HTML (same as sidebar widget)
+    feed.innerHTML = `
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="padding: 20px; background: rgba(255, 102, 0, 0.05); border: 1px solid rgba(255, 102, 0, 0.2); border-radius: 12px;">
+                <div style="margin-bottom: 12px;">
+                    <div style="font-weight: bold; font-size: 18px; color: #FF6600;">
+                        💰 Public Tips
+                    </div>
+                </div>
+
+                <!-- Network Activity -->
+                <div style="font-size: 13px; color: #999; margin-bottom: 8px;">Network Activity (All-Time)</div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                    <div style="font-size: 14px; color: #ccc;">Total:</div>
+                    <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetNetworkStats.totalXMR.toFixed(5)} XMR</div>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                    <div style="font-size: 14px; color: #ccc;">Tips:</div>
+                    <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetNetworkStats.count}</div>
+                </div>
+
+                <!-- Personal Stats (shown when logged in) -->
+                ${State.publicKey ? `
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 102, 0, 0.2);">
+                    <div onclick="toggleWidgetReceivedTips()" style="cursor: pointer; font-size: 13px; color: #999; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                        <span>You Received</span>
+                        <span id="widgetReceivedArrow" style="color: #FF6600; font-size: 16px;">▼</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <div style="font-size: 14px; color: #ccc;">✓ Verified:</div>
+                        <div style="font-size: 14px; color: #10B981; font-weight: bold;">${widgetPersonalStats.verified.totalXMR.toFixed(5)} XMR</div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <div style="font-size: 14px; color: #ccc;">💰 Disclosed:</div>
+                        <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetPersonalStats.disclosed.totalXMR.toFixed(5)} XMR</div>
+                    </div>
+
+                    <!-- Expandable received tips list -->
+                    <div id="widgetReceivedExpanded" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 102, 0, 0.15);">
+                        <div id="widgetReceivedTips" style="font-size: 12px;"></div>
+                    </div>
+                </div>
+
+                <!-- Sent Stats -->
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 102, 0, 0.2);">
+                    <div onclick="toggleWidgetSentTips()" style="cursor: pointer; font-size: 13px; color: #999; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                        <span>You Sent</span>
+                        <span id="widgetSentArrow" style="color: #FF6600; font-size: 16px;">▼</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <div style="font-size: 14px; color: #ccc;">Total:</div>
+                        <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetSentStats.totalXMR.toFixed(5)} XMR</div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <div style="font-size: 14px; color: #ccc;">Tips:</div>
+                        <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetSentStats.count}</div>
+                    </div>
+
+                    <!-- Expandable sent tips list -->
+                    <div id="widgetSentExpanded" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 102, 0, 0.15);">
+                        <div id="widgetSentTipsList" style="font-size: 12px;"></div>
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+}
+
 window.removeMedia = removeMedia;
 window.publishNewPost = publishNewPost;
 window.closeNewPostModal = closeNewPostModal;
