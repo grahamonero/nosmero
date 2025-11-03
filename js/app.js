@@ -131,6 +131,11 @@ async function handleHashRouting() {
 // Track if we're loading a direct note link (to skip feed loading)
 let directNoteId = null;
 
+// Track own profile page state for pagination
+let cachedOwnPosts = [];
+let displayedOwnPostCount = 0;
+const OWN_PROFILE_POSTS_PER_PAGE = 30;
+
 // Handle path-based routing for Monero QR code links (nosmero.com/n/{noteId})
 function checkDirectNoteLink() {
     const pathname = window.location.pathname;
@@ -1005,16 +1010,16 @@ async function displayMoneroAddressInProfile(profile) {
 // Load user's posts
 async function loadUserPosts() {
     console.log('Loading user posts for:', State.publicKey);
-    
+
     const profileContent = document.getElementById('profileContent');
     if (!profileContent) return;
-    
+
     try {
         const userPosts = [];
         const processedIds = new Set();
-        
+
         const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
-            { kinds: [1], authors: [State.publicKey], limit: 50 }
+            { kinds: [1], authors: [State.publicKey], limit: 100 }
         ], {
             onevent(event) {
                 if (!processedIds.has(event.id)) {
@@ -1024,16 +1029,16 @@ async function loadUserPosts() {
             },
             oneose() {
                 console.log('Received', userPosts.length, 'user posts');
-                
+
                 // Update posts count
                 const postsCount = document.getElementById('postsCount');
                 if (postsCount) {
                     postsCount.textContent = userPosts.length;
                 }
-                
+
                 // Sort posts by timestamp (newest first)
                 userPosts.sort((a, b) => b.created_at - a.created_at);
-                
+
                 if (userPosts.length === 0) {
                     profileContent.innerHTML = `
                         <div style="text-align: center; color: #666; padding: 40px;">
@@ -1042,14 +1047,18 @@ async function loadUserPosts() {
                         </div>
                     `;
                 } else {
-                    // Render posts using the same format as the main feed
-                    displayUserPosts(userPosts);
+                    // Store posts in cache for pagination
+                    cachedOwnPosts = userPosts;
+                    displayedOwnPostCount = 0;
+
+                    // Render first page of posts
+                    displayUserPosts(userPosts.slice(0, OWN_PROFILE_POSTS_PER_PAGE));
                 }
-                
+
                 sub.close();
             }
         });
-        
+
         setTimeout(() => {
             sub.close();
             if (userPosts.length === 0) {
@@ -1061,7 +1070,7 @@ async function loadUserPosts() {
                 `;
             }
         }, 5000);
-        
+
     } catch (error) {
         console.error('Error loading user posts:', error);
         profileContent.innerHTML = '<div style="color: #f56565; text-align: center; padding: 40px;">Error loading posts</div>';
@@ -1085,9 +1094,12 @@ function displayUserPosts(posts) {
                 State.eventCache[post.id] = post;
             });
 
+            // Fetch profiles for posts and any parent posts they might reference
+            const allAuthors = [...new Set(posts.map(post => post.pubkey))];
+            await Posts.fetchProfiles(allAuthors);
+
             // Fetch Monero addresses for all post authors
             if (window.getUserMoneroAddress) {
-                const allAuthors = [...new Set(posts.map(post => post.pubkey))];
                 console.log('💰 Fetching Monero addresses for profile posts, authors:', allAuthors.length);
                 await Promise.all(
                     allAuthors.map(async (pubkey) => {
@@ -1102,6 +1114,15 @@ function displayUserPosts(posts) {
                         }
                     })
                 );
+            }
+
+            // Fetch parent posts and their authors for replies
+            const parentPostsMap = await Posts.fetchParentPosts(posts);
+            const parentAuthors = Object.values(parentPostsMap)
+                .filter(parent => parent)
+                .map(parent => parent.pubkey);
+            if (parentAuthors.length > 0) {
+                await Posts.fetchProfiles([...new Set(parentAuthors)]);
             }
 
             // Fetch disclosed tips for profile posts (pass full post objects for author moderation)
@@ -1160,7 +1181,24 @@ function displayUserPosts(posts) {
                     `;
                 }
             }));
-            profileContent.innerHTML = renderedPosts.join('');
+
+            // Update displayed count
+            displayedOwnPostCount += posts.length;
+
+            // Check if there are more posts to load
+            const hasMorePosts = displayedOwnPostCount < cachedOwnPosts.length;
+            const remainingCount = cachedOwnPosts.length - displayedOwnPostCount;
+
+            // Add Load More button if there are more posts
+            const loadMoreButton = hasMorePosts ? `
+                <div id="ownProfileLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                    <button onclick="loadMoreOwnPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                        Load More Posts (${remainingCount} available)
+                    </button>
+                </div>
+            ` : '';
+
+            profileContent.innerHTML = renderedPosts.join('') + loadMoreButton;
 
             // Process any embedded notes after rendering
             (async () => {
@@ -1176,6 +1214,92 @@ function displayUserPosts(posts) {
             profileContent.innerHTML = '<div style="color: #f56565; text-align: center; padding: 40px;">Error rendering profile notes</div>';
         }
     })();
+}
+
+// Load more of logged-in user's own posts
+async function loadMoreOwnPosts() {
+    const startIndex = displayedOwnPostCount;
+    const endIndex = Math.min(startIndex + OWN_PROFILE_POSTS_PER_PAGE, cachedOwnPosts.length);
+    const postsToRender = cachedOwnPosts.slice(startIndex, endIndex);
+
+    if (postsToRender.length === 0) return;
+
+    try {
+        const Posts = await import('./posts.js');
+        const Utils = await import('./utils.js');
+
+        // Add posts to global event cache
+        postsToRender.forEach(post => {
+            State.eventCache[post.id] = post;
+        });
+
+        // Fetch parent posts and their authors for replies
+        const parentPostsMap = await Posts.fetchParentPosts(postsToRender);
+        const parentAuthors = Object.values(parentPostsMap)
+            .filter(parent => parent)
+            .map(parent => parent.pubkey);
+        if (parentAuthors.length > 0) {
+            await Posts.fetchProfiles([...new Set(parentAuthors)]);
+        }
+
+        // Fetch disclosed tips
+        const disclosedTipsData = await Posts.fetchDisclosedTips(postsToRender);
+        Object.assign(Posts.disclosedTipsCache, disclosedTipsData);
+
+        // Render new posts
+        const renderedPosts = await Promise.all(postsToRender.map(async post => {
+            try {
+                return await Posts.renderSinglePost(post, 'feed');
+            } catch (error) {
+                console.error('Error rendering profile post:', error);
+                const userProfile = State.profileCache[State.publicKey] || { name: 'Anonymous', picture: null };
+                const time = formatTime(post.created_at);
+                const content = post.content.length > 500 ?
+                    post.content.substring(0, 500) + '... <span style="color: #FF6600; cursor: pointer;">Read more</span>' :
+                    post.content;
+
+                return `
+                    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px;">
+                        <div style="color: #666; font-size: 12px;">Error rendering post</div>
+                    </div>
+                `;
+            }
+        }));
+
+        // Update displayed count
+        displayedOwnPostCount = endIndex;
+
+        // Check if there are more posts
+        const hasMorePosts = displayedOwnPostCount < cachedOwnPosts.length;
+        const remainingCount = cachedOwnPosts.length - displayedOwnPostCount;
+
+        // Remove old Load More button
+        const loadMoreContainer = document.getElementById('ownProfileLoadMoreContainer');
+        if (loadMoreContainer) {
+            loadMoreContainer.remove();
+        }
+
+        // Add new Load More button if needed
+        const loadMoreButton = hasMorePosts ? `
+            <div id="ownProfileLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <button onclick="loadMoreOwnPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                    Load More Posts (${remainingCount} available)
+                </button>
+            </div>
+        ` : '';
+
+        // Append new posts and button to container
+        const profileContent = document.getElementById('profileContent');
+        if (profileContent) {
+            profileContent.insertAdjacentHTML('beforeend', renderedPosts.join('') + loadMoreButton);
+        }
+
+        // Process embedded notes
+        await Utils.processEmbeddedNotes('profileContent');
+
+    } catch (error) {
+        console.error('Error loading more own posts:', error);
+    }
 }
 
 // Switch profile tabs
@@ -2913,6 +3037,7 @@ window.reportPost = UI.reportPost;
 window.requestDeletion = UI.requestDeletion;
 window.viewUserProfilePage = UI.viewUserProfilePage;
 window.goBackFromProfile = UI.goBackFromProfile;
+window.loadMoreOwnPosts = loadMoreOwnPosts;
 
 // ==================== MOBILE NAVIGATION ====================
 
