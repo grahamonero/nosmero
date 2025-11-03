@@ -1132,7 +1132,7 @@ function displayUserPosts(posts) {
 
             const renderedPosts = await Promise.all(posts.map(async post => {
                 try {
-                    return await Posts.renderSinglePost(post, 'feed');
+                    return await Posts.renderSinglePost(post, 'feed', null, parentPostsMap);
                 } catch (error) {
                     console.error('Error rendering profile post:', error);
                     // Fallback to simple rendering
@@ -1249,7 +1249,7 @@ async function loadMoreOwnPosts() {
         // Render new posts
         const renderedPosts = await Promise.all(postsToRender.map(async post => {
             try {
-                return await Posts.renderSinglePost(post, 'feed');
+                return await Posts.renderSinglePost(post, 'feed', null, parentPostsMap);
             } catch (error) {
                 console.error('Error rendering profile post:', error);
                 const userProfile = State.profileCache[State.publicKey] || { name: 'Anonymous', picture: null };

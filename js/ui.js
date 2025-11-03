@@ -1862,7 +1862,7 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
         // Render each post using the proper renderSinglePost function
         const renderedPosts = await Promise.all(posts.map(async post => {
             try {
-                return await PostsModule.renderSinglePost(post, 'feed');
+                return await PostsModule.renderSinglePost(post, 'feed', null, parentPostsMap);
             } catch (error) {
                 console.error('Error rendering profile post:', error);
                 // Fallback to basic rendering if renderSinglePost fails
@@ -1945,7 +1945,7 @@ async function loadMoreProfilePosts() {
         // Render new posts
         const renderedPosts = await Promise.all(postsToRender.map(async post => {
             try {
-                return await PostsModule.renderSinglePost(post, 'feed');
+                return await PostsModule.renderSinglePost(post, 'feed', null, parentPostsMap);
             } catch (error) {
                 console.error('Error rendering profile post:', error);
                 return `
