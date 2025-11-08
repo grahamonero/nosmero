@@ -86,28 +86,16 @@ export async function signEvent(eventTemplate) {
         }
         return await window.nostr.signEvent(eventTemplate);
     }
-    // Check if user is using NIP-46 remote signer (nsec.app)
-    else if (State.privateKey === 'nip46') {
-        // Use NIP-46 remote signing
-        if (!window.NIP46) {
-            throw new Error('NIP-46 not initialized. Please reconnect to your remote signer.');
+    // Check if user is using Amber (NIP-46 remote signer)
+    else if (State.privateKey === 'amber') {
+        // Use Amber for remote signing
+        const Amber = await import('./amber.js');
+
+        if (!Amber.isConnected()) {
+            throw new Error('Not connected to Amber. Please reconnect.');
         }
 
-        // NIP-46 requires the full event template including pubkey
-        // Add pubkey if it's missing
-        if (!eventTemplate.pubkey) {
-            if (!State.publicKey) {
-                throw new Error('Public key not available. Please log in again.');
-            }
-            eventTemplate.pubkey = State.publicKey;
-        }
-
-        // Add content field if missing (some events like reactions need it)
-        if (eventTemplate.content === undefined) {
-            eventTemplate.content = '';
-        }
-
-        return await window.NIP46.signEventRemote(eventTemplate);
+        return await Amber.signEvent(eventTemplate);
     }
     // Use local private key with finalizeEvent
     else {

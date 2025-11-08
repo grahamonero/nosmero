@@ -154,6 +154,68 @@ export function showLoginWithNsec() {
     }
 }
 
+// Show Amber login interface
+export function showLoginWithAmber() {
+    hideLoginModal();
+
+    const feed = document.getElementById('feed');
+    if (feed) {
+        feed.innerHTML = `
+            <div style="padding: 40px; text-align: center; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #8B5CF6; margin-bottom: 30px;">📱 Login with Amber</h2>
+                <p style="color: #ccc; margin-bottom: 30px;">
+                    Connect to your Amber signer on Android
+                </p>
+
+                <div style="margin-bottom: 30px;">
+                    <input type="text" id="amberBunkerInput" placeholder="Paste your bunker:// URI from Amber..."
+                           style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 20px;"
+                           onkeypress="if(event.key==='Enter') loginWithAmber()">
+
+                    <div style="display: flex; gap: 12px; justify-content: center;">
+                        <button onclick="loginWithAmber()"
+                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #8B5CF6, #FF6600); color: #fff; font-weight: bold;">
+                            📱 Connect to Amber
+                        </button>
+                        <button onclick="showAuthUI()"
+                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
+                            ← Back
+                        </button>
+                    </div>
+                </div>
+
+                <div style="font-size: 13px; color: #666; text-align: left; background: rgba(139, 92, 246, 0.1); padding: 20px; border-radius: 12px; border-left: 3px solid #8B5CF6;">
+                    <p style="color: #8B5CF6; font-weight: bold; margin-bottom: 12px;">📱 How to get your bunker URI:</p>
+                    <ol style="text-align: left; margin: 0; padding-left: 20px; line-height: 1.8; color: #ccc;">
+                        <li>Open <strong style="color: #8B5CF6;">Amber</strong> on your Android device</li>
+                        <li>Go to <strong>Settings → Connections</strong></li>
+                        <li>Tap "Create Connection" or use existing one</li>
+                        <li>Copy the <strong style="color: #8B5CF6;">bunker://</strong> URI</li>
+                        <li>Paste it in the field above</li>
+                    </ol>
+                </div>
+
+                <div style="font-size: 13px; color: #666; text-align: left; background: rgba(255, 102, 0, 0.1); padding: 20px; border-radius: 12px; border-left: 3px solid #FF6600; margin-top: 20px;">
+                    <p style="color: #FF6600; font-weight: bold; margin-bottom: 12px;">🔐 What is Amber?</p>
+                    <p style="color: #ccc; margin-bottom: 12px;">
+                        Amber is a secure Nostr signer app for Android that keeps your private key on your phone.
+                        Your key never leaves your device - Nosmero requests signatures remotely.
+                    </p>
+                    <p style="color: #999; font-size: 12px; margin: 0;">
+                        <strong>Benefits:</strong> Maximum security • Works like a hardware wallet • Approve each action
+                    </p>
+                </div>
+            </div>
+        `;
+
+        // Focus the input field
+        setTimeout(() => {
+            const input = document.getElementById('amberBunkerInput');
+            if (input) input.focus();
+        }, 100);
+    }
+}
+
 // Show nsec.app login interface using nostr-login library
 export async function showLoginWithNsecApp() {
     hideLoginModal();
@@ -3337,6 +3399,7 @@ window.showLoginModal = showLoginModal;
 window.hideLoginModal = hideLoginModal;
 window.showCreateAccount = showCreateAccount;
 window.showLoginWithNsec = showLoginWithNsec;
+window.showLoginWithAmber = showLoginWithAmber;
 window.showLoginWithNsecApp = showLoginWithNsecApp;
 window.showGeneratedKeyModal = showGeneratedKeyModal;
 window.closeKeyModal = closeKeyModal;

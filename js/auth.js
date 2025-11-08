@@ -378,111 +378,58 @@ export async function loginWithExtension() {
     }
 }
 
-// ==================== NSEC.APP LOGIN (NIP-46) ====================
+// ==================== AMBER LOGIN (NIP-46 REMOTE SIGNING) ====================
 
-// Temporary storage for public key from nsec.app
-let nsecAppPublicKey = null;
+/**
+ * Login using Amber Android signer
+ * User provides bunker URI from Amber app
+ */
+export async function loginWithAmber() {
+    // Abort any ongoing home feed loading
+    State.abortHomeFeedLoading();
 
-// Step 1: Connect to nsec.app (establish bunker connection and get public key)
-export async function connectToNsecApp() {
     try {
-        const usernameInput = document.getElementById('nsecAppUsernameInput');
-        if (!usernameInput) {
-            alert('Username input field not found');
+        const bunkerInput = document.getElementById('amberBunkerInput');
+        if (!bunkerInput) {
+            alert('Bunker URI input field not found');
             return;
         }
 
-        let input = usernameInput.value.trim();
-        if (!input) {
-            alert('Please enter your nsec.app username or connection string');
-            return;
-        }
-
-        // Handle different input formats
-        let bunkerURI;
-
-        if (input.startsWith('bunker://')) {
-            // Direct bunker URI
-            bunkerURI = input;
-        } else if (input.includes('@nsec.app') || input.includes('@')) {
-            // Username format: username@nsec.app or just username
-            // For now, tell them we need the connection string
-            alert('Please use your nsec.app connection string.\n\nHow to find it:\n1. Go to nsec.app\n2. Click your profile/settings\n3. Look for "Nostr Connect" or "Apps"\n4. Copy the connection string (starts with bunker:// or your npub)');
-            return;
-        } else if (input.startsWith('npub')) {
-            // Could be npub format, but we need the full bunker URI
-            alert('Please use your full connection string from nsec.app.\n\nHow to find it:\n1. Go to nsec.app\n2. Click your profile/settings\n3. Look for "Nostr Connect" or "Apps"\n4. Copy the full connection string');
-            return;
-        } else {
-            // Assume it's a username without @nsec.app
-            alert('Please use your nsec.app connection string.\n\nHow to find it:\n1. Go to nsec.app\n2. Click your profile/settings\n3. Look for "Nostr Connect" or "Apps"\n4. Copy the connection string (starts with bunker://)');
+        const bunkerURI = bunkerInput.value.trim();
+        if (!bunkerURI) {
+            alert('Please enter your bunker URI from Amber');
             return;
         }
 
         // Validate bunker URI format
         if (!bunkerURI.startsWith('bunker://')) {
-            alert('Invalid connection string format. Should start with "bunker://"');
+            alert('Invalid bunker URI format. Should start with "bunker://"\n\nGet it from Amber app: Settings → Connections');
             return;
         }
 
-        showNotification('Connecting to nsec.app...', 'info');
+        showNotification('Connecting to Amber...', 'info');
 
-        // Import NIP-46 module (SAME module used by Amber)
-        const NIP46 = await import('./nip46.js');
+        // Clear any existing user settings to ensure fresh login
+        clearUserSettings();
 
-        // Connect to nsec.app (user will approve in nsec.app popup - this returns "ack")
-        await NIP46.connect(bunkerURI);
+        // Import Amber module
+        const Amber = await import('./amber.js');
 
-        // Now get the actual public key with a separate request
-        showNotification('Getting your public key from nsec.app...', 'info');
-        const userPubkey = await NIP46.getPublicKey();
+        // Connect to Amber and get user's public key
+        const userPubkey = await Amber.connect(bunkerURI);
 
         if (!userPubkey || userPubkey.length !== 64) {
-            throw new Error('Failed to get valid public key from nsec.app');
+            throw new Error('Failed to get valid public key from Amber');
         }
 
-        // Store the public key temporarily
-        nsecAppPublicKey = userPubkey;
-
-        showNotification('Connection established! Now click Login.', 'success');
-
-        // Show step 2 UI
-        const step1 = document.getElementById('nsecAppStep1');
-        const step2 = document.getElementById('nsecAppStep2');
-        if (step1) step1.style.display = 'none';
-        if (step2) step2.style.display = 'block';
-
-    } catch (error) {
-        console.error('nsec.app connection error:', error);
-        showNotification('Failed to connect: ' + error.message, 'error');
-    }
-}
-
-// Step 2: Complete login (use the public key from step 1)
-export async function completeNsecAppLogin() {
-    // Abort any ongoing home feed loading
-    State.abortHomeFeedLoading();
-
-    try {
-        // Check if we have the public key from connect step
-        if (!nsecAppPublicKey) {
-            throw new Error('Connection not established. Please connect first.');
-        }
-
-        // NOTE: Don't call clearUserSettings() for NIP-46 login!
-        // We're logging into an existing account, not creating a new one.
-
-        showNotification('Completing login...', 'info');
-
-        const userPubkey = nsecAppPublicKey;
-
+        // Set user state
         setPublicKey(userPubkey);
-        setPrivateKey('nip46'); // Special marker for NIP-46 users
-
-        localStorage.setItem('nostr-private-key', 'nip46');
+        setPrivateKey('amber'); // Special marker for Amber users
+        localStorage.setItem('nostr-private-key', 'amber');
         localStorage.setItem('nostr-public-key', userPubkey);
+        localStorage.setItem('amber-bunker-uri', bunkerURI); // Store for reconnection
 
-        showNotification('Login successful!', 'success');
+        showNotification('Connected to Amber!', 'success');
 
         // Load user's NIP-65 relay list after successful login
         try {
@@ -492,14 +439,13 @@ export async function completeNsecAppLogin() {
             console.error('Error loading NIP-65 relay list:', error);
         }
 
-        // Clear the login UI display before starting authenticated session
-        const feed = document.getElementById('feed');
-        const homeFeedList = document.getElementById('homeFeedList');
-        if (feed) {
-            feed.innerHTML = '<div class="loading">Loading your feed...</div>';
-        }
-        if (homeFeedList) {
-            homeFeedList.innerHTML = '';
+        // Update disclosed tips widget
+        try {
+            if (window.NostrPosts && window.NostrPosts.updateDisclosedTipsWidget) {
+                await window.NostrPosts.updateDisclosedTipsWidget();
+            }
+        } catch (error) {
+            console.error('Error updating disclosed tips widget:', error);
         }
 
         // Clear all home feed state to prevent anonymous posts from persisting
@@ -516,8 +462,12 @@ export async function completeNsecAppLogin() {
         }
 
     } catch (error) {
-        console.error('nsec.app login error:', error);
-        showNotification('Login failed: ' + error.message, 'error');
+        console.error('Amber login error:', error);
+        showNotification('Failed to connect to Amber: ' + error.message, 'error');
+
+        // Clear any partial login state
+        localStorage.removeItem('nostr-private-key');
+        localStorage.removeItem('amber-bunker-uri');
     }
 }
 
@@ -638,21 +588,46 @@ if (typeof document !== 'undefined') {
 // ==================== LOGOUT FUNCTIONALITY ====================
 
 // Clear stored keys and return to login screen
-export function logout() {
-    // Disconnect NIP-46 if active
-    if (privateKey === 'nip46' && window.NIP46) {
-        window.NIP46.disconnect();
-    }
-
+export async function logout() {
     // Update last viewed messages time before logout
     // This marks current session as "viewed" so next login only shows new messages
     State.setLastViewedMessagesTime(Math.floor(Date.now() / 1000));
+
+    // Disconnect Amber if active (WITH RETRY LOGIC)
+    if (privateKey === 'amber') {
+        console.log('🔌 Disconnecting from Amber...');
+
+        let disconnectSuccess = false;
+        const maxRetries = 3;
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const Amber = await import('./amber.js');
+                await Amber.disconnect();
+                disconnectSuccess = true;
+                console.log('✅ Amber disconnected successfully');
+                break;
+            } catch (error) {
+                console.error(`❌ Amber disconnect attempt ${attempt}/${maxRetries} failed:`, error);
+
+                if (attempt < maxRetries) {
+                    console.log(`⏳ Waiting 2 seconds before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+            }
+        }
+
+        if (!disconnectSuccess) {
+            console.warn('⚠️ All disconnect attempts failed, proceeding with logout anyway');
+        }
+    }
 
     // Clear stored keys
     localStorage.removeItem('nostr-private-key');
     localStorage.removeItem('nostr-public-key');
     localStorage.removeItem('encryption-enabled');
     localStorage.removeItem('nostr-private-key-encrypted');
+    localStorage.removeItem('amber-bunker-uri');
 
     // Use comprehensive settings clearing function
     clearUserSettings();
@@ -842,8 +817,7 @@ export function cancelPin() {
 window.createNewAccount = createNewAccount;
 window.loginWithNsec = loginWithNsec;
 window.loginWithExtension = loginWithExtension;
-window.connectToNsecApp = connectToNsecApp;
-window.completeNsecAppLogin = completeNsecAppLogin;
+window.loginWithAmber = loginWithAmber;
 window.logout = logout;
 window.updateUIForLogout = updateUIForLogout;
 window.showPinModal = showPinModal;

@@ -6,10 +6,6 @@
     <title>nosmero - Nostr + Monero</title>
     <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
     <link rel="stylesheet" href="/styles.css?v=1.8.2">
-
-    <!-- Eruda mobile debugging console (DEV ONLY) -->
-    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-    <script>eruda.init();</script>
 </head>
 <body>
     <!-- Mobile menu toggle button -->
@@ -76,6 +72,9 @@
             </button>
             <button class="login-option-btn" onclick="showLoginWithNsecApp()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
                 🌐 Use nsec.app
+            </button>
+            <button class="login-option-btn" onclick="showLoginWithAmber()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
+                📱 Use Amber
             </button>
         </div>
         
@@ -199,6 +198,9 @@
                 <button class="login-option-btn" onclick="showLoginWithNsecApp()">
                     🌐 Login with nsec.app
                 </button>
+                <button class="login-option-btn" onclick="showLoginWithAmber()">
+                    📱 Login with Amber
+                </button>
             </div>
 
             <!-- Create Account Section -->
@@ -243,42 +245,40 @@
                 <button class="close-btn" onclick="backToLoginOptions()">Back</button>
             </div>
 
-            <!-- Login with nsec.app Section -->
-            <div id="loginWithNsecAppSection" style="display: none;">
+            <!-- Login with Amber Section -->
+            <div id="loginWithAmberSection" style="display: none;">
                 <div style="margin-bottom: 16px;">
-                    <input type="text" id="nsecAppUsernameInput" placeholder="Paste your nsec.app connection string..."
+                    <input type="text" id="amberBunkerInput" placeholder="Paste your bunker URI from Amber..."
                            style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
                 </div>
                 <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
-                    Get your connection string from nsec.app (Settings → Nostr Connect / Apps)
+                    Get your bunker URI from the Amber app (Settings → Connections)
                 </div>
+
                 <div style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
-                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">🌐 How to get your connection string:</div>
-                    <ol style="color: #ccc; font-size: 13px; margin: 0; padding-left: 20px;">
-                        <li>Go to <a href="https://nsec.app" target="_blank" style="color: #8B5CF6;">nsec.app</a> in your browser</li>
-                        <li>Login or create account</li>
-                        <li>Click profile icon or go to Settings</li>
-                        <li>Look for "Nostr Connect" or "Apps" section</li>
-                        <li>Copy the connection string (starts with "bunker://")</li>
+                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">📱 How to get your bunker URI:</div>
+                    <ol style="color: #ccc; font-size: 13px; margin: 0; padding-left: 20px; line-height: 1.8;">
+                        <li>Open <strong style="color: #8B5CF6;">Amber</strong> on your Android device</li>
+                        <li>Go to Settings → Connections</li>
+                        <li>Tap "Create Connection" or use an existing one</li>
+                        <li>Copy the <strong style="color: #8B5CF6;">bunker://</strong> URI</li>
                         <li>Paste it here</li>
                     </ol>
                 </div>
 
-                <!-- Step 1: Connect -->
-                <div id="nsecAppStep1">
-                    <button class="send-btn" onclick="connectToNsecApp()">Connect to nsec.app</button>
-                    <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+                <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">🔐 What is Amber?</div>
+                    <div style="color: #ccc; font-size: 13px; line-height: 1.5;">
+                        Amber is a secure Nostr signer app for Android that keeps your private key on your phone.
+                        When you use Amber, your key never leaves your device - Nosmero requests signatures remotely.
+                    </div>
+                    <div style="margin-top: 8px; color: #999; font-size: 12px;">
+                        <strong>Benefits:</strong> Maximum security, works like a hardware wallet, approve each action
+                    </div>
                 </div>
 
-                <!-- Step 2: Login (shown after connection) -->
-                <div id="nsecAppStep2" style="display: none;">
-                    <div style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
-                        <div style="color: #8B5CF6; font-weight: bold;">✅ Connected to nsec.app!</div>
-                        <div style="color: #ccc; font-size: 13px; margin-top: 4px;">Now click Login to complete the process.</div>
-                    </div>
-                    <button class="send-btn" onclick="completeNsecAppLogin()">Login</button>
-                    <button class="close-btn" onclick="backToLoginOptions()">Back</button>
-                </div>
+                <button class="send-btn" onclick="loginWithAmber()">Connect to Amber</button>
+                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
             </div>
 
             <!-- Key Display Section -->
