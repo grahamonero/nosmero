@@ -1613,15 +1613,15 @@ export function renderNotifications(groupedNotifications = []) {
         const clickHandler = isNoteFound ? `openThreadView('${originalNote.id}')` : '';
         
         return `
-            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px; ${isNoteFound ? 'cursor: pointer;' : 'opacity: 0.7;'}" 
+            <div class="notification-item" style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px; ${isNoteFound ? 'cursor: pointer;' : 'opacity: 0.7;'}"
                  ${isNoteFound ? `onclick="${clickHandler}"` : ''}
-                 onmouseover="this.style.background='rgba(255, 255, 255, 0.05)'" 
+                 onmouseover="this.style.background='rgba(255, 255, 255, 0.05)'"
                  onmouseout="this.style.background='rgba(255, 255, 255, 0.02)'">
-                
+
                 <!-- Original Note -->
-                <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #333;">
+                <div class="notification-content" style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #333;">
                     <div style="color: #888; font-size: 14px; margin-bottom: 8px;">Your note:</div>
-                    <div style="color: ${isNoteFound ? '#fff' : '#888'}; line-height: 1.4; font-size: 15px; ${!isNoteFound ? 'font-style: italic;' : ''}; word-wrap: break-word; overflow-wrap: break-word;">
+                    <div class="post-content" style="color: ${isNoteFound ? '#fff' : '#888'}; line-height: 1.4; font-size: 15px; ${!isNoteFound ? 'font-style: italic;' : ''}; word-wrap: break-word; overflow-wrap: break-word;">
                         ${parseContent(originalContent)}
                     </div>
                 </div>
@@ -1642,7 +1642,7 @@ export function renderNotifications(groupedNotifications = []) {
                             return `
                                 <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid #FF6600;">
                                     <div style="color: #FF6600; font-size: 13px; font-weight: bold; margin-bottom: 4px; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${reply.pubkey}')">${displayName}:</div>
-                                    <div style="color: #ccc; font-size: 14px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word;">${parseContent(reply.content)}</div>
+                                    <div class="post-content" style="color: #ccc; font-size: 14px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word;">${parseContent(reply.content)}</div>
                                 </div>
                             `;
                         }).join('')}
