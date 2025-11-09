@@ -27,6 +27,11 @@ let oldestCachedTimestamp = null;
 // Disclosed tips data cache
 export let disclosedTipsCache = {};
 
+// Trending feed pagination state
+let cachedTrendingPosts = [];
+let displayedTrendingPostCount = 0;
+const TRENDING_POSTS_PER_PAGE = 30;
+
 // Clear all home feed state (used when switching users)
 export function clearHomeFeedState() {
     console.log('🧹 Clearing home feed state');
@@ -224,6 +229,14 @@ export async function loadStreamingHomeFeed() {
     State.setHomeFeedAbortController(abortController);
 
     try {
+        // Anonymous users see Trending Monero Notes instead of curated authors
+        if (!State.publicKey) {
+            console.log('👤 Anonymous user detected - loading Trending Monero Notes feed');
+            isLoadingHomeFeed = false;
+            await loadTrendingFeedForAnonymous();
+            return;
+        }
+
         State.setCurrentPage('home');
 
         // Show home feed header/controls
@@ -321,7 +334,7 @@ export async function loadStreamingHomeFeed() {
 // ==================== TRENDING FEED (MONERO-FOCUSED) ====================
 
 // Load trending Monero-related notes from last 24 hours
-export async function loadTrendingFeed() {
+export async function loadTrendingFeed(forceRefresh = false) {
     console.log('📈 Loading Monero-focused trending feed');
 
     try {
@@ -343,6 +356,24 @@ export async function loadTrendingFeed() {
         const homeFeedList = document.getElementById('homeFeedList');
         if (homeFeedList) {
             homeFeedList.innerHTML = '<div class="loading">Loading trending Monero posts...</div>';
+        }
+
+        // Try to load from cache first (unless force refresh)
+        if (!forceRefresh) {
+            try {
+                console.log('📦 Attempting to load from cache...');
+                const cacheResponse = await fetch('/trending-cache.json');
+                if (cacheResponse.ok) {
+                    const cache = await cacheResponse.json();
+                    console.log(`✅ Cache loaded: ${cache.notes_cached} notes from ${new Date(cache.timestamp).toLocaleString()}`);
+                    await renderCachedTrendingFeedForLoggedIn(cache);
+                    return;
+                }
+            } catch (cacheError) {
+                console.log('⚠️ Cache not available, performing live search:', cacheError.message);
+            }
+        } else {
+            console.log('🔄 Force refresh requested, skipping cache');
         }
 
         // Import search module to use its hashtag search
@@ -393,15 +424,15 @@ export async function loadTrendingFeed() {
 
         console.log(`💎 Found ${allNotes.length} Monero-related notes from search`);
 
-        // Filter for notes from last 24 hours only
-        const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
-        const recentNotes = allNotes.filter(note => note.created_at >= oneDayAgo);
+        // Filter for notes from last 7 days (extended from 24 hours for better pagination)
+        const sevenDaysAgo = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
+        const recentNotes = allNotes.filter(note => note.created_at >= sevenDaysAgo);
 
-        console.log(`📅 Filtered to ${recentNotes.length} notes from last 24 hours (removed ${allNotes.length - recentNotes.length} older notes)`);
+        console.log(`📅 Filtered to ${recentNotes.length} notes from last 7 days (removed ${allNotes.length - recentNotes.length} older notes)`);
 
         if (recentNotes.length === 0) {
             if (homeFeedList) {
-                homeFeedList.innerHTML = '<div class="status">No trending Monero posts found in the last 24 hours</div>';
+                homeFeedList.innerHTML = '<div class="status">No trending Monero posts found in the last 7 days</div>';
             }
             return;
         }
@@ -420,10 +451,11 @@ export async function loadTrendingFeed() {
         // Sort by score descending
         notesWithScores.sort((a, b) => b.score - a.score);
 
-        // Take top 50
-        const topNotes = notesWithScores.slice(0, 50);
+        // Take top 200 for pagination (increased from 50)
+        const topNotes = notesWithScores.slice(0, 200);
 
-        console.log(`🏆 Top trending note scores:`, topNotes.slice(0, 5).map(n => n.score));
+        console.log(`🏆 Keeping top ${topNotes.length} trending notes (sorted by engagement)`);
+        console.log(`🏆 Top 5 scores:`, topNotes.slice(0, 5).map(n => n.score));
 
         // Fetch profiles for all note authors
         const authorPubkeys = [...new Set(topNotes.map(n => n.note.pubkey))];
@@ -447,16 +479,79 @@ export async function loadTrendingFeed() {
             );
         }
 
-        // Render trending notes
+        // Cache all trending notes for pagination
+        cachedTrendingPosts = topNotes;
+        displayedTrendingPostCount = 0;
+
+        // Cache all trending notes in eventCache so interactions (like/reply/repost) can find them
+        topNotes.forEach(({ note }) => {
+            if (!State.eventCache[note.id]) {
+                State.eventCache[note.id] = note;
+            }
+        });
+
+        console.log(`💾 Cached ${topNotes.length} trending notes in eventCache`);
+
+        // Render first page of trending notes (30 posts)
+        const firstPageNotes = topNotes.slice(0, TRENDING_POSTS_PER_PAGE);
+        displayedTrendingPostCount = firstPageNotes.length;
+
         const renderedPosts = await Promise.all(
-            topNotes.map(({ note, engagement }) => renderSinglePost(note, 'feed', { [note.id]: engagement }, null))
+            firstPageNotes.map(({ note, engagement }) => renderSinglePost(note, 'feed', { [note.id]: engagement }, null))
         );
 
+        // Check if there are more posts
+        const hasMorePosts = displayedTrendingPostCount < cachedTrendingPosts.length;
+        const remainingCount = cachedTrendingPosts.length - displayedTrendingPostCount;
+
+        // Add info header showing total notes found
+        const infoHeader = `
+            <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; text-align: center;">
+                <div style="color: #FF6600; font-size: 16px; font-weight: bold; margin-bottom: 4px;">
+                    ${topNotes.length} notes found over the past 7 days
+                </div>
+                <div style="color: #888; font-size: 14px;">
+                    Ranked by interactions (replies, reposts, and likes)
+                </div>
+            </div>
+        `;
+
+        // Add Load More button if needed
+        const loadMoreButton = hasMorePosts ? `
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                    Load More Posts (${remainingCount} available)
+                </button>
+            </div>
+        ` : '';
+
         if (homeFeedList) {
-            homeFeedList.innerHTML = renderedPosts.join('');
+            homeFeedList.innerHTML = infoHeader + renderedPosts.join('') + loadMoreButton;
         }
 
-        console.log('✅ Trending feed loaded successfully');
+        // Expose trending data to window for Puppeteer extraction
+        window.__nosmeroTrendingCache__ = {
+            timestamp: Date.now(),
+            generated_at: new Date().toISOString(),
+            time_window_days: 7,
+            total_notes_found: allNotes.length,
+            notes_cached: topNotes.length,
+            notes: topNotes.map(({ note, score, engagement }) => ({
+                id: note.id,
+                pubkey: note.pubkey,
+                created_at: note.created_at,
+                content: note.content,
+                tags: note.tags,
+                sig: note.sig,
+                score,
+                engagement
+            }))
+        };
+
+        console.log(`✅ Trending feed loaded successfully`);
+        console.log(`   📊 Total notes cached: ${cachedTrendingPosts.length}`);
+        console.log(`   📄 Currently displaying: ${displayedTrendingPostCount}`);
+        console.log(`   🔽 Load More button: ${hasMorePosts ? 'VISIBLE' : 'HIDDEN'} (${remainingCount} remaining)`);
 
     } catch (error) {
         console.error('Error loading trending feed:', error);
@@ -471,6 +566,550 @@ export async function loadTrendingFeed() {
         }
     }
 }
+
+// Load trending feed specifically for anonymous users (with banner)
+async function loadTrendingFeedForAnonymous(forceRefresh = false) {
+    console.log('📈 Loading Trending Monero Notes for anonymous user');
+
+    try {
+        State.setCurrentPage('home');
+
+        // Show home feed header/controls
+        const homeFeedHeader = document.getElementById('homeFeedHeader');
+        if (homeFeedHeader) {
+            homeFeedHeader.style.display = 'block';
+        }
+
+        // Hide Load More button container if it exists
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        if (loadMoreContainer) {
+            loadMoreContainer.style.display = 'none';
+        }
+
+        // Show loading state
+        const homeFeedList = document.getElementById('homeFeedList');
+        if (homeFeedList) {
+            homeFeedList.innerHTML = '<div class="loading">Loading trending Monero posts...</div>';
+        }
+
+        // Try to load from cache first (unless force refresh)
+        if (!forceRefresh) {
+            try {
+                console.log('📦 Attempting to load from cache...');
+                const cacheResponse = await fetch('/trending-cache.json');
+                if (cacheResponse.ok) {
+                    const cache = await cacheResponse.json();
+                    console.log(`✅ Cache loaded: ${cache.notes_cached} notes from ${new Date(cache.timestamp).toLocaleString()}`);
+                    await renderCachedTrendingFeed(cache);
+                    return;
+                }
+            } catch (cacheError) {
+                console.log('⚠️  Cache not available, falling back to live search:', cacheError.message);
+            }
+        } else {
+            console.log('🔄 Force refresh requested, skipping cache');
+        }
+
+        // Fallback: Load from relays (slow path)
+        console.log('🔍 Loading trending feed from relays...');
+
+        // Import search module to use its hashtag search
+        const Search = await import('./search.js');
+        const Relays = await import('./relays.js');
+
+        const pool = State.pool;
+        const relays = Relays.DEFAULT_RELAYS;
+
+        if (!pool || !relays.length) {
+            throw new Error('No relay connection available');
+        }
+
+        const allNotes = [];
+        const noteIds = new Set();
+
+        console.log('📡 Querying relays for Monero-related content');
+
+        // Query 1: Search #monero hashtag
+        console.log('🏷️ Searching #monero hashtag...');
+        const moneroHashtagResults = await Search.searchHashtag('monero');
+        moneroHashtagResults.forEach(event => {
+            if (!noteIds.has(event.id)) {
+                noteIds.add(event.id);
+                allNotes.push(event);
+            }
+        });
+
+        // Query 2: Search #xmr hashtag
+        console.log('🏷️ Searching #xmr hashtag...');
+        const xmrHashtagResults = await Search.searchHashtag('xmr');
+        xmrHashtagResults.forEach(event => {
+            if (!noteIds.has(event.id)) {
+                noteIds.add(event.id);
+                allNotes.push(event);
+            }
+        });
+
+        // Query 3: Search for "monero" keyword in content
+        console.log('🔍 Searching "monero" keyword...');
+        const moneroContentResults = await Search.searchContent('monero');
+        moneroContentResults.forEach(event => {
+            if (!noteIds.has(event.id)) {
+                noteIds.add(event.id);
+                allNotes.push(event);
+            }
+        });
+
+        console.log(`💎 Found ${allNotes.length} Monero-related notes from search`);
+
+        // Filter for notes from last 7 days
+        const sevenDaysAgo = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
+        const recentNotes = allNotes.filter(note => note.created_at >= sevenDaysAgo);
+
+        console.log(`📅 Filtered to ${recentNotes.length} notes from last 7 days (removed ${allNotes.length - recentNotes.length} older notes)`);
+
+        if (recentNotes.length === 0) {
+            if (homeFeedList) {
+                homeFeedList.innerHTML = '<div class="status">No trending Monero posts found in the last 7 days</div>';
+            }
+            return;
+        }
+
+        // Fetch engagement counts for all notes
+        console.log('📊 Fetching engagement counts for Monero notes');
+        const engagementData = await fetchEngagementCounts(recentNotes.map(n => n.id));
+
+        // Calculate engagement scores
+        const notesWithScores = recentNotes.map(note => {
+            const engagement = engagementData[note.id] || { reactions: 0, reposts: 0, replies: 0 };
+            const score = (engagement.reactions * 1) + (engagement.reposts * 2) + (engagement.replies * 3);
+            return { note, score, engagement };
+        });
+
+        // Sort by score descending
+        notesWithScores.sort((a, b) => b.score - a.score);
+
+        // Take top 200 for pagination
+        const topNotes = notesWithScores.slice(0, 200);
+
+        console.log(`🏆 Keeping top ${topNotes.length} trending notes (sorted by engagement)`);
+        console.log(`🏆 Top 5 scores:`, topNotes.slice(0, 5).map(n => n.score));
+
+        // Fetch profiles for all note authors
+        const authorPubkeys = [...new Set(topNotes.map(n => n.note.pubkey))];
+        await fetchProfiles(authorPubkeys);
+
+        // Fetch Monero addresses for authors
+        if (window.getUserMoneroAddress) {
+            await Promise.all(
+                authorPubkeys.map(async (pubkey) => {
+                    try {
+                        const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                        if (State.profileCache[pubkey]) {
+                            State.profileCache[pubkey].monero_address = moneroAddr || null;
+                        }
+                    } catch (error) {
+                        if (State.profileCache[pubkey]) {
+                            State.profileCache[pubkey].monero_address = null;
+                        }
+                    }
+                })
+            );
+        }
+
+        // Cache all trending notes for pagination
+        cachedTrendingPosts = topNotes;
+        displayedTrendingPostCount = 0;
+
+        // Cache all trending notes in eventCache so interactions can find them
+        topNotes.forEach(({ note }) => {
+            if (!State.eventCache[note.id]) {
+                State.eventCache[note.id] = note;
+            }
+        });
+
+        console.log(`💾 Cached ${topNotes.length} trending notes in eventCache`);
+
+        // Render first page of trending notes (30 posts)
+        const firstPageNotes = topNotes.slice(0, TRENDING_POSTS_PER_PAGE);
+        displayedTrendingPostCount = firstPageNotes.length;
+
+        const renderedPosts = await Promise.all(
+            firstPageNotes.map(({ note, engagement }) => renderSinglePost(note, 'feed', { [note.id]: engagement }, null))
+        );
+
+        // Check if there are more posts
+        const hasMorePosts = displayedTrendingPostCount < cachedTrendingPosts.length;
+        const remainingCount = cachedTrendingPosts.length - displayedTrendingPostCount;
+
+        // Add anonymous user banner
+        const anonymousBanner = `
+            <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.15), rgba(139, 92, 246, 0.15)); border: 1px solid rgba(255, 102, 0, 0.4); border-radius: 12px; padding: 20px; margin-bottom: 20px; text-align: center;">
+                <div style="color: #FF6600; font-size: 18px; font-weight: bold; margin-bottom: 8px;">
+                    📈 Viewing Trending Monero Notes
+                </div>
+                <div style="color: #ccc; font-size: 15px; margin-bottom: 12px;">
+                    ${topNotes.length} notes from the past 7 days, ranked by interactions
+                </div>
+                <div style="color: #888; font-size: 14px;">
+                    <a href="#" onclick="showLoginModal(); return false;" style="color: #FF6600; text-decoration: underline; cursor: pointer;">Login</a> to see your personalized feed
+                </div>
+            </div>
+        `;
+
+        // Add Load More button if needed
+        const loadMoreButton = hasMorePosts ? `
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                    Load More Posts (${remainingCount} available)
+                </button>
+            </div>
+        ` : '';
+
+        if (homeFeedList) {
+            homeFeedList.innerHTML = anonymousBanner + renderedPosts.join('') + loadMoreButton;
+        }
+
+        // Expose trending data to window for Puppeteer extraction
+        window.__nosmeroTrendingCache__ = {
+            timestamp: Date.now(),
+            generated_at: new Date().toISOString(),
+            time_window_days: 7,
+            total_notes_found: allNotes.length,
+            notes_cached: topNotes.length,
+            notes: topNotes.map(({ note, score, engagement }) => ({
+                id: note.id,
+                pubkey: note.pubkey,
+                created_at: note.created_at,
+                content: note.content,
+                tags: note.tags,
+                sig: note.sig,
+                score,
+                engagement
+            }))
+        };
+
+        console.log(`✅ Trending feed loaded for anonymous user`);
+        console.log(`   📊 Total notes cached: ${cachedTrendingPosts.length}`);
+        console.log(`   📄 Currently displaying: ${displayedTrendingPostCount}`);
+        console.log(`   🔽 Load More button: ${hasMorePosts ? 'VISIBLE' : 'HIDDEN'} (${remainingCount} remaining)`);
+
+    } catch (error) {
+        console.error('Error loading trending feed for anonymous user:', error);
+        const homeFeedList = document.getElementById('homeFeedList');
+        if (homeFeedList) {
+            homeFeedList.innerHTML = `
+                <div class="error">
+                    Failed to load trending feed: ${error.message}
+                    <button class="retry-btn" onclick="window.location.reload()">Retry</button>
+                </div>
+            `;
+        }
+    }
+}
+
+// Render trending feed from cached data
+async function renderCachedTrendingFeed(cache) {
+    console.log(`📦 Rendering cached trending feed: ${cache.notes_cached} notes`);
+
+    const homeFeedList = document.getElementById('homeFeedList');
+    if (!homeFeedList) return;
+
+    // Store in pagination cache
+    cachedTrendingPosts = cache.notes.map(noteData => ({
+        note: noteData,
+        score: noteData.score,
+        engagement: noteData.engagement
+    }));
+    displayedTrendingPostCount = 0;
+
+    // Cache all notes in eventCache
+    cache.notes.forEach(noteData => {
+        if (!State.eventCache[noteData.id]) {
+            State.eventCache[noteData.id] = noteData;
+        }
+    });
+
+    // Fetch profiles for all note authors
+    const authorPubkeys = [...new Set(cache.notes.map(n => n.pubkey))];
+    await fetchProfiles(authorPubkeys);
+
+    // Fetch Monero addresses for authors
+    if (window.getUserMoneroAddress) {
+        await Promise.all(
+            authorPubkeys.map(async (pubkey) => {
+                try {
+                    const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                    if (State.profileCache[pubkey]) {
+                        State.profileCache[pubkey].monero_address = moneroAddr || null;
+                    }
+                } catch (error) {
+                    if (State.profileCache[pubkey]) {
+                        State.profileCache[pubkey].monero_address = null;
+                    }
+                }
+            })
+        );
+    }
+
+    // Render first page
+    const firstPageNotes = cachedTrendingPosts.slice(0, TRENDING_POSTS_PER_PAGE);
+    displayedTrendingPostCount = firstPageNotes.length;
+
+    const renderedPosts = await Promise.all(
+        firstPageNotes.map(async ({ note, engagement }) => {
+            try {
+                return await renderSinglePost(note, 'feed', { [note.id]: engagement }, null);
+            } catch (error) {
+                console.error('Error rendering cached post:', error);
+                return '';
+            }
+        })
+    );
+
+    // Check if there are more posts
+    const hasMorePosts = displayedTrendingPostCount < cachedTrendingPosts.length;
+    const remainingCount = cachedTrendingPosts.length - displayedTrendingPostCount;
+
+    // Format last updated time
+    const lastUpdated = new Date(cache.timestamp);
+    const now = new Date();
+    const hoursSince = Math.floor((now - lastUpdated) / (1000 * 60 * 60));
+    const minutesSince = Math.floor((now - lastUpdated) / (1000 * 60));
+
+    let timeAgo;
+    if (hoursSince >= 1) {
+        timeAgo = `${hoursSince} hour${hoursSince > 1 ? 's' : ''} ago`;
+    } else if (minutesSince >= 1) {
+        timeAgo = `${minutesSince} minute${minutesSince > 1 ? 's' : ''} ago`;
+    } else {
+        timeAgo = 'just now';
+    }
+
+    // Anonymous user banner with cache info
+    const anonymousBanner = `
+        <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.15), rgba(139, 92, 246, 0.15)); border: 1px solid rgba(255, 102, 0, 0.4); border-radius: 12px; padding: 20px; margin-bottom: 20px; text-align: center;">
+            <div style="color: #FF6600; font-size: 18px; font-weight: bold; margin-bottom: 8px;">
+                📈 Viewing Trending Monero Notes
+            </div>
+            <div style="color: #ccc; font-size: 15px; margin-bottom: 8px;">
+                ${cache.notes_cached} notes from the past ${cache.time_window_days} days, ranked by interactions
+            </div>
+            <div style="color: #888; font-size: 13px; margin-bottom: 12px;">
+                Last updated ${timeAgo} • <a href="#" onclick="refreshTrendingFeed(); return false;" style="color: #FF6600; text-decoration: underline; cursor: pointer;">Refresh now</a>
+            </div>
+            <div style="color: #888; font-size: 14px;">
+                <a href="#" onclick="showLoginModal(); return false;" style="color: #FF6600; text-decoration: underline; cursor: pointer;">Login</a> to see your personalized feed
+            </div>
+        </div>
+    `;
+
+    // Load More button
+    const loadMoreButton = hasMorePosts ? `
+        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                Load More Posts (${remainingCount} available)
+            </button>
+        </div>
+    ` : '';
+
+    homeFeedList.innerHTML = anonymousBanner + renderedPosts.join('') + loadMoreButton;
+
+    // Expose trending data to window for Puppeteer extraction (even when loaded from cache)
+    window.__nosmeroTrendingCache__ = cache;
+
+    console.log(`✅ Cached trending feed rendered (${displayedTrendingPostCount} of ${cachedTrendingPosts.length})`);
+}
+
+// Render trending feed from cached data (for logged-in users)
+async function renderCachedTrendingFeedForLoggedIn(cache) {
+    console.log(`📦 Rendering cached trending feed for logged-in user: ${cache.notes_cached} notes`);
+
+    const homeFeedList = document.getElementById('homeFeedList');
+    if (!homeFeedList) return;
+
+    // Store in pagination cache
+    cachedTrendingPosts = cache.notes.map(noteData => ({
+        note: noteData,
+        score: noteData.score,
+        engagement: noteData.engagement
+    }));
+    displayedTrendingPostCount = 0;
+
+    // Cache all notes in eventCache
+    cache.notes.forEach(noteData => {
+        if (!State.eventCache[noteData.id]) {
+            State.eventCache[noteData.id] = noteData;
+        }
+    });
+
+    // Fetch profiles for all note authors
+    const authorPubkeys = [...new Set(cache.notes.map(n => n.pubkey))];
+    await fetchProfiles(authorPubkeys);
+
+    // Fetch Monero addresses for authors
+    if (window.getUserMoneroAddress) {
+        await Promise.all(
+            authorPubkeys.map(async (pubkey) => {
+                try {
+                    const moneroAddr = await window.getUserMoneroAddress(pubkey);
+                    if (State.profileCache[pubkey]) {
+                        State.profileCache[pubkey].monero_address = moneroAddr || null;
+                    }
+                } catch (error) {
+                    if (State.profileCache[pubkey]) {
+                        State.profileCache[pubkey].monero_address = null;
+                    }
+                }
+            })
+        );
+    }
+
+    // Render first page
+    const firstPageNotes = cachedTrendingPosts.slice(0, TRENDING_POSTS_PER_PAGE);
+    displayedTrendingPostCount = firstPageNotes.length;
+
+    const renderedPosts = await Promise.all(
+        firstPageNotes.map(async ({ note, engagement }) => {
+            try {
+                return await renderSinglePost(note, 'feed', { [note.id]: engagement }, null);
+            } catch (error) {
+                console.error('Error rendering cached post:', error);
+                return '';
+            }
+        })
+    );
+
+    // Check if there are more posts
+    const hasMorePosts = displayedTrendingPostCount < cachedTrendingPosts.length;
+    const remainingCount = cachedTrendingPosts.length - displayedTrendingPostCount;
+
+    // Format last updated time
+    const lastUpdated = new Date(cache.timestamp);
+    const now = new Date();
+    const hoursSince = Math.floor((now - lastUpdated) / (1000 * 60 * 60));
+    const minutesSince = Math.floor((now - lastUpdated) / (1000 * 60));
+
+    let timeAgo;
+    if (hoursSince >= 1) {
+        timeAgo = `${hoursSince} hour${hoursSince > 1 ? 's' : ''} ago`;
+    } else if (minutesSince >= 1) {
+        timeAgo = `${minutesSince} minute${minutesSince > 1 ? 's' : ''} ago`;
+    } else {
+        timeAgo = 'just now';
+    }
+
+    // Logged-in user header with cache info (no login prompt)
+    const infoHeader = `
+        <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; text-align: center;">
+            <div style="color: #FF6600; font-size: 16px; font-weight: bold; margin-bottom: 4px;">
+                ${cache.notes_cached} notes found over the past ${cache.time_window_days} days
+            </div>
+            <div style="color: #888; font-size: 14px; margin-bottom: 8px;">
+                Ranked by interactions (replies, reposts, and likes)
+            </div>
+            <div style="color: #888; font-size: 13px;">
+                Last updated ${timeAgo} • <a href="#" onclick="refreshTrendingFeedLoggedIn(); return false;" style="color: #FF6600; text-decoration: underline; cursor: pointer;">Refresh now</a>
+            </div>
+        </div>
+    `;
+
+    // Load More button
+    const loadMoreButton = hasMorePosts ? `
+        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                Load More Posts (${remainingCount} available)
+            </button>
+        </div>
+    ` : '';
+
+    homeFeedList.innerHTML = infoHeader + renderedPosts.join('') + loadMoreButton;
+
+    // Expose trending data to window for Puppeteer extraction (even when loaded from cache)
+    window.__nosmeroTrendingCache__ = cache;
+
+    console.log(`✅ Cached trending feed rendered for logged-in user (${displayedTrendingPostCount} of ${cachedTrendingPosts.length})`);
+}
+
+// Refresh trending feed (force reload from relays)
+async function refreshTrendingFeed() {
+    console.log('🔄 Forcing trending feed refresh...');
+    await loadTrendingFeedForAnonymous(true);
+}
+
+// Refresh trending feed for logged-in users (force reload from relays)
+async function refreshTrendingFeedLoggedIn() {
+    console.log('🔄 Forcing trending feed refresh for logged-in user...');
+    await loadTrendingFeed(true);
+}
+
+// Make refresh functions globally accessible
+window.refreshTrendingFeedLoggedIn = refreshTrendingFeedLoggedIn;
+
+// Make refresh function globally accessible
+window.refreshTrendingFeed = refreshTrendingFeed;
+
+// Load more trending posts (pagination)
+async function loadMoreTrendingPosts() {
+    const startIndex = displayedTrendingPostCount;
+    const endIndex = Math.min(startIndex + TRENDING_POSTS_PER_PAGE, cachedTrendingPosts.length);
+    const postsToRender = cachedTrendingPosts.slice(startIndex, endIndex);
+
+    if (postsToRender.length === 0) return;
+
+    try {
+        // Render new posts
+        const renderedPosts = await Promise.all(
+            postsToRender.map(async ({ note, engagement }) => {
+                try {
+                    return await renderSinglePost(note, 'feed', { [note.id]: engagement }, null);
+                } catch (error) {
+                    console.error('Error rendering trending post:', error);
+                    return `
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px;">
+                            <div style="color: #666; font-size: 12px;">Error rendering post</div>
+                        </div>
+                    `;
+                }
+            })
+        );
+
+        // Update displayed count
+        displayedTrendingPostCount = endIndex;
+
+        // Check if there are more posts
+        const hasMorePosts = displayedTrendingPostCount < cachedTrendingPosts.length;
+        const remainingCount = cachedTrendingPosts.length - displayedTrendingPostCount;
+
+        // Remove old Load More button
+        const loadMoreContainer = document.getElementById('trendingLoadMoreContainer');
+        if (loadMoreContainer) {
+            loadMoreContainer.remove();
+        }
+
+        // Add new Load More button if needed
+        const loadMoreButton = hasMorePosts ? `
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                    Load More Posts (${remainingCount} available)
+                </button>
+            </div>
+        ` : '';
+
+        // Append new posts and button to container
+        const homeFeedList = document.getElementById('homeFeedList');
+        if (homeFeedList) {
+            homeFeedList.insertAdjacentHTML('beforeend', renderedPosts.join('') + loadMoreButton);
+        }
+
+        console.log(`📄 Loaded ${postsToRender.length} more trending posts (showing ${displayedTrendingPostCount} of ${cachedTrendingPosts.length})`);
+
+    } catch (error) {
+        console.error('Error loading more trending posts:', error);
+    }
+}
+
+// Make loadMoreTrendingPosts globally accessible
+window.loadMoreTrendingPosts = loadMoreTrendingPosts;
 
 // Load fresh following list from relays (always, no cache)
 async function loadFreshFollowingList() {
@@ -1596,7 +2235,7 @@ export function getLightningAddress(post) {
 export async function likePost(postId) {
     const post = State.posts.find(p => p.id === postId) || State.eventCache[postId];
     if (!post) {
-        alert('Post not found');
+        alert('Note not found');
         return;
     }
     
@@ -1661,13 +2300,13 @@ export function repostNote(postId) {
                currentHomeFeedResults.find(p => p.id === postId);
 
     if (!post) {
-        console.error('Post not found in any location:', {
+        console.error('Note not found in any location:', {
             postId,
             statePostsCount: State.posts.length,
             eventCacheKeys: Object.keys(State.eventCache).length,
             homeFeedResultsCount: currentHomeFeedResults.length
         });
-        alert('Post not found');
+        alert('Note not found');
         return;
     }
 
@@ -1859,7 +2498,7 @@ export function closeRepostModal() {
 export function replyToPost(postId) {
     const post = State.posts.find(p => p.id === postId) || State.eventCache[postId];
     if (!post) {
-        alert('Post not found');
+        alert('Note not found');
         return;
     }
 
@@ -1903,7 +2542,7 @@ export async function sendReply(replyToId) {
     
     const originalPost = State.posts.find(p => p.id === replyToId) || State.eventCache[replyToId];
     if (!originalPost) {
-        alert('Original post not found');
+        alert('Original note not found');
         return;
     }
     
@@ -2274,7 +2913,7 @@ export async function fetchDisclosedTips(postsOrIds) {
                         console.log('  Referenced post:', referencedPostId);
 
                         if (!referencedPostId || !disclosures[referencedPostId]) {
-                            console.log('  ⚠️ Post not found in current list');
+                            console.log('  ⚠️ Note not found in current list');
                             return;
                         }
 
