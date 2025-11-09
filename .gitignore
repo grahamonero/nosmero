@@ -53,3 +53,8 @@ node_modules/
 
 # Generated cache files
 trending-cache.json
+
+# Environment variables
+.env
+.env.*
+!.env.example
