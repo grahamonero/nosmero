@@ -135,6 +135,14 @@ export function showLoginWithNsec() {
                     </div>
                 </div>
 
+                <!-- Critical Security Warning -->
+                <div style="margin-bottom: 24px; padding: 16px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 4px solid #FF6600; max-width: 400px; margin: 0 auto 24px auto;">
+                    <div style="color: #FF6600; font-weight: bold; font-size: 14px; margin-bottom: 8px;">⚠️ Critical Security Warning</div>
+                    <div style="color: #ccc; font-size: 13px; line-height: 1.6; text-align: left;">
+                        <strong style="color: #FF6600;">Anyone with your nsec can control your account permanently.</strong> There is no password reset or recovery - if your nsec is exposed or lost, your identity is compromised forever.
+                    </div>
+                </div>
+
                 <div style="font-size: 12px; color: #666; text-align: left; max-width: 400px; margin: 0 auto;">
                     <p><strong>Security Tips:</strong></p>
                     <ul style="text-align: left; margin: 10px 0;">
@@ -2344,6 +2352,18 @@ export async function toggleFollow(pubkey) {
             return;
         }
 
+        // CRITICAL: Block follow actions during sync to prevent catastrophic data loss
+        if (!StateModule.contactListFullySynced) {
+            const progress = StateModule.contactListSyncProgress || { loaded: 0, total: 0 };
+            const message = progress.total > 0
+                ? `⏳ Still syncing your follows (${progress.loaded}/${progress.total} relays)...\n\nPlease wait a moment to prevent data loss.`
+                : `⏳ Still syncing your follows...\n\nPlease wait a moment to prevent data loss.`;
+
+            console.warn('🔒 Follow action blocked - contact list sync not complete');
+            alert(message);
+            return;
+        }
+
         // Use the GLOBAL state, not local followingList
         const currentFollowing = new Set(StateModule.followingUsers || []);
         const isCurrentlyFollowing = currentFollowing.has(pubkey);
@@ -2559,6 +2579,40 @@ export async function copyUserNpub(pubkey) {
     }
 }
 
+// ==================== CONTACT LIST SYNC STATUS INDICATOR ====================
+
+// Show the sync status banner with optional progress
+export function showContactSyncStatus(loaded = 0, total = 0) {
+    const banner = document.getElementById('contactSyncStatus');
+    const text = document.getElementById('contactSyncText');
+
+    if (!banner || !text) return;
+
+    if (total > 0) {
+        text.textContent = `Syncing your follows: ${loaded}/${total} relays`;
+    } else {
+        text.textContent = 'Syncing your follows...';
+    }
+
+    banner.style.display = 'flex';
+}
+
+// Hide the sync status banner
+export function hideContactSyncStatus() {
+    const banner = document.getElementById('contactSyncStatus');
+    if (banner) {
+        banner.style.display = 'none';
+    }
+}
+
+// Update sync progress (can be called during sync)
+export function updateContactSyncProgress(loaded, total) {
+    const text = document.getElementById('contactSyncText');
+    if (text) {
+        text.textContent = `Syncing your follows: ${loaded}/${total} relays`;
+    }
+}
+
 // Make functions globally available
 window.toggleFollow = toggleFollow;
 window.copyUserNpub = copyUserNpub;
@@ -2730,7 +2784,7 @@ export async function muteUser() {
     const post = State.eventCache[currentMenuPostId] || State.posts.find(p => p.id === currentMenuPostId);
 
     if (!post || !post.pubkey) {
-        showNotification('Cannot mute - post author not found', 'error');
+        showNotification('Cannot mute - note author not found', 'error');
         document.getElementById('postMenu').style.display = 'none';
         return;
     }
@@ -2769,7 +2823,7 @@ export async function reportPost() {
             showNotification('Report functionality not yet implemented', 'info');
         } catch (error) {
             console.error('Error reporting post:', error);
-            showNotification('Failed to report post', 'error');
+            showNotification('Failed to report note', 'error');
         }
     }
     
