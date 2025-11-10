@@ -4,6 +4,7 @@
 import * as State from './state.js';
 import * as Utils from './utils.js';
 import * as Relays from './relays.js';
+import * as UI from './ui.js';
 
 // Constants for feed management
 export const POSTS_PER_PAGE = 10;
@@ -233,6 +234,10 @@ export async function loadStreamingHomeFeed() {
         if (!State.publicKey) {
             console.log('👤 Anonymous user detected - loading Trending Monero Notes feed');
             isLoadingHomeFeed = false;
+
+            // Initialize home feed structure for anonymous users
+            initializeHomeFeedResults();
+
             await loadTrendingFeedForAnonymous();
             return;
         }
@@ -769,6 +774,11 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
             homeFeedList.innerHTML = anonymousBanner + renderedPosts.join('') + loadMoreButton;
         }
 
+        // Hide the home feed header for anonymous users (trending feed has its own banner)
+        if (homeFeedHeader) {
+            homeFeedHeader.style.display = 'none';
+        }
+
         // Expose trending data to window for Puppeteer extraction
         window.__nosmeroTrendingCache__ = {
             timestamp: Date.now(),
@@ -913,6 +923,12 @@ async function renderCachedTrendingFeed(cache) {
     ` : '';
 
     homeFeedList.innerHTML = anonymousBanner + renderedPosts.join('') + loadMoreButton;
+
+    // Hide the home feed header for anonymous users (trending feed has its own banner)
+    const header = document.getElementById('homeFeedHeader');
+    if (header) {
+        header.style.display = 'none';
+    }
 
     // Expose trending data to window for Puppeteer extraction (even when loaded from cache)
     window.__nosmeroTrendingCache__ = cache;
@@ -1118,16 +1134,28 @@ async function loadFreshFollowingList() {
     console.log('🔍 Current State.followingUsers size:', State.followingUsers ? State.followingUsers.size : 'undefined');
 
     if (!State.publicKey) {
-        // Anonymous users get curated authors
+        // Anonymous users get curated authors - no sync needed
         currentFollowingList = new Set(Utils.getCuratedAuthors());
         updateHomeFeedStatus(`Using curated feed - ${currentFollowingList.size} authors`);
         console.log('🔍 No publicKey, using curated authors');
+        State.setContactListFullySynced(true);
         return;
     }
+
+    // CRITICAL: Set sync flag to false at start to prevent race condition (logged-in users only)
+    State.setContactListFullySynced(false);
+    console.log('🔒 Contact list sync: LOCKED - follow actions blocked during sync');
+
+    // Show visual sync status indicator (logged-in users only)
+    UI.showContactSyncStatus();
 
     try {
         const readRelays = Relays.getUserDataRelays(); // Use NIP-65 relays for personal data
         let foundFollowingList = false;
+
+        // Track sync progress for UI feedback
+        State.setContactListSyncProgress({ loaded: 0, total: readRelays.length });
+        UI.showContactSyncStatus(0, readRelays.length);
 
         await new Promise((resolve) => {
             const sub = State.pool.subscribeMany(readRelays, [
@@ -1185,17 +1213,32 @@ async function loadFreshFollowingList() {
             currentFollowingList = new Set();
             updateHomeFeedStatus(`⚠️ Unable to load following list from relays - please check connection`);
             console.error('Could not fetch fresh following list from any relay');
+            // CRITICAL: Unlock follow actions even on failure (user can try manual actions)
+            State.setContactListFullySynced(true);
+            State.setContactListSyncProgress({ loaded: readRelays.length, total: readRelays.length });
+            UI.hideContactSyncStatus();
+            console.log('🔓 Contact list sync: UNLOCKED (failed to load)');
             return; // Exit early if no fresh data available
         } else {
             // Update global state with fresh data (no localStorage caching)
             State.setFollowingUsers(currentFollowingList);
             console.log('✓ Fresh following list loaded and updated in global state');
+
+            // CRITICAL: Unlock follow actions now that sync is complete
+            State.setContactListFullySynced(true);
+            State.setContactListSyncProgress({ loaded: readRelays.length, total: readRelays.length });
+            UI.hideContactSyncStatus();
+            console.log(`🔓 Contact list sync: UNLOCKED - ${currentFollowingList.size} follows loaded, follow actions now safe`);
         }
 
     } catch (error) {
         console.error('Error loading fresh following list:', error);
         currentFollowingList = new Set();
         updateHomeFeedStatus(`Error loading following list - please refresh or check network`);
+        // CRITICAL: Unlock follow actions even on error (user can try manual actions)
+        State.setContactListFullySynced(true);
+        UI.hideContactSyncStatus();
+        console.log('🔓 Contact list sync: UNLOCKED (error occurred)');
         return; // Exit early if error occurs
     }
 }
@@ -2260,7 +2303,7 @@ export async function likePost(postId) {
             
             State.likedPosts.delete(postId);
             updateLikeButton(postId, false);
-            Utils.showNotification('Post unliked', 'info');
+            Utils.showNotification('Note unliked', 'info');
             
         } else {
             // Like: Create reaction event (kind 7)
@@ -2280,7 +2323,7 @@ export async function likePost(postId) {
             
             State.likedPosts.add(postId);
             updateLikeButton(postId, true);
-            Utils.showNotification('Post liked!', 'success');
+            Utils.showNotification('Note liked!', 'success');
         }
     } catch (error) {
         console.error('Failed to like/unlike post:', error);
@@ -2407,7 +2450,7 @@ export function setRepostType(type) {
 // Send the repost
 export async function sendRepost() {
     if (!currentRepostPost) {
-        alert('No post selected for reposting');
+        alert('No note selected for reposting');
         return;
     }
 
@@ -2446,7 +2489,7 @@ async function doQuickRepost() {
 
     State.repostedPosts.add(currentRepostPost.id);
     updateRepostButton(currentRepostPost.id, true);
-    Utils.showNotification('Post reposted!', 'success');
+    Utils.showNotification('Note reposted!', 'success');
 }
 
 // Perform quote repost (kind 1 with embedded note)
@@ -2454,7 +2497,7 @@ async function doQuoteRepost() {
     const userComment = document.getElementById('repostComment').value.trim();
 
     if (!userComment) {
-        alert('Please add a comment for your quote repost');
+        alert('Please add a comment for your quote note');
         return;
     }
 
@@ -2475,7 +2518,7 @@ async function doQuoteRepost() {
     const signedEvent = await Utils.signEvent(eventTemplate);
     await State.pool.publish(Relays.getWriteRelays(), signedEvent);
 
-    Utils.showNotification('Quote repost published!', 'success');
+    Utils.showNotification('Quote note published!', 'success');
 
     // Refresh feed to show new post (force fresh to bypass cache)
     setTimeout(async () => await loadFeedRealtime(), 1000);
@@ -2586,7 +2629,7 @@ export async function sendReply(replyToId) {
         const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
         
-        Utils.showNotification('Reply posted!', 'success');
+        Utils.showNotification('Reply published!', 'success');
         document.getElementById('replyModal').style.display = 'none';
         document.getElementById('replyContent').value = '';
         removeMedia('reply');
@@ -2596,7 +2639,7 @@ export async function sendReply(replyToId) {
         
     } catch (error) {
         console.error('Failed to post reply:', error);
-        Utils.showNotification('Failed to post reply: ' + error.message, 'error');
+        Utils.showNotification('Failed to publish reply: ' + error.message, 'error');
     }
 }
 
@@ -3591,7 +3634,7 @@ export async function sendPost() {
         
     } catch (error) {
         console.error('Post sending error:', error);
-        Utils.showNotification(`Failed to send post: ${error.message}`, 'error');
+        Utils.showNotification(`Failed to send note: ${error.message}`, 'error');
     }
 }
 
@@ -3682,7 +3725,7 @@ export function initializePosts() {
 // Modified sendReply to use the stored reply ID from the existing replyToPost function
 export async function sendReplyToCurrentPost() {
     if (!window.currentReplyToId) {
-        alert('No post selected for reply');
+        alert('No note selected for reply');
         return;
     }
     
@@ -3944,7 +3987,7 @@ export async function publishNewPost() {
         const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
         
-        Utils.showNotification('Post published!', 'success');
+        Utils.showNotification('Note published!', 'success');
         
         // Clear form and close modal
         document.getElementById('newPostContent').value = '';
@@ -3957,7 +4000,7 @@ export async function publishNewPost() {
         
     } catch (error) {
         console.error('Failed to publish post:', error);
-        Utils.showNotification('Failed to publish post: ' + error.message, 'error');
+        Utils.showNotification('Failed to publish note: ' + error.message, 'error');
     }
 }
 

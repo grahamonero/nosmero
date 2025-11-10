@@ -1479,3 +1479,13 @@
         .embedded-note.error {
             border-color: rgba(255, 102, 102, 0.3);
         }
+
+/* Spinner animation for sync status indicator */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}

@@ -24,6 +24,10 @@ export let likedPosts = new Set();  // Track posts liked by current user
 export let repostedPosts = new Set();  // Track posts reposted by current user
 export let followingUsers = new Set();  // Track users followed by current user
 export let mutedUsers = new Set();  // Track users muted by current user (NIP-51 kind 10000)
+
+// Contact list sync state to prevent race condition data loss
+export let contactListFullySynced = false;  // Track if kind:3 contact list has fully loaded from relays
+export let contactListSyncProgress = { loaded: 0, total: 0 };  // Track sync progress for UI display
 export let notifications = [];  // Array of notification objects
 export let lastNotificationCheck = 0;  // Timestamp of last notification check
 export let lastViewedNotificationTime = parseInt(localStorage.getItem('lastViewedNotificationTime') || '0');  // Track last viewed notification time
@@ -65,6 +69,8 @@ export function setLikedPosts(liked) { likedPosts = liked; }
 export function setRepostedPosts(reposts) { repostedPosts = reposts; }
 export function setFollowingUsers(following) { followingUsers = following; }
 export function setMutedUsers(muted) { mutedUsers = muted; }
+export function setContactListFullySynced(synced) { contactListFullySynced = synced; }
+export function setContactListSyncProgress(progress) { contactListSyncProgress = progress; }
 export function setNotifications(notifs) { notifications = notifs; }
 export function setLastNotificationCheck(time) { lastNotificationCheck = time; }
 export function setLastViewedNotificationTime(time) {

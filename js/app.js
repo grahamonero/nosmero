@@ -491,9 +491,7 @@ async function loadHomeFeed() {
 
     feed.innerHTML = '<div class="loading">Loading feed...</div>';
 
-    // Initialize the home feed DOM structure before loading posts
-    Posts.initializeHomeFeedResults();
-
+    // loadFeedRealtime() handles its own initialization
     // Load feed for both logged in users and anonymous users
     // Anonymous users will see posts from default curated authors
 
