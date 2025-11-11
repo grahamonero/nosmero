@@ -2783,7 +2783,8 @@ export async function likePost(postId) {
                 tags: [
                     ['e', postId],
                     ['p', post.pubkey],
-                    ['k', '1'] // Reacting to kind 1 (text note)
+                    ['k', '1'], // Reacting to kind 1 (text note)
+                    ['client', 'nosmero']
                 ],
                 content: '🤍' // Heart emoji
             };
@@ -2949,7 +2950,8 @@ async function doQuickRepost() {
         created_at: Math.floor(Date.now() / 1000),
         tags: [
             ['e', currentRepostPost.id, '', 'mention'],
-            ['p', currentRepostPost.pubkey]
+            ['p', currentRepostPost.pubkey],
+            ['client', 'nosmero']
         ],
         content: JSON.stringify(currentRepostPost) // Include original event
     };
@@ -2980,7 +2982,8 @@ async function doQuoteRepost() {
         tags: [
             ['e', currentRepostPost.id, '', 'mention'],
             ['p', currentRepostPost.pubkey],
-            ['q', currentRepostPost.id] // Quote tag
+            ['q', currentRepostPost.id], // Quote tag
+            ['client', 'nosmero']
         ],
         content: noteContent
     };
@@ -3086,7 +3089,8 @@ export async function sendReply(replyToId) {
             created_at: Math.floor(Date.now() / 1000),
             tags: [
                 ['e', replyToId, '', 'reply'],
-                ['p', originalPost.pubkey]
+                ['p', originalPost.pubkey],
+                ['client', 'nosmero']
             ],
             content: replyContent
         };
@@ -4056,10 +4060,12 @@ export async function sendPost() {
         const event = {
             kind: 1,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [],
+            tags: [
+                ['client', 'nosmero']
+            ],
             content: content
         };
-        
+
         // Add Monero address tag if set
         if (State.userMoneroAddress) {
             event.tags.push(['monero_address', State.userMoneroAddress]);
@@ -4444,10 +4450,12 @@ export async function publishNewPost() {
         const eventTemplate = {
             kind: 1,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [],
+            tags: [
+                ['client', 'nosmero']
+            ],
             content: postContent
         };
-        
+
         // Add Monero address if provided
         if (moneroAddress) {
             eventTemplate.tags.push(['monero', moneroAddress]);
