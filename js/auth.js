@@ -673,19 +673,24 @@ function updateUIForLogout() {
         window.updateUIForLogout();
         return;
     }
-    
+
     // Fallback: Show auth options and hide logout option
     const authOptions = document.getElementById('authOptions');
     const logoutOption = document.getElementById('logoutOption');
-    
+
     if (authOptions) authOptions.style.display = 'block';
     if (logoutOption) logoutOption.style.display = 'none';
-    
+
     // Update the main logout button text
     const mainLogoutBtn = document.querySelector('.nav-item[onclick="logout()"] span:last-child');
     if (mainLogoutBtn) {
         mainLogoutBtn.textContent = 'Login';
         mainLogoutBtn.parentElement.onclick = () => window.showAuthUI();
+    }
+
+    // Update header UI for logged-out state (Create Note → Login button)
+    if (typeof window.updateHeaderUIForAuthState === 'function') {
+        window.updateHeaderUIForAuthState();
     }
 }
 
