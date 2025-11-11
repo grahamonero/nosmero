@@ -1372,9 +1372,9 @@ export async function openThreadView(eventId) {
             console.error('Thread page elements not found');
             return;
         }
-        
-        // Show loading state
-        threadContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">Loading thread...</div>';
+
+        // Show skeleton loading screen
+        showSkeletonLoader('threadPageContent', 3);
         threadPage.style.display = 'block';
         
         // Update current page state
@@ -3457,6 +3457,77 @@ window.showLoginWithAmber = showLoginWithAmber;
 window.showLoginWithNsecApp = showLoginWithNsecApp;
 window.showGeneratedKeyModal = showGeneratedKeyModal;
 window.closeKeyModal = closeKeyModal;
+// ============================================
+// SKELETON LOADING SCREENS
+// ============================================
+
+/**
+ * Generate HTML for a single skeleton post placeholder
+ * @returns {string} HTML string for skeleton post
+ */
+function generateSkeletonPost() {
+    return `
+        <div class="skeleton-post">
+            <div class="skeleton-post-header">
+                <div class="skeleton-avatar"></div>
+                <div class="skeleton-post-info">
+                    <div class="skeleton-line skeleton-line-medium"></div>
+                </div>
+            </div>
+            <div class="skeleton-content">
+                <div class="skeleton-line skeleton-line-long"></div>
+                <div class="skeleton-line skeleton-line-long"></div>
+                <div class="skeleton-line skeleton-line-medium"></div>
+            </div>
+            <div class="skeleton-actions">
+                <div class="skeleton-action"></div>
+                <div class="skeleton-action"></div>
+                <div class="skeleton-action"></div>
+                <div class="skeleton-action"></div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Show skeleton loading placeholders in a container
+ * @param {string} containerId - ID of the container element
+ * @param {number} count - Number of skeleton posts to show (default: 5)
+ */
+export function showSkeletonLoader(containerId, count = 5) {
+    const container = document.getElementById(containerId);
+    if (!container) {
+        console.warn(`Container ${containerId} not found for skeleton loader`);
+        return;
+    }
+
+    // Generate skeleton posts
+    const skeletonHTML = Array(count)
+        .fill(null)
+        .map(() => generateSkeletonPost())
+        .join('');
+
+    // Wrap in skeleton loader container
+    container.innerHTML = `<div class="skeleton-loader" id="skeleton-loader-${containerId}">${skeletonHTML}</div>`;
+}
+
+/**
+ * Hide skeleton loading placeholders from a container
+ * @param {string} containerId - ID of the container element
+ */
+export function hideSkeletonLoader(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) {
+        console.warn(`Container ${containerId} not found for hiding skeleton loader`);
+        return;
+    }
+
+    const skeletonLoader = container.querySelector('.skeleton-loader');
+    if (skeletonLoader) {
+        skeletonLoader.remove();
+    }
+}
+
 window.openZapModal = openZapModal;
 window.zapWithCustomAmount = zapWithCustomAmount;
 window.addToQueueAndClose = addToQueueAndClose;

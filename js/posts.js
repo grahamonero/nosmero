@@ -357,10 +357,10 @@ export async function loadTrendingFeed(forceRefresh = false) {
             loadMoreContainer.style.display = 'none';
         }
 
-        // Show loading state
+        // Show skeleton loading state
         const homeFeedList = document.getElementById('homeFeedList');
         if (homeFeedList) {
-            homeFeedList.innerHTML = '<div class="loading">Loading trending Monero posts...</div>';
+            UI.showSkeletonLoader('homeFeedList', 5);
         }
 
         // Try to load from cache first (unless force refresh)
@@ -591,10 +591,10 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
             loadMoreContainer.style.display = 'none';
         }
 
-        // Show loading state
+        // Show skeleton loading state
         const homeFeedList = document.getElementById('homeFeedList');
         if (homeFeedList) {
-            homeFeedList.innerHTML = '<div class="loading">Loading trending Monero posts...</div>';
+            UI.showSkeletonLoader('homeFeedList', 5);
         }
 
         // Try to load from cache first (unless force refresh)
@@ -1589,6 +1589,9 @@ export function initializeHomeFeedResults() {
             </button>
         </div>
     `;
+
+    // Show skeleton screens in the feed list
+    UI.showSkeletonLoader('homeFeedList', 5);
 }
 
 // Display posts from cache (instant, no network delay)

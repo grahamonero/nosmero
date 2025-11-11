@@ -4,6 +4,7 @@
 
 import { showNotification } from './utils.js';
 import { SEARCH_RELAYS } from './relays.js';
+import { showSkeletonLoader, hideSkeletonLoader } from './ui.js';
 import {
     pool,
     relays,
@@ -1146,6 +1147,9 @@ export function initializeSearchResults(query) {
         </div>
         <div id="searchResultsList"></div>
     `;
+
+    // Show skeleton loading in search results
+    showSkeletonLoader('searchResultsList', 4);
 }
 
 // Add a single result to the streaming display
