@@ -47,14 +47,3 @@ nosmeroav.png
 # System files
 .DS_Store
 Thumbs.db
-
-# Node modules
-node_modules/
-
-# Generated cache files
-trending-cache.json
-
-# Environment variables
-.env
-.env.*
-!.env.example

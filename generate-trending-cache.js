@@ -6,14 +6,21 @@
 
 const puppeteer = require('puppeteer');
 const fs = require('fs');
+const path = require('path');
 
-const SITE_URL = 'https://nosmero.com'; // Production site
-const CACHE_FILE = '/var/www/html/trending-cache.json';
+// Auto-detect environment based on script location
+const IS_PRODUCTION = __dirname.includes('/var/www/html');
+const SITE_URL = IS_PRODUCTION ? 'https://nosmero.com' : 'https://nosmero.com:8443';
+const CACHE_FILE = IS_PRODUCTION
+    ? '/var/www/html/trending-cache.json'
+    : '/var/www/dev.nosmero.com/trending-cache.json';
 const TIMEOUT = 120000; // 2 minutes max
 
 async function generateCache() {
     console.log('🚀 Starting trending cache generation via Puppeteer...');
+    console.log(`📦 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`📍 Target URL: ${SITE_URL}`);
+    console.log(`💾 Cache file: ${CACHE_FILE}`);
 
     let browser;
 
@@ -44,22 +51,38 @@ async function generateCache() {
             timeout: TIMEOUT
         });
 
-        console.log('⏳ Waiting for trending data to load on home page...');
+        console.log('⏳ Waiting for page to load...');
 
-        // Anonymous users automatically see trending feed on home page
-        // Wait for the trending feed header to appear
+        // Wait for the refresh function to be available
         await page.waitForFunction(
-            () => {
-                const homeFeedList = document.getElementById('homeFeedList');
-                return homeFeedList && (
-                    homeFeedList.innerHTML.includes('Viewing Trending Monero Notes') ||
-                    homeFeedList.innerHTML.includes('notes from the past')
-                );
-            },
+            () => typeof window.refreshTrendingFeedLoggedIn === 'function',
             { timeout: TIMEOUT }
         );
 
-        console.log('✅ Trending data loaded!');
+        console.log('🔄 Forcing fresh trending data generation (bypassing cache)...');
+
+        // Force refresh to bypass cache and generate fresh data
+        await page.evaluate(() => window.refreshTrendingFeedLoggedIn());
+
+        // Wait a bit longer for relay queries to complete (trending search is slow)
+        console.log('⏳ Waiting for fresh data (relay queries may take 30-60 seconds)...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // Wait for fresh data to be generated and cached
+        await page.waitForFunction(
+            () => {
+                // Check if cache has been updated with fresh timestamp
+                const cache = window.__nosmeroTrendingCache__;
+                if (!cache || !cache.timestamp) return false;
+
+                // Check if timestamp is recent (within last 5 minutes)
+                const cacheAge = Date.now() - cache.timestamp;
+                return cacheAge < (5 * 60 * 1000);
+            },
+            { timeout: TIMEOUT, polling: 1000 }
+        );
+
+        console.log('✅ Fresh trending data generated!');
 
         // Extract the cached trending data from window.__nosmeroTrendingCache__
         console.log('🔍 Extracting note data from browser...');

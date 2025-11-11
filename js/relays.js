@@ -262,7 +262,7 @@ export async function publishRelayList(readRelays, writeRelays) {
 // Update active relay list based on user preferences
 export function updateActiveRelays() {
     const allUserRelays = new Set([...userRelayList.read, ...userRelayList.write]);
-    
+
     if (allUserRelays.size > 0) {
         // Update the relays in state
         State.setRelays(Array.from(allUserRelays));
@@ -271,6 +271,11 @@ export function updateActiveRelays() {
         // Use default relays
         State.setRelays([...DEFAULT_RELAYS]);
         console.log('Reset to default relays:', State.relays);
+    }
+
+    // Update relay indicator in header
+    if (typeof window.updateRelayIndicator === 'function') {
+        window.updateRelayIndicator(State.relays.length);
     }
 }
 
@@ -423,17 +428,22 @@ export function initializeRelays() {
         State.setPool(pool);
         console.log('✓ Relay pool initialized');
     }
-    
+
     // Load user relay list from localStorage or use defaults
     loadUserRelayList();
-    
+
     // Set default relays if none set
     if (!State.relays || State.relays.length === 0) {
         State.setRelays([...DEFAULT_RELAYS]);
     }
-    
+
     console.log('✓ Relays module initialized');
     console.log('Default relays:', DEFAULT_RELAYS);
     console.log('Current user relay list:', userRelayList);
     console.log('Active relays:', State.relays);
+
+    // Update relay indicator in header
+    if (typeof window.updateRelayIndicator === 'function') {
+        window.updateRelayIndicator(State.relays.length);
+    }
 }

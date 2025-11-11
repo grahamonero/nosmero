@@ -291,6 +291,11 @@ async function checkExistingSession() {
             } catch (error) {
                 console.error('Error updating disclosed tips widget:', error);
             }
+
+            // Update header UI for logged-in state (Login → Create Note button)
+            if (typeof window.updateHeaderUIForAuthState === 'function') {
+                window.updateHeaderUIForAuthState();
+            }
         }
     }
 }
@@ -1691,15 +1696,20 @@ function updateUIForLogin() {
     // Hide auth options and show logout option
     const authOptions = document.getElementById('authOptions');
     const logoutOption = document.getElementById('logoutOption');
-    
+
     if (authOptions) authOptions.style.display = 'none';
     if (logoutOption) logoutOption.style.display = 'block';
-    
+
     // Update the main logout button
     const mainLogoutBtn = document.querySelector('.nav-item[onclick="logout()"] span:last-child');
     if (mainLogoutBtn) {
         mainLogoutBtn.textContent = 'Logout';
         mainLogoutBtn.parentElement.onclick = () => window.logout();
+    }
+
+    // Update new header UI (Login button → Create Note button)
+    if (typeof window.updateHeaderUIForAuthState === 'function') {
+        window.updateHeaderUIForAuthState();
     }
 }
 
@@ -1708,15 +1718,20 @@ function updateUIForLogout() {
     // Show auth options and hide logout option
     const authOptions = document.getElementById('authOptions');
     const logoutOption = document.getElementById('logoutOption');
-    
+
     if (authOptions) authOptions.style.display = 'block';
     if (logoutOption) logoutOption.style.display = 'none';
-    
+
     // Update the main logout button text
     const mainLogoutBtn = document.querySelector('.nav-item[onclick="logout()"] span:last-child');
     if (mainLogoutBtn) {
         mainLogoutBtn.textContent = 'Login';
         mainLogoutBtn.parentElement.onclick = () => window.showAuthUI();
+    }
+
+    // Update new header UI (Create Note button → Login button)
+    if (typeof window.updateHeaderUIForAuthState === 'function') {
+        window.updateHeaderUIForAuthState();
     }
 }
 
@@ -3058,7 +3073,12 @@ function toggleMobileMenu() {
     const sidebar = document.querySelector('.sidebar');
     const overlay = document.querySelector('.mobile-overlay');
     const menuButton = document.querySelector('.mobile-menu-toggle');
-    
+
+    // New UI uses different menu system - ignore if elements don't exist
+    if (!sidebar || !overlay || !menuButton) {
+        return;
+    }
+
     if (sidebar.classList.contains('mobile-open')) {
         closeMobileMenu();
     } else {
@@ -3071,12 +3091,15 @@ function openMobileMenu() {
     const sidebar = document.querySelector('.sidebar');
     const overlay = document.querySelector('.mobile-overlay');
     const menuButton = document.querySelector('.mobile-menu-toggle');
-    
-    sidebar.classList.add('mobile-open');
-    overlay.classList.add('active');
-    menuButton.classList.add('menu-open');
-    menuButton.innerHTML = '✕'; // X symbol
-    
+
+    // Add null checks - new UI doesn't use these elements
+    if (sidebar) sidebar.classList.add('mobile-open');
+    if (overlay) overlay.classList.add('active');
+    if (menuButton) {
+        menuButton.classList.add('menu-open');
+        menuButton.innerHTML = '✕'; // X symbol
+    }
+
     // Prevent body scroll when menu is open
     document.body.style.overflow = 'hidden';
 }
@@ -3086,12 +3109,15 @@ function closeMobileMenu() {
     const sidebar = document.querySelector('.sidebar');
     const overlay = document.querySelector('.mobile-overlay');
     const menuButton = document.querySelector('.mobile-menu-toggle');
-    
-    sidebar.classList.remove('mobile-open');
-    overlay.classList.remove('active');
-    menuButton.classList.remove('menu-open');
-    menuButton.innerHTML = '📚'; // Menu symbol
-    
+
+    // Add null checks - new UI doesn't use these elements
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    if (overlay) overlay.classList.remove('active');
+    if (menuButton) {
+        menuButton.classList.remove('menu-open');
+        menuButton.innerHTML = '📚'; // Menu symbol
+    }
+
     // Restore body scroll
     document.body.style.overflow = '';
 }
