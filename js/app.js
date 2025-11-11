@@ -489,10 +489,7 @@ async function loadHomeFeed() {
     const feed = document.getElementById('feed');
     if (!feed) return;
 
-    // Show skeleton loading screen instead of plain text
-    UI.showSkeletonLoader('feed', 5);
-
-    // loadFeedRealtime() handles its own initialization
+    // loadFeedRealtime() handles its own initialization and skeleton screens
     // Load feed for both logged in users and anonymous users
     // Anonymous users will see posts from default curated authors
 

@@ -1732,6 +1732,9 @@ async function renderHomeFeedResults() {
         return;
     }
 
+    // Clear skeleton screens before rendering
+    UI.hideSkeletonLoader('homeFeedList');
+
     const resultsEl = document.getElementById('homeFeedList');
     if (!resultsEl) {
         console.error('🚫 homeFeedList element not found for rendering');
@@ -3546,15 +3549,15 @@ export function cancelCompose() {
 export async function sendPost() {
     const textarea = document.querySelector('.compose-textarea');
     if (!textarea) {
-        Utils.showNotification('Compose area not found', 'error');
+        UI.showErrorToast('Compose area not found');
         return;
     }
-    
+
     let content = textarea.value.trim();
-    
+
     // Check if we have content or media
     if (!content && !currentMediaFile) {
-        Utils.showNotification('Please enter some text or add media', 'error');
+        UI.showWarningToast('Please enter some text or add media');
         return;
     }
     
@@ -3580,7 +3583,7 @@ export async function sendPost() {
                 showUploadProgress('compose', 'Upload complete!');
             } catch (error) {
                 console.error('Media upload failed:', error);
-                Utils.showNotification(`Media upload failed: ${error.message}`, 'error');
+                UI.showErrorToast(`Media upload failed: ${error.message}`);
                 return;
             }
         }
@@ -3629,15 +3632,15 @@ export async function sendPost() {
         
         // Hide compose area
         hideCompose();
-        
-        // Show success notification
-        Utils.showNotification('Note published successfully!', 'success');
-        
+
+        // Show success toast
+        UI.showSuccessToast('Note published successfully!', 'Posted');
+
         console.log('Post sent!', signedEvent);
-        
+
     } catch (error) {
         console.error('Post sending error:', error);
-        Utils.showNotification(`Failed to send note: ${error.message}`, 'error');
+        UI.showErrorToast(`Failed to send note: ${error.message}`, 'Publishing Error');
     }
 }
 
