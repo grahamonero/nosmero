@@ -489,7 +489,8 @@ async function loadHomeFeed() {
     const feed = document.getElementById('feed');
     if (!feed) return;
 
-    feed.innerHTML = '<div class="loading">Loading feed...</div>';
+    // Show skeleton loading screen instead of plain text
+    UI.showSkeletonLoader('feed', 5);
 
     // loadFeedRealtime() handles its own initialization
     // Load feed for both logged in users and anonymous users
@@ -523,26 +524,37 @@ async function loadUserProfile() {
         feed.innerHTML = `
             <div style="max-width: 800px; margin: 0 auto; padding: 20px;">
                 <div id="profileHeader" style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid #333; border-radius: 16px; padding: 24px; margin-bottom: 24px;">
-                    <div class="loading" style="text-align: center; color: #666;">Loading profile...</div>
+                    <div class="skeleton-loader">
+                        <div style="display: flex; align-items: center; margin-bottom: 16px;">
+                            <div class="skeleton-avatar" style="width: 80px; height: 80px; margin-right: 16px;"></div>
+                            <div style="flex: 1;">
+                                <div class="skeleton-line skeleton-line-medium" style="margin-bottom: 8px;"></div>
+                                <div class="skeleton-line skeleton-line-short"></div>
+                            </div>
+                        </div>
+                        <div class="skeleton-line skeleton-line-long" style="margin-bottom: 8px;"></div>
+                        <div class="skeleton-line skeleton-line-medium"></div>
+                    </div>
                 </div>
-                
+
                 <div style="display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap;">
-                    <button id="profileTabPosts" class="profile-tab active" onclick="switchProfileTab('posts')" 
+                    <button id="profileTabPosts" class="profile-tab active" onclick="switchProfileTab('posts')"
                             style="padding: 10px 20px; border-radius: 20px; border: 1px solid #333; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; cursor: pointer; font-weight: bold;">
                         Posts
                     </button>
-                    <button id="profileTabAbout" class="profile-tab" onclick="switchProfileTab('about')" 
+                    <button id="profileTabAbout" class="profile-tab" onclick="switchProfileTab('about')"
                             style="padding: 10px 20px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer;">
                         About
                     </button>
                 </div>
-                
-                <div id="profileContent">
-                    <div class="loading" style="text-align: center; color: #666; padding: 40px;">Loading posts...</div>
-                </div>
+
+                <div id="profileContent"></div>
             </div>
         `;
-        
+
+        // Show skeleton posts in profile content
+        UI.showSkeletonLoader('profileContent', 3);
+
         await loadUserProfileData();
     }
 }
