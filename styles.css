@@ -5,13 +5,34 @@
             box-sizing: border-box;
         }
 
+        /* CSS Variables - New Design System */
+        :root {
+            --monero-orange: #FF6600;
+            --bitcoin-orange: #F7931A;
+            --dark-bg: #0a0a0a;
+            --darker-bg: #050505;
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --card-hover: rgba(255, 255, 255, 0.05);
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0a0;
+            --text-muted: #606060;
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.15);
+            --success: #10B981;
+            --danger: #EF4444;
+            --purple: #9B59B6;
+            --warning: #F59E0B;
+            --info: #3B82F6;
+        }
+
         /* Main body styling - Dark theme with flexible layout */
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #000;
-            color: #fff;
-            display: flex;
-            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--dark-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+            height: 100vh;
+            overflow: hidden;
         }
 
         /* Left navigation sidebar - Fixed position with scrolling */
@@ -82,12 +103,396 @@
             transform: scale(1.02);
         }
 
-        /* Main content area - Offset by sidebar width */
-        .main {
-            margin-left: 260px; /* Same as sidebar width */
+        /* ==================================
+           NEW MINIMAL HEADER & NAVIGATION
+           ================================== */
+
+        /* Minimal Fixed Header - Single Row Layout */
+        .minimal-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(10, 10, 10, 0.95);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 100;
+        }
+
+        /* Single Row: All elements in one horizontal line */
+        .header-single-row {
+            height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1.5rem;
+            gap: 1.5rem;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .header-logo {
+            height: auto;
+            max-height: 50px; /* Smaller for single row */
+            width: auto;
+            object-fit: contain;
+            display: block;
+        }
+
+        .tagline {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        /* Hamburger Menu Button */
+        .mobile-menu-btn {
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0.5rem;
+            min-width: 44px;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Feed Selector Tabs */
+        .feed-selector {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
             flex: 1;
-            border-right: 1px solid #333;
-            max-width: 800px; /* Increased width for better space usage */
+            justify-content: flex-start;
+        }
+
+        .feed-tab {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.9rem;
+            padding: 0.5rem 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .feed-tab.active {
+            color: #fff;
+            background: linear-gradient(135deg, var(--monero-orange), var(--purple));
+            border-color: transparent;
+        }
+
+        .feed-tab:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--monero-orange);
+        }
+
+        .feed-tab.active:hover {
+            color: #fff;
+            background: linear-gradient(135deg, var(--monero-orange), var(--purple));
+            transform: scale(1.02);
+        }
+
+        /* Quick Actions */
+        .quick-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .relay-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .login-btn {
+            background: transparent;
+            color: var(--text-primary);
+            padding: 0.6rem 1.2rem;
+            border-radius: 50px;
+            border: 1px solid var(--border-color);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 44px;
+        }
+
+        .login-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--monero-orange);
+        }
+
+        /* Orange Login Button in Feed Navigation */
+        .login-btn-orange {
+            background: linear-gradient(135deg, var(--monero-orange), var(--purple));
+            color: white;
+            padding: 0.6rem 1.2rem;
+            border-radius: 50px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .login-btn-orange:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
+        }
+
+        /* Create Note Button in Header */
+        .create-note-btn {
+            background: linear-gradient(135deg, var(--monero-orange), var(--purple));
+            color: white;
+            padding: 0.6rem 1.2rem;
+            border-radius: 50px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .create-note-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
+        }
+
+        /* Slide-out Hamburger Menu */
+        .slide-menu {
+            position: fixed;
+            top: 0;
+            left: -280px;
+            width: 280px;
+            height: 100vh;
+            background: var(--darker-bg);
+            border-right: 1px solid var(--border-color);
+            transition: left 0.3s ease;
+            z-index: 200;
+            overflow-y: auto;
+        }
+
+        .slide-menu.active {
+            left: 0;
+        }
+
+        .menu-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 199;
+            display: none;
+        }
+
+        .menu-overlay.active {
+            display: block;
+        }
+
+        .menu-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .menu-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.5rem;
+            cursor: pointer;
+            min-width: 44px;
+            min-height: 44px;
+        }
+
+        .menu-nav {
+            padding: 1rem;
+        }
+
+        .menu-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.875rem 1rem;
+            margin-bottom: 0.25rem;
+            border-radius: 12px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: all 0.2s;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .menu-item:hover {
+            background: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        .menu-item.active {
+            background: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        .menu-icon {
+            font-size: 1.25rem;
+            width: 24px;
+            text-align: center;
+        }
+
+        /* Welcome Banner for First-Time Users */
+        .welcome-banner {
+            background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(155, 89, 182, 0.1));
+            border: 1px solid rgba(255, 102, 0, 0.2);
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        .welcome-banner.hidden {
+            display: none;
+        }
+
+        .close-banner {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1.2rem;
+            min-width: 44px;
+            min-height: 44px;
+        }
+
+        .welcome-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .welcome-text {
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+
+        .welcome-actions {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .welcome-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+        }
+
+        .welcome-btn.primary {
+            background: var(--monero-orange);
+            color: white;
+            border: none;
+        }
+
+        .welcome-btn.secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        /* ==================================
+           END NEW HEADER & NAVIGATION
+           ================================== */
+
+        /* Main content area - Left-aligned feed-first layout */
+        .main {
+            margin-top: 71px; /* Offset for single-row header (70px + 1px border) */
+            width: 100%;
+            max-width: 1200px; /* Wide column for better content display */
+            margin-left: 2rem; /* Left alignment with breathing room */
+            margin-right: 0;
+            padding: 1.5rem;
+            height: calc(100vh - 71px);
+            overflow-y: auto;
+        }
+
+        /* Custom Dark Scrollbar for Feed */
+        .main::-webkit-scrollbar {
+            width: 12px;
+        }
+
+        .main::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+        }
+
+        .main::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, var(--monero-orange), var(--purple));
+            border-radius: 10px;
+            border: 2px solid rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .main::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, #FF8533, #A66BCF);
+            box-shadow: 0 0 10px rgba(255, 102, 0, 0.5);
+        }
+
+        /* Firefox scrollbar styling */
+        .main {
+            scrollbar-width: thin;
+            scrollbar-color: var(--monero-orange) rgba(0, 0, 0, 0.3);
         }
 
         /* Sticky header with blur effect for feed sections */
@@ -138,17 +543,22 @@
             min-height: calc(100vh - 80px);
         }
 
-        /* Individual post/note container */
+        /* Individual post/note container - Glassmorphism cards */
         .post {
-            border-bottom: 1px solid #333;
-            padding: 16px 20px;
-            transition: background 0.2s;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            transition: all 0.2s;
             max-width: 100%;
             overflow: hidden;
         }
 
         .post:hover {
-            background: rgba(255, 255, 255, 0.02);
+            background: var(--card-hover);
+            border-color: var(--border-hover);
+            transform: translateY(-2px);
         }
 
         .post-header {
@@ -375,6 +785,79 @@
             background: linear-gradient(135deg, #FF6600, #8B5CF6);
             color: #000;
         }
+
+        /* ==================================
+           DUAL ZAP BUTTONS (XMR + Lightning)
+           ================================== */
+
+        /* Container for dual zap buttons */
+        .zap-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin: 1rem 0;
+        }
+
+        .zap-btn {
+            flex: 1;
+            padding: 0.75rem;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+            position: relative;
+            min-height: 44px;
+        }
+
+        .monero-zap {
+            border-color: rgba(255, 102, 0, 0.3);
+            background: rgba(255, 102, 0, 0.05);
+            color: var(--monero-orange);
+        }
+
+        .monero-zap:hover {
+            border-color: var(--monero-orange);
+            background: rgba(255, 102, 0, 0.1);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 102, 0, 0.2);
+        }
+
+        .lightning-zap {
+            border-color: rgba(247, 147, 26, 0.3);
+            background: rgba(247, 147, 26, 0.05);
+            color: var(--bitcoin-orange);
+        }
+
+        .lightning-zap:hover {
+            border-color: var(--bitcoin-orange);
+            background: rgba(247, 147, 26, 0.1);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(247, 147, 26, 0.2);
+        }
+
+        .zap-count {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: var(--success);
+            color: white;
+            padding: 0.15rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: bold;
+            min-width: 20px;
+            text-align: center;
+        }
+
+        /* ==================================
+           END DUAL ZAP BUTTONS
+           ================================== */
 
         /* Modal overlay for login, XMR QR codes, etc. */
         .modal {
@@ -1188,11 +1671,29 @@
         }
         
         @media (max-width: 768px) {
+            /* NEW RESPONSIVE RULES FOR FEED-FIRST DESIGN */
+            .feed-selector {
+                display: none; /* Hide feed tabs on mobile */
+            }
+
+            .relay-indicator {
+                display: none; /* Hide relay indicator on mobile */
+            }
+
+            .main {
+                padding: 1rem; /* Reduce padding on mobile */
+            }
+
+            .logo img {
+                width: 80px !important; /* Smaller logo on mobile */
+                font-size: 0.7rem;
+            }
+
             /* Show mobile menu toggle */
             .mobile-menu-toggle {
                 display: block;
             }
-            
+
             /* Transform sidebar for mobile */
             .sidebar {
                 position: fixed;

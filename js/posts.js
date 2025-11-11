@@ -1439,6 +1439,470 @@ export async function fetchUserMuteList(pubkey) {
 
 // ==================== END MUTE LIST MANAGEMENT ====================
 
+// ==================== WEB OF TRUST FEED ====================
+
+// Track Web of Trust feed state
+let webOfTrustOffset = 0;
+let webOfTrustPosts = [];
+
+// Get Web of Trust users (follow Ys from follow Xs)
+// Algorithm:
+// 1. Take 10 "follow Xs" from user's following list (with offset)
+// 2. For each follow X, get 2 "follow Ys" from their following list
+// 3. Return all follow Ys (up to 20 users)
+async function getWebOfTrustUsers(offset = 0) {
+    console.log(`🕸️ Starting Web of Trust user discovery (offset: ${offset})...`);
+
+    if (!State.publicKey || State.followingUsers.size === 0) {
+        console.log('❌ No following list available for Web of Trust');
+        return { followYs: new Set(), hasMore: false };
+    }
+
+    const allYourFollows = Array.from(State.followingUsers);
+
+    if (allYourFollows.length === 0) {
+        console.log('❌ No follows available');
+        return { followYs: new Set(), hasMore: false };
+    }
+
+    // Step 1: Get 10 "follow Xs" starting at offset, cycling through the list
+    // Use modulo to wrap around when we reach the end
+    const actualOffset = offset % allYourFollows.length;
+    const followXs = [];
+
+    for (let i = 0; i < 10; i++) {
+        const index = (actualOffset + i) % allYourFollows.length;
+        followXs.push(allYourFollows[index]);
+    }
+
+    console.log(`📊 Follow X calculation (cycling mode):`);
+    console.log(`  Total follows: ${allYourFollows.length}`);
+    console.log(`  Requested offset: ${offset}`);
+    console.log(`  Actual offset (wrapped): ${actualOffset}`);
+    console.log(`  Follow Xs indices: [${actualOffset} to ${(actualOffset + 9) % allYourFollows.length}]`);
+    console.log(`  Follow Xs count: ${followXs.length}`);
+    console.log(`  Has more: true (infinite cycling)`);
+
+    console.log(`📋 Using ${followXs.length} follow Xs (cycling through ${allYourFollows.length} total follows)...`);
+
+    const readRelays = Relays.getUserDataRelays();
+    const followXtoYsMap = new Map(); // Map each follow X to their follow Ys
+
+    try {
+        // Step 2: Fetch contact lists for all follow Xs
+        await new Promise((resolve) => {
+            const sub = State.pool.subscribeMany(readRelays, [
+                { kinds: [3], authors: followXs, limit: followXs.length }
+            ], {
+                onevent(event) {
+                    const followXPubkey = event.pubkey;
+                    const theirFollows = [];
+
+                    // Parse contact list and extract p tags
+                    event.tags.forEach(tag => {
+                        if (tag[0] === 'p' && tag[1]) {
+                            const pubkey = tag[1];
+                            // Exclude yourself and users you already follow
+                            if (pubkey !== State.publicKey && !State.followingUsers.has(pubkey)) {
+                                theirFollows.push(pubkey);
+                            }
+                        }
+                    });
+
+                    // Store this follow X's follows
+                    followXtoYsMap.set(followXPubkey, theirFollows);
+                },
+                oneose() {
+                    if (sub) sub.close();
+                }
+            });
+
+            // Timeout after 5 seconds
+            setTimeout(() => {
+                if (sub) sub.close();
+                resolve();
+            }, 5000);
+        });
+
+        // Step 3: Pick 2 follow Ys from each follow X
+        const followYs = new Set();
+        followXtoYsMap.forEach((theirFollows, followXPubkey) => {
+            // Take first 2 from their following list
+            const selectedYs = theirFollows.slice(0, 2);
+            selectedYs.forEach(y => followYs.add(y));
+            console.log(`  Follow X ${followXPubkey.slice(0, 8)}: selected ${selectedYs.length} follow Ys`);
+        });
+
+        console.log(`✅ Collected ${followYs.size} follow Ys from ${followXtoYsMap.size} follow Xs`);
+
+        // Always return hasMore: true for infinite cycling
+        return { followYs, hasMore: true };
+
+    } catch (error) {
+        console.error('Error fetching Web of Trust users:', error);
+        return { followYs: new Set(), hasMore: false };
+    }
+}
+
+// Load Web of Trust feed (posts from follow Ys, past 24 hours)
+export async function loadWebOfTrustFeed() {
+    console.log('🕸️ Loading Web of Trust feed...');
+
+    const feed = document.getElementById('feed');
+    if (!feed) return;
+
+    // Reset state for fresh load with random starting point
+    // This ensures each load shows different posts from different follow Xs
+    if (State.followingUsers && State.followingUsers.size > 0) {
+        const totalFollows = State.followingUsers.size;
+        // Start from random offset (multiples of 10 for consistency)
+        webOfTrustOffset = Math.floor(Math.random() * Math.ceil(totalFollows / 10)) * 10;
+        console.log(`🎲 Starting from random offset: ${webOfTrustOffset} (out of ${totalFollows} follows)`);
+    } else {
+        webOfTrustOffset = 0;
+    }
+    webOfTrustPosts = [];
+
+    // Show loading state
+    feed.innerHTML = `
+        <div style="padding: 20px; text-align: center; color: #999;">
+            <div class="spinner" style="width: 40px; height: 40px; border: 3px solid rgba(255, 255, 255, 0.1); border-top-color: #FF6600; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
+            <p>Discovering your Web of Trust network...</p>
+        </div>
+    `;
+
+    try {
+        // Check if user is logged in
+        if (!State.publicKey) {
+            feed.innerHTML = `
+                <div style="text-align: center; color: #666; padding: 40px;">
+                    <p>Please log in to see your Web of Trust feed.</p>
+                    <p style="font-size: 14px; margin-top: 10px;">
+                        Your Web of Trust shows posts from users followed by people you follow.
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        // Get follow Ys from first batch of follow Xs
+        const { followYs, hasMore } = await getWebOfTrustUsers(webOfTrustOffset);
+
+        if (followYs.size === 0) {
+            feed.innerHTML = `
+                <div style="text-align: center; color: #666; padding: 40px;">
+                    <p>No Web of Trust users found.</p>
+                    <p style="font-size: 14px; margin-top: 10px;">
+                        Follow more users to expand your Web of Trust network!
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        // Update loading message
+        feed.innerHTML = `
+            <div style="padding: 20px; text-align: center; color: #999;">
+                <div class="spinner" style="width: 40px; height: 40px; border: 3px solid rgba(255, 255, 255, 0.1); border-top-color: #FF6600; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
+                <p>Loading posts from ${followYs.size} Web of Trust users...</p>
+            </div>
+        `;
+
+        // Calculate timestamp for 24 hours ago
+        const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
+
+        const followYsArray = Array.from(followYs);
+        const readRelays = Relays.getUserDataRelays();
+
+        console.log(`📡 Fetching posts from ${followYsArray.length} follow Ys (1-2 per user, past 24 hours)...`);
+
+        // Fetch 1-2 posts per follow Y for better intermingling
+        const postsPerAuthor = {};
+
+        await new Promise((resolve) => {
+            const sub = State.pool.subscribeMany(readRelays, [
+                {
+                    kinds: [1], // Text notes only
+                    authors: followYsArray,
+                    since: oneDayAgo, // Only posts from past 24 hours
+                    limit: followYsArray.length * 2 // Get up to 2 posts per user
+                }
+            ], {
+                onevent(event) {
+                    // Limit to 2 posts per author for diversity
+                    if (!postsPerAuthor[event.pubkey]) {
+                        postsPerAuthor[event.pubkey] = [];
+                    }
+
+                    if (postsPerAuthor[event.pubkey].length < 2) {
+                        // Avoid duplicates
+                        if (!webOfTrustPosts.find(p => p.id === event.id)) {
+                            webOfTrustPosts.push(event);
+                            postsPerAuthor[event.pubkey].push(event);
+                        }
+                    }
+                },
+                oneose() {
+                    if (sub) sub.close();
+                }
+            });
+
+            // Timeout after 6 seconds
+            setTimeout(() => {
+                if (sub) sub.close();
+                resolve();
+            }, 6000);
+        });
+
+        console.log(`✅ Found ${webOfTrustPosts.length} Web of Trust posts from ${Object.keys(postsPerAuthor).length} users`);
+
+        // Sort by timestamp (newest first)
+        webOfTrustPosts.sort((a, b) => b.created_at - a.created_at);
+
+        // Take first 10 posts
+        const postsToDisplay = webOfTrustPosts.slice(0, 10);
+
+        console.log(`📊 Posts by author:`);
+        Object.entries(postsPerAuthor).forEach(([pubkey, posts]) => {
+            console.log(`  ${pubkey.slice(0, 8)}: ${posts.length} posts`);
+        });
+
+        // Render posts
+        if (postsToDisplay.length === 0) {
+            feed.innerHTML = `
+                <div style="text-align: center; color: #666; padding: 40px;">
+                    <p>No recent posts from your Web of Trust.</p>
+                    <p style="font-size: 14px; margin-top: 10px;">
+                        Check back later for new content from your extended network!
+                    </p>
+                </div>
+            `;
+        } else {
+            // Fetch profiles for post authors
+            await fetchProfiles(followYsArray);
+
+            // Fetch parent posts for replies
+            const parentPostsMap = await fetchParentPosts(postsToDisplay);
+            console.log(`✅ Fetched ${Object.keys(parentPostsMap).length} parent posts for replies`);
+
+            // Render posts using existing renderSinglePost function with parent context
+            const renderedPosts = await Promise.all(
+                postsToDisplay.map(async (post) => {
+                    try {
+                        return await renderSinglePost(post, 'feed', null, parentPostsMap);
+                    } catch (error) {
+                        console.error('Error rendering Web of Trust post:', error);
+                        return '';
+                    }
+                })
+            );
+
+            // Update offset for next load
+            webOfTrustOffset += 10;
+
+            console.log(`📍 Offset updated to ${webOfTrustOffset}, cycling continues indefinitely`);
+
+            // Always show Load More button (infinite cycling)
+            const loadMoreButton = `
+                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                    <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                        Load More Posts
+                    </button>
+                </div>
+            `;
+
+            feed.innerHTML = `
+                <div style="padding: 16px 20px; border-bottom: 1px solid #333; background: rgba(255, 255, 255, 0.02);">
+                    <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Web of Trust Feed</h3>
+                    <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
+                        Posts from users followed by people you follow (past 24 hours)
+                    </p>
+                </div>
+                <div id="homeFeedList">
+                    ${renderedPosts.filter(p => p).join('')}
+                </div>
+                ${loadMoreButton}
+            `;
+        }
+
+    } catch (error) {
+        console.error('Error loading Web of Trust feed:', error);
+        feed.innerHTML = `
+            <div style="text-align: center; color: #ff6666; padding: 40px;">
+                <p>Failed to load Web of Trust feed.</p>
+                <p style="font-size: 14px; margin-top: 10px;">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+// Load more Web of Trust posts (next batch of follow Xs)
+export async function loadMoreWebOfTrustPosts() {
+    console.log('🕸️ Loading more Web of Trust posts...');
+
+    try {
+        // Remove existing Load More button
+        const loadMoreContainer = document.getElementById('webOfTrustLoadMoreContainer');
+        if (loadMoreContainer) {
+            loadMoreContainer.innerHTML = `
+                <div style="padding: 20px; text-align: center; color: #999;">
+                    <div class="spinner" style="width: 30px; height: 30px; border: 2px solid rgba(255, 255, 255, 0.1); border-top-color: #FF6600; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto;"></div>
+                </div>
+            `;
+        }
+
+        // Get next batch of follow Ys from next batch of follow Xs
+        console.log(`🔄 Load More triggered - current offset: ${webOfTrustOffset}`);
+        const { followYs, hasMore } = await getWebOfTrustUsers(webOfTrustOffset);
+
+        console.log(`📋 Load More result - followYs: ${followYs.size}, cycling continues`);
+
+        if (followYs.size === 0) {
+            console.log('⚠️ No follow Ys found in this batch');
+            if (loadMoreContainer) {
+                loadMoreContainer.innerHTML = `
+                    <p style="color: #666; text-align: center; padding: 20px;">No users found in this batch. <a href="#" onclick="loadMoreWebOfTrustPosts(); return false;" style="color: #FF6600;">Try loading more</a></p>
+                `;
+            }
+            return;
+        }
+
+        // Calculate timestamp for 24 hours ago
+        const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
+
+        const followYsArray = Array.from(followYs);
+        const readRelays = Relays.getUserDataRelays();
+        const newPosts = [];
+        const newPostsPerAuthor = {};
+
+        console.log(`📡 Fetching posts from ${followYsArray.length} new follow Ys (1-2 per user)...`);
+
+        await new Promise((resolve) => {
+            const sub = State.pool.subscribeMany(readRelays, [
+                {
+                    kinds: [1],
+                    authors: followYsArray,
+                    since: oneDayAgo,
+                    limit: followYsArray.length * 2 // Up to 2 posts per user
+                }
+            ], {
+                onevent(event) {
+                    // Limit to 2 posts per author for diversity
+                    if (!newPostsPerAuthor[event.pubkey]) {
+                        newPostsPerAuthor[event.pubkey] = [];
+                    }
+
+                    if (newPostsPerAuthor[event.pubkey].length < 2) {
+                        // Avoid duplicates
+                        if (!webOfTrustPosts.find(p => p.id === event.id) && !newPosts.find(p => p.id === event.id)) {
+                            newPosts.push(event);
+                            newPostsPerAuthor[event.pubkey].push(event);
+                        }
+                    }
+                },
+                oneose() {
+                    if (sub) sub.close();
+                }
+            });
+
+            setTimeout(() => {
+                if (sub) sub.close();
+                resolve();
+            }, 6000);
+        });
+
+        console.log(`✅ Found ${newPosts.length} new Web of Trust posts from ${Object.keys(newPostsPerAuthor).length} users`);
+
+        // Add to global posts array
+        webOfTrustPosts.push(...newPosts);
+
+        // Sort and take first 10 new posts
+        newPosts.sort((a, b) => b.created_at - a.created_at);
+        const postsToDisplay = newPosts.slice(0, 10);
+
+        console.log(`📊 New posts by author:`);
+        Object.entries(newPostsPerAuthor).forEach(([pubkey, posts]) => {
+            console.log(`  ${pubkey.slice(0, 8)}: ${posts.length} posts`);
+        });
+
+        if (postsToDisplay.length > 0) {
+            // Fetch profiles for new authors
+            await fetchProfiles(followYsArray);
+
+            // Fetch parent posts for replies
+            const parentPostsMap = await fetchParentPosts(postsToDisplay);
+            console.log(`✅ Fetched ${Object.keys(parentPostsMap).length} parent posts for new replies`);
+
+            // Render new posts with parent context
+            const renderedPosts = await Promise.all(
+                postsToDisplay.map(async (post) => {
+                    try {
+                        return await renderSinglePost(post, 'feed', null, parentPostsMap);
+                    } catch (error) {
+                        console.error('Error rendering Web of Trust post:', error);
+                        return '';
+                    }
+                })
+            );
+
+            // Update offset for next load
+            webOfTrustOffset += 10;
+
+            console.log(`📍 Offset updated to ${webOfTrustOffset}, cycling continues indefinitely`);
+
+            // Always show Load More button (infinite cycling)
+            const newLoadMoreButton = `
+                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                    <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                        Load More Posts
+                    </button>
+                </div>
+            `;
+
+            // Append new posts
+            const homeFeedList = document.getElementById('homeFeedList');
+            if (homeFeedList && loadMoreContainer) {
+                homeFeedList.insertAdjacentHTML('beforeend', renderedPosts.filter(p => p).join(''));
+                loadMoreContainer.outerHTML = newLoadMoreButton;
+            }
+        } else {
+            // No posts in this batch, keep the Load More button for next cycle
+            webOfTrustOffset += 10;
+            console.log(`⚠️ No posts in this batch, continuing to next batch (offset: ${webOfTrustOffset})`);
+
+            if (loadMoreContainer) {
+                loadMoreContainer.innerHTML = `
+                    <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                        <p style="color: #666; margin-bottom: 12px;">No posts in this batch</p>
+                        <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                            Load More Posts
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+    } catch (error) {
+        console.error('Error loading more Web of Trust posts:', error);
+        const loadMoreContainer = document.getElementById('webOfTrustLoadMoreContainer');
+        if (loadMoreContainer) {
+            loadMoreContainer.innerHTML = `
+                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                    <p style="color: #ff6666; margin-bottom: 12px;">Error loading posts. Please try again.</p>
+                    <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                        Retry
+                    </button>
+                </div>
+            `;
+        }
+    }
+}
+
+// Make loadMoreWebOfTrustPosts globally accessible
+window.loadMoreWebOfTrustPosts = loadMoreWebOfTrustPosts;
+
+// ==================== END WEB OF TRUST FEED ====================
+
 // Real-time relay post streaming (no cache involved)
 async function prepareProfiles() {
     const followingArray = Array.from(currentFollowingList);

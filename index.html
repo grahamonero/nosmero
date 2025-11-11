@@ -9,15 +9,119 @@
 
 </head>
 <body>
-    <!-- Mobile menu toggle button -->
-    <button class="mobile-menu-toggle" onclick="toggleMobileMenu()" aria-label="Toggle menu">
-        📚
-    </button>
-    
-    <!-- Mobile overlay -->
-    <div class="mobile-overlay" onclick="closeMobileMenu()"></div>
-    
-    <div class="sidebar">
+    <!-- ==================================
+         NEW MINIMAL HEADER & HAMBURGER MENU
+         ================================== -->
+
+    <!-- Menu Overlay for Slide-out Menu -->
+    <div class="menu-overlay" id="menuOverlay" onclick="closeHamburgerMenu()"></div>
+
+    <!-- Slide-out Hamburger Menu -->
+    <nav class="slide-menu" id="slideMenu">
+        <div class="menu-header">
+            <span style="font-weight: 600; color: var(--text-primary);">Menu</span>
+            <button class="menu-close" onclick="closeHamburgerMenu()">✕</button>
+        </div>
+        <div class="menu-nav">
+            <div class="menu-item" data-tab="home" onclick="handleMenuItemClick('home')">
+                <span class="menu-icon">🏠</span>
+                <span>Home</span>
+            </div>
+            <div class="menu-item" data-tab="search" onclick="handleMenuItemClick('search')">
+                <span class="menu-icon">🔍</span>
+                <span>Search</span>
+            </div>
+            <div class="menu-item" data-tab="notifications" onclick="handleMenuItemClick('notifications')">
+                <span class="menu-icon">🔔</span>
+                <span>Notifications</span>
+            </div>
+            <div class="menu-item" data-tab="messages" onclick="handleMenuItemClick('messages')">
+                <span class="menu-icon">💬</span>
+                <span>Messages</span>
+            </div>
+            <div class="menu-item" data-tab="profile" onclick="handleMenuItemClick('profile')">
+                <span class="menu-icon">👤</span>
+                <span>Profile</span>
+            </div>
+            <div class="menu-item" data-tab="settings" onclick="handleMenuItemClick('settings')">
+                <span class="menu-icon">⚙️</span>
+                <span>Settings</span>
+            </div>
+            <div class="menu-item" onclick="toggleTheme()">
+                <span class="menu-icon" id="themeIconMenu">🌙</span>
+                <span id="themeLabelMenu">Dark Mode</span>
+            </div>
+            <div class="menu-item" onclick="toggleCompose()" id="menuCreateNoteBtn" style="display: none;">
+                <span class="menu-icon">✏️</span>
+                <span>Create Note</span>
+            </div>
+            <!-- Login Options (shown when anonymous) -->
+            <div id="menuLoginOptions" style="display: none; margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                <div class="menu-item" onclick="showCreateAccount(); closeHamburgerMenu();">
+                    <span class="menu-icon">🆕</span>
+                    <span>Create Account</span>
+                </div>
+                <div class="menu-item" onclick="showLoginWithNsec(); closeHamburgerMenu();">
+                    <span class="menu-icon">🔑</span>
+                    <span>Login with nsec</span>
+                </div>
+                <div class="menu-item" onclick="loginWithExtension(); closeHamburgerMenu();">
+                    <span class="menu-icon">🔌</span>
+                    <span>Use Extension</span>
+                </div>
+                <div class="menu-item" onclick="showLoginWithNsecApp(); closeHamburgerMenu();">
+                    <span class="menu-icon">🌐</span>
+                    <span>Use nsec.app</span>
+                </div>
+                <div class="menu-item" onclick="showLoginWithAmber(); closeHamburgerMenu();">
+                    <span class="menu-icon">📱</span>
+                    <span>Use Amber</span>
+                </div>
+            </div>
+            <div class="menu-item" onclick="logout()" id="menuLogoutBtn" style="display: none; margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                <span class="menu-icon">🚪</span>
+                <span style="color: #ff6b6b;">Logout</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Minimal Fixed Header - Single Row Layout -->
+    <header class="minimal-header">
+        <div class="header-single-row">
+            <button class="mobile-menu-btn" onclick="openHamburgerMenu()" aria-label="Open menu">☰</button>
+            <div class="logo-container">
+                <img src="/nosmero-logo-new.png" alt="nosmero" class="header-logo">
+                <span class="tagline">nostr + monero</span>
+            </div>
+
+            <nav class="feed-selector">
+                <a href="#" class="feed-tab active" data-feed="following" onclick="handleFeedTabClick('following', event)">Following</a>
+                <a href="#" class="feed-tab" data-feed="tipactivity" onclick="handleFeedTabClick('tipactivity', event)">Monero Tip Activity</a>
+                <a href="#" class="feed-tab" data-feed="global" onclick="handleFeedTabClick('global', event)">Web of Trust Feed</a>
+                <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero Notes</a>
+                <button class="create-note-btn" id="headerCreateNoteBtn" onclick="handleCreateNoteClick()" style="display: none;">
+                    ✏️ <span>Post</span>
+                </button>
+                <button class="login-btn-orange" id="headerLoginBtn" onclick="showLoginOptions()">
+                    Login
+                </button>
+            </nav>
+
+            <div class="quick-actions">
+                <div class="relay-indicator" id="relayIndicator">
+                    <div class="status-dot"></div>
+                    <span id="relayCount">0 relays connected</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ==================================
+         END NEW HEADER & MENU
+         ================================== -->
+
+    <!-- LEGACY: Keep existing sidebar hidden for backward compatibility -->
+    <div class="sidebar" style="display: none;">
         <div class="logo">
             <img src="/nosmero-logo-new.png" alt="nosmero" style="width: 120px; height: auto;">
         </div>
@@ -100,14 +204,6 @@
     </div>
 
     <div class="main">
-        <div class="header">
-            <div class="tab-bar">
-                <button class="tab active" data-feed="home">Home</button>
-                <button class="tab" data-feed="tipactivity">Tip Activity</button>
-                <button class="tab" data-feed="trending">Trending Monero Notes</button>
-            </div>
-        </div>
-
         <!-- Contact List Sync Status Indicator -->
         <div id="contactSyncStatus" class="sync-status-banner" style="display: none; background: linear-gradient(135deg, #FF6600, #8B5CF6); padding: 10px 16px; margin: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13px; align-items: center; gap: 10px;">
             <div class="spinner" style="width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
@@ -136,6 +232,20 @@
         </div>
 
         <div class="feed" id="feed">
+            <!-- Welcome Banner for First-Time Anonymous Users -->
+            <div class="welcome-banner hidden" id="welcomeBanner">
+                <button class="close-banner" onclick="closeWelcomeBanner()">✕</button>
+                <h2 class="welcome-title">Welcome to Nosmero 👋</h2>
+                <p class="welcome-text">
+                    You are viewing the top notes regarding the Monero community. To post or send tips, just generate your keys - takes 5 seconds, no email needed.
+                </p>
+                <div class="welcome-actions">
+                    <button class="welcome-btn primary" onclick="handleCreateKeysAndPost()">Create Keys & Post</button>
+                    <a href="#" class="welcome-btn secondary" onclick="showWhatIsNostr()">What's Nostr?</a>
+                    <a href="#" class="welcome-btn secondary" onclick="showWhatIsMonero()">What's Monero?</a>
+                </div>
+            </div>
+
             <div class="loading">Loading nostr-tools...</div>
         </div>
         
@@ -742,6 +852,9 @@
 
     <!-- Load nostr-tools from local copy -->
     <script src="/lib/nostr-tools.bundle.js"></script>
+
+    <!-- UI Redesign JS - New minimal header, hamburger menu, feed tabs -->
+    <script src="/js/ui-redesign.js?v=3.0.0"></script>
 
     <!-- Load the modular v2 application -->
     <script type="module" src="/js/app.js?v=2.9.14"></script>
