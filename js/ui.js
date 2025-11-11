@@ -1466,11 +1466,11 @@ export async function openThreadView(eventId) {
         // Fetch additional replies from relays
         const Relays = await import('./relays.js');
         const pool = StateModule.pool;
-        const relays = Relays.getActiveRelays();
+        const activeRelays = Relays.getActiveRelays();
 
-        if (pool && relays.length) {
+        if (pool && activeRelays.length) {
             await new Promise((resolve) => {
-                const sub = pool.subscribeMany(relays, [
+                const sub = pool.subscribeMany(activeRelays, [
                     {
                         kinds: [1], // Text notes
                         '#e': [eventId], // Replies to this specific event
@@ -1501,7 +1501,7 @@ export async function openThreadView(eventId) {
             // Also fetch replies to the parent if this is a reply
             if (parentId) {
                 await new Promise((resolve) => {
-                    const sub = pool.subscribeMany(relays, [
+                    const sub = pool.subscribeMany(activeRelays, [
                         {
                             kinds: [1], // Text notes
                             '#e': [parentId], // Replies to the parent
@@ -1555,25 +1555,53 @@ export async function openThreadView(eventId) {
             );
         }
 
-        // Fetch disclosed tips for all thread posts (pass full post objects for author moderation)
+        // Fetch disclosed tips and engagement counts for all thread posts
+        let disclosedTipsData = {};
+        let engagementData = {};
         if (threadPosts.length > 0) {
-            const disclosedTipsData = await Posts.fetchDisclosedTips(threadPosts);
-            console.log('💰 Fetched disclosed tips for thread:', disclosedTipsData);
+            [disclosedTipsData, engagementData] = await Promise.all([
+                Posts.fetchDisclosedTips(threadPosts),
+                Posts.fetchEngagementCounts(threadPosts.map(p => p.id), activeRelays)
+            ]);
+
             // Update the cache so renderSinglePost can access it
             Object.assign(Posts.disclosedTipsCache, disclosedTipsData);
         }
 
         // Build thread tree structure
         const threadTree = buildThreadTree(threadPosts, eventId);
-        
+
+        // Compute reply counts from the actual thread tree structure
+        // This ensures counts match what's displayed and uses the same parent logic
+        function computeReplyCountsFromTree(threadTree, engagementData) {
+            function countReplies(node) {
+                const directReplyCount = node.replies.length;
+
+                // Initialize if doesn't exist
+                if (!engagementData[node.post.id]) {
+                    engagementData[node.post.id] = { reactions: 0, reposts: 0, replies: 0, zaps: 0 };
+                }
+
+                // Set reply count based on actual children in tree
+                engagementData[node.post.id].replies = directReplyCount;
+
+                // Recursively process child nodes
+                node.replies.forEach(reply => countReplies(reply));
+            }
+
+            threadTree.forEach(rootNode => countReplies(rootNode));
+        }
+
+        computeReplyCountsFromTree(threadTree, engagementData);
+
         // Render thread with proper nesting
         let threadHtml = '';
         async function renderThreadNode(node, depth = 0) {
             const isMainPost = node.post.id === eventId;
             const indent = Math.min(depth * 20, 100); // Max indent of 100px
-            
+
             let html = `<div class="thread-post ${isMainPost ? 'main-post' : ''}" style="margin-bottom: 12px; margin-left: ${indent}px;">`;
-            html += await Posts.renderSinglePost(node.post, isMainPost ? 'highlight' : 'thread');
+            html += await Posts.renderSinglePost(node.post, isMainPost ? 'highlight' : 'thread', engagementData);
             html += '</div>';
             
             // Render replies
@@ -1616,6 +1644,8 @@ export async function openSingleNoteView(eventId) {
             import('./state.js'),
             import('./relays.js')
         ]);
+
+        const activeRelays = Relays.getActiveRelays();
 
         // Store current page to go back to
         previousPage = StateModule.currentPage || 'home';
@@ -1700,14 +1730,16 @@ export async function openSingleNoteView(eventId) {
             }
         }
 
-        // Fetch disclosed tips for this note (pass full post object for author moderation)
-        const disclosedTipsData = await Posts.fetchDisclosedTips([note]);
-        console.log('💰 Fetched disclosed tips for single note:', disclosedTipsData);
+        // Fetch disclosed tips and engagement counts for this note
+        const [disclosedTipsData, engagementData] = await Promise.all([
+            Posts.fetchDisclosedTips([note]),
+            Posts.fetchEngagementCounts([note.id], activeRelays)
+        ]);
         // Update the cache so renderSinglePost can access it
         Object.assign(Posts.disclosedTipsCache, disclosedTipsData);
 
         // Render just this single note (highlighted)
-        const noteHtml = await Posts.renderSinglePost(note, 'highlight');
+        const noteHtml = await Posts.renderSinglePost(note, 'highlight', engagementData);
         threadContent.innerHTML = `
             <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-left: 3px solid #FF6600; border-radius: 4px;">
                 <div style="color: #FF6600; font-weight: bold;">📍 Direct Note Link</div>
@@ -1914,8 +1946,13 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
             );
         }
 
-        // Also fetch parent posts and their authors for replies
-        const parentPostsMap = await PostsModule.fetchParentPosts(posts);
+        // Fetch parent posts, disclosed tips, and engagement counts
+        const [parentPostsMap, disclosedTipsData, engagementData] = await Promise.all([
+            PostsModule.fetchParentPosts(posts),
+            PostsModule.fetchDisclosedTips(posts),
+            PostsModule.fetchEngagementCounts(posts.map(p => p.id))
+        ]);
+
         const parentAuthors = Object.values(parentPostsMap)
             .filter(parent => parent)
             .map(parent => parent.pubkey);
@@ -1923,16 +1960,13 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
             await PostsModule.fetchProfiles([...new Set(parentAuthors)]);
         }
 
-        // Fetch disclosed tips for posts (pass full post objects for author moderation)
-        const disclosedTipsData = await PostsModule.fetchDisclosedTips(posts);
-
         // Cache disclosed tips data for later access
         Object.assign(PostsModule.disclosedTipsCache, disclosedTipsData);
 
-        // Render each post using the proper renderSinglePost function
+        // Render each post with engagement data, parent context, and disclosed tips
         const renderedPosts = await Promise.all(posts.map(async post => {
             try {
-                return await PostsModule.renderSinglePost(post, 'feed', null, parentPostsMap);
+                return await PostsModule.renderSinglePost(post, 'feed', engagementData, parentPostsMap);
             } catch (error) {
                 console.error('Error rendering profile post:', error);
                 // Fallback to basic rendering if renderSinglePost fails
@@ -1999,8 +2033,13 @@ async function loadMoreProfilePosts() {
             StateModule.eventCache[post.id] = post;
         });
 
-        // Fetch parent posts for replies
-        const parentPostsMap = await PostsModule.fetchParentPosts(postsToRender);
+        // Fetch parent posts, disclosed tips, and engagement counts
+        const [parentPostsMap, disclosedTipsData, engagementData] = await Promise.all([
+            PostsModule.fetchParentPosts(postsToRender),
+            PostsModule.fetchDisclosedTips(postsToRender),
+            PostsModule.fetchEngagementCounts(postsToRender.map(p => p.id))
+        ]);
+
         const parentAuthors = Object.values(parentPostsMap)
             .filter(parent => parent)
             .map(parent => parent.pubkey);
@@ -2008,14 +2047,13 @@ async function loadMoreProfilePosts() {
             await PostsModule.fetchProfiles([...new Set(parentAuthors)]);
         }
 
-        // Fetch disclosed tips
-        const disclosedTipsData = await PostsModule.fetchDisclosedTips(postsToRender);
+        // Cache disclosed tips data
         Object.assign(PostsModule.disclosedTipsCache, disclosedTipsData);
 
-        // Render new posts
+        // Render new posts with engagement data
         const renderedPosts = await Promise.all(postsToRender.map(async post => {
             try {
-                return await PostsModule.renderSinglePost(post, 'feed', null, parentPostsMap);
+                return await PostsModule.renderSinglePost(post, 'feed', engagementData, parentPostsMap);
             } catch (error) {
                 console.error('Error rendering profile post:', error);
                 return `
