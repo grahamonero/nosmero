@@ -40,7 +40,8 @@
         .nav-item {
             display: flex;
             align-items: center;
-            padding: 12px 16px;
+            padding: 14px 16px;
+            min-height: 44px;
             margin-bottom: 8px;
             border-radius: 8px;
             cursor: pointer;
@@ -66,7 +67,8 @@
             background: linear-gradient(135deg, #FF6600, #8B5CF6); /* Orange gradient */
             border: none;
             color: #000;
-            padding: 12px 24px;
+            padding: 14px 24px;
+            min-height: 48px;
             border-radius: 24px;
             font-size: 16px;
             font-weight: bold;
@@ -347,11 +349,14 @@
             border: none;
             color: #666;
             cursor: pointer;
-            padding: 8px;
+            padding: 12px;
+            min-width: 44px;
+            min-height: 44px;
             border-radius: 50%;
             transition: all 0.2s;
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 4px;
         }
 
@@ -423,7 +428,8 @@
             background: #333;
             border: 1px solid #666;
             color: #FFFFFF;
-            padding: 12px 24px;
+            padding: 14px 24px;
+            min-height: 48px;
             border-radius: 8px;
             cursor: pointer;
             margin-top: 16px;
@@ -1488,4 +1494,91 @@
     to {
         transform: rotate(360deg);
     }
+}
+
+/* Skeleton Screen Loading Animations */
+@keyframes shimmer {
+    0% {
+        background-position: -468px 0;
+    }
+    100% {
+        background-position: 468px 0;
+    }
+}
+
+.skeleton-loader {
+    width: 100%;
+    padding: 20px;
+}
+
+.skeleton-post {
+    border-bottom: 1px solid #333;
+    padding: 16px 20px;
+    margin-bottom: 0;
+}
+
+.skeleton-post-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.skeleton-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    margin-right: 12px;
+    background: linear-gradient(to right, #222 0%, #333 50%, #222 100%);
+    background-size: 468px 104px;
+    animation: shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-post-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.skeleton-line {
+    height: 12px;
+    border-radius: 4px;
+    background: linear-gradient(to right, #222 0%, #333 50%, #222 100%);
+    background-size: 468px 104px;
+    animation: shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-line-short {
+    width: 40%;
+}
+
+.skeleton-line-medium {
+    width: 60%;
+}
+
+.skeleton-line-long {
+    width: 100%;
+}
+
+.skeleton-content {
+    margin-bottom: 12px;
+}
+
+.skeleton-content .skeleton-line {
+    margin-bottom: 8px;
+}
+
+.skeleton-actions {
+    display: flex;
+    gap: 40px;
+    margin-top: 12px;
+}
+
+.skeleton-action {
+    width: 60px;
+    height: 16px;
+    border-radius: 4px;
+    background: linear-gradient(to right, #222 0%, #333 50%, #222 100%);
+    background-size: 468px 104px;
+    animation: shimmer 1.2s ease-in-out infinite;
 }
