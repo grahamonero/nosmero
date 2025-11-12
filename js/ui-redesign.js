@@ -140,8 +140,71 @@ async function handleCreateNoteClick() {
 }
 
 function showLoginOptions() {
-    // Open hamburger menu to show login options
-    openHamburgerMenu();
+    // Show login modal with all login options
+    const modal = document.createElement('div');
+    modal.id = 'loginOptionsModal';
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); display: flex; align-items: center; justify-content: center; z-index: 1000;';
+
+    modal.innerHTML = `
+        <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 2rem; max-width: 400px; width: 90%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0; color: var(--text-primary);">Login to Nosmero</h2>
+                <button onclick="document.getElementById('loginOptionsModal').remove()" style="background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;">×</button>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <button onclick="showCreateAccount(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: white; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: transform 0.2s;">
+                    🆕 Create New Account
+                </button>
+                <button onclick="showLoginWithNsec(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;">
+                    🔑 Login with nsec
+                </button>
+                <button onclick="loginWithExtension(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;">
+                    🔌 Use Extension (NIP-07)
+                </button>
+                <button onclick="showLoginWithNsecApp(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;">
+                    🌐 Use nsec.app
+                </button>
+                <button onclick="showLoginWithAmber(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;">
+                    📱 Use Amber (Android)
+                </button>
+            </div>
+        </div>
+    `;
+
+    // Close on overlay click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+
+    document.body.appendChild(modal);
+}
+
+// Helper function to update menu user info
+function updateMenuUserInfo(profile, shortNpub) {
+    const userName = profile?.name || profile?.display_name || shortNpub || 'Anonymous';
+    const profilePic = profile?.picture || '/default-avatar.png';
+
+    const menuUserName = document.getElementById('menuUserName');
+    const menuUserNpub = document.getElementById('menuUserNpub');
+    const menuUserPic = document.getElementById('menuUserPic');
+
+    if (menuUserName) {
+        menuUserName.textContent = userName;
+    }
+
+    if (menuUserNpub) {
+        menuUserNpub.textContent = shortNpub;
+    }
+
+    if (menuUserPic) {
+        menuUserPic.src = profilePic;
+        // Handle image load errors
+        menuUserPic.onerror = function() {
+            this.src = '/default-avatar.png';
+        };
+    }
 }
 
 async function updateHeaderUIForAuthState() {
@@ -158,6 +221,8 @@ async function updateHeaderUIForAuthState() {
     const menuCreateNoteBtn = document.getElementById('menuCreateNoteBtn');
     const menuLogoutBtn = document.getElementById('menuLogoutBtn');
     const menuLoginOptions = document.getElementById('menuLoginOptions');
+    const menuUserInfo = document.getElementById('menuUserInfo');
+    const notificationsBtn = document.getElementById('headerNotificationsBtn');
 
     console.log('🔄 updateHeaderUIForAuthState called');
     console.log('  - State.publicKey:', StateModule.publicKey ? StateModule.publicKey.substring(0, 16) + '...' : 'null');
@@ -167,23 +232,71 @@ async function updateHeaderUIForAuthState() {
     console.log('  - menuCreateNoteBtn exists:', !!menuCreateNoteBtn);
     console.log('  - menuLogoutBtn exists:', !!menuLogoutBtn);
     console.log('  - menuLoginOptions exists:', !!menuLoginOptions);
+    console.log('  - notificationsBtn exists:', !!notificationsBtn);
 
     if (isLoggedIn) {
-        // Logged in: show create note, hide login, show menu logout, hide menu login options
+        // Logged in: show create note, hide login, show menu logout, hide menu login options, show notifications
         console.log('  ✅ User is logged in - showing Create Note button');
         if (loginBtn) loginBtn.style.display = 'none';
         if (createNoteBtn) createNoteBtn.style.display = 'flex';
         if (menuCreateNoteBtn) menuCreateNoteBtn.style.display = 'flex';
         if (menuLogoutBtn) menuLogoutBtn.style.display = 'flex';
         if (menuLoginOptions) menuLoginOptions.style.display = 'none';
+        if (notificationsBtn) notificationsBtn.style.display = 'flex';
+
+        // Update user info in hamburger menu
+        if (menuUserInfo) {
+            menuUserInfo.style.display = 'block';
+
+            // Get profile from cache or fetch it
+            let profile = StateModule.profileCache[StateModule.publicKey];
+
+            // Generate npub
+            const npub = window.NostrTools?.nip19.npubEncode(StateModule.publicKey) || '';
+            const shortNpub = npub ? `${npub.substring(0, 12)}...${npub.substring(npub.length - 6)}` : '';
+
+            if (!profile) {
+                // Profile not in cache yet, try to fetch it
+                console.log('📝 Profile not in cache, fetching...');
+
+                // Show loading state
+                const menuUserNameEl = document.getElementById('menuUserName');
+                const menuUserNpubEl = document.getElementById('menuUserNpub');
+                if (menuUserNameEl) menuUserNameEl.textContent = 'Loading...';
+                if (menuUserNpubEl) menuUserNpubEl.textContent = shortNpub;
+
+                // Fetch profile asynchronously using Posts.fetchProfiles
+                ensurePostsLoaded().then(async (PostsModule) => {
+                    try {
+                        await PostsModule.fetchProfiles([StateModule.publicKey]);
+                        // Profile should now be in cache
+                        profile = StateModule.profileCache[StateModule.publicKey];
+                        console.log('✅ Profile fetched successfully:', profile?.name || profile?.display_name || 'No name');
+                        updateMenuUserInfo(profile, shortNpub);
+                    } catch (err) {
+                        console.error('❌ Error fetching profile:', err);
+                        updateMenuUserInfo(null, shortNpub);
+                    }
+                }).catch(err => {
+                    console.error('❌ Error loading Posts module:', err);
+                    updateMenuUserInfo(null, shortNpub);
+                });
+            } else {
+                // Profile is in cache
+                console.log('✅ Profile found in cache:', profile?.name || profile?.display_name || 'No name');
+                updateMenuUserInfo(profile, shortNpub);
+            }
+        }
     } else {
-        // Anonymous: show login button, hide create note, hide menu logout, show menu login options
+        // Anonymous: show login button, hide create note, hide menu logout, show menu login options, hide notifications
         console.log('  ❌ User is anonymous - showing Login button');
         if (loginBtn) loginBtn.style.display = 'flex'; // Changed to flex to match button layout
         if (createNoteBtn) createNoteBtn.style.display = 'none';
         if (menuCreateNoteBtn) menuCreateNoteBtn.style.display = 'none';
         if (menuLogoutBtn) menuLogoutBtn.style.display = 'none';
         if (menuLoginOptions) menuLoginOptions.style.display = 'block';
+        if (menuUserInfo) menuUserInfo.style.display = 'none';
+        if (notificationsBtn) notificationsBtn.style.display = 'none';
     }
 }
 
