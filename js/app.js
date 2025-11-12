@@ -949,11 +949,13 @@ async function displayLightningAddressInProfile(profile) {
     
     if (lightningAddress) {
         // Display the Lightning address with copy functionality
+        // JavaScript string escaping for onclick
+        const jsEscapedLightning = lightningAddress.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         addressContainer.innerHTML = `
             <div style="color: #FFDF00; font-size: 14px; display: flex; align-items: center; gap: 8px;">
                 <span style="margin-right: 6px;">⚡</span>
-                <span>Lightning: ${lightningAddress}</span>
-                <button onclick="navigator.clipboard.writeText('${lightningAddress}'); Utils.showNotification('Lightning address copied!', 'success')"
+                <span>Lightning: ${Utils.escapeHtml(lightningAddress)}</span>
+                <button onclick="navigator.clipboard.writeText('${jsEscapedLightning}'); Utils.showNotification('Lightning address copied!', 'success')"
                         style="background: none; border: 1px solid #FFDF00; color: #FFDF00; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 10px;">
                     Copy
                 </button>
@@ -1003,17 +1005,19 @@ async function displayMoneroAddressInProfile(profile) {
 
             // Display the Monero address with copy button
             const shortAddress = `${moneroAddress.substring(0, 8)}...${moneroAddress.substring(moneroAddress.length - 8)}`;
+            // JavaScript string escaping for onclick
+            const jsEscapedAddress = moneroAddress.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             addressContainer.innerHTML = `
                 <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid #FF6600; border-radius: 8px; padding: 12px; margin-top: 8px;">
                     <div style="color: #FF6600; font-size: 12px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
                         <span><span style="margin-right: 6px;">💰</span>MONERO ADDRESS</span>
-                        <button onclick="navigator.clipboard.writeText('${moneroAddress}'); Utils.showNotification('Monero address copied!', 'success')"
+                        <button onclick="navigator.clipboard.writeText('${jsEscapedAddress}'); Utils.showNotification('Monero address copied!', 'success')"
                                 style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 10px;">
                             Copy
                         </button>
                     </div>
                     <div style="color: #fff; font-family: monospace; font-size: 14px; word-break: break-all; line-height: 1.4;">
-                        ${moneroAddress}
+                        ${Utils.escapeHtml(moneroAddress)}
                     </div>
                     <div style="color: #ccc; font-size: 11px; margin-top: 6px;">
                         Available for XMR zaps
@@ -1195,9 +1199,9 @@ function displayUserPosts(posts) {
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div onclick="openThreadView('${post.id}')" style="color: #fff; line-height: 1.6; white-space: pre-wrap; margin-bottom: 12px; cursor: pointer;">
-                                ${escapeHtml(content)}
+                                ${Utils.escapeHtml(content)}
                             </div>
                         
                             <div style="display: flex; gap: 20px; padding-top: 12px; border-top: 1px solid #333; font-size: 14px;">
@@ -1369,7 +1373,7 @@ function switchProfileTab(tab) {
                 <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 24px;">
                     <h3 style="color: #FF6600; margin-bottom: 16px;">About</h3>
                     <p style="color: #ccc; line-height: 1.6; margin-bottom: 16px;">
-                        ${userProfile.about ? escapeHtml(userProfile.about) : 'No bio available'}
+                        ${userProfile.about ? Utils.escapeHtml(userProfile.about) : 'No bio available'}
                     </p>
                     
                     <h3 style="color: #FF6600; margin-bottom: 16px;">Details</h3>
@@ -1398,16 +1402,6 @@ function formatTime(timestamp) {
     
     const date = new Date(timestamp * 1000);
     return date.toLocaleDateString();
-}
-
-// Helper function to escape HTML
-function escapeHtml(unsafe) {
-    return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
 }
 
 // Load settings page (DISABLED - using modal version instead)
@@ -1531,14 +1525,14 @@ async function loadSettings_OLD_DISABLED() {
                     <h4 style="color: #FF6600; margin: 0 0 15px 0;">💰 Monero (XMR) Zaps</h4>
                     <div style="margin-bottom: 15px;">
                         <label style="color: #ccc; display: block; margin-bottom: 8px;">Default Zap Amount (XMR)</label>
-                        <input type="text" id="defaultZapAmount" placeholder="0.00018" 
-                               value="${localStorage.getItem('default-zap-amount') || '0.00018'}"
+                        <input type="text" id="defaultZapAmount" placeholder="0.00018"
+                               value="${Utils.escapeHtml(localStorage.getItem('default-zap-amount') || '0.00018')}"
                                style="padding: 10px; background: #333; border: 1px solid #555; border-radius: 6px; color: #fff; width: 150px;">
                     </div>
                     <div style="margin-bottom: 15px;">
                         <label style="color: #ccc; display: block; margin-bottom: 8px;">Your Monero Address (for receiving XMR zaps)</label>
-                        <input type="text" id="userMoneroAddress" placeholder="44ABC...XMR" 
-                               value="${localStorage.getItem('user-monero-address') || ''}"
+                        <input type="text" id="userMoneroAddress" placeholder="44ABC...XMR"
+                               value="${Utils.escapeHtml(localStorage.getItem('user-monero-address') || '')}"
                                style="padding: 10px; background: #333; border: 1px solid #555; border-radius: 6px; color: #fff; width: 100%; max-width: 500px;">
                     </div>
                 </div>
@@ -1813,25 +1807,28 @@ function displayCurrentRelays() {
                     const permissions = [];
                     if (relay.read) permissions.push('📖 Read');
                     if (relay.write) permissions.push('✍️ Write');
-                    
+
+                    // Escape for JavaScript string context (single quotes and backslashes)
+                    const jsEscapedUrl = relay.url.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
                     return `
                         <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 6px;">
                             <div>
-                                <div style="color: #fff; font-family: monospace; font-size: 14px;">${relay.url}</div>
+                                <div style="color: #fff; font-family: monospace; font-size: 14px;">${Utils.escapeHtml(relay.url)}</div>
                                 <div style="color: #888; font-size: 12px; margin-top: 4px;">
                                     ${permissions.join(' • ')}
                                 </div>
                             </div>
                             <div style="display: flex; gap: 8px;">
-                                <button onclick="toggleRelayPermission('${relay.url}', 'read', ${relay.read})" 
+                                <button onclick="toggleRelayPermission('${jsEscapedUrl}', 'read', ${relay.read})"
                                         style="padding: 4px 8px; background: ${relay.read ? '#4CAF50' : '#666'}; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px;">
                                     R
                                 </button>
-                                <button onclick="toggleRelayPermission('${relay.url}', 'write', ${relay.write})" 
+                                <button onclick="toggleRelayPermission('${jsEscapedUrl}', 'write', ${relay.write})"
                                         style="padding: 4px 8px; background: ${relay.write ? '#4CAF50' : '#666'}; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px;">
                                     W
                                 </button>
-                                <button onclick="removeRelay('${relay.url}')" 
+                                <button onclick="removeRelay('${jsEscapedUrl}')"
                                         style="padding: 4px 8px; background: #ff4444; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px;">
                                     ✕
                                 </button>
@@ -1841,8 +1838,8 @@ function displayCurrentRelays() {
                 }).join('')}
             </div>
             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #555; color: #888; font-size: 12px;">
-                Total: ${relayConfig.length} relay${relayConfig.length !== 1 ? 's' : ''} | 
-                Read: ${relayConfig.filter(r => r.read).length} | 
+                Total: ${relayConfig.length} relay${relayConfig.length !== 1 ? 's' : ''} |
+                Read: ${relayConfig.filter(r => r.read).length} |
                 Write: ${relayConfig.filter(r => r.write).length}
             </div>
         `;
