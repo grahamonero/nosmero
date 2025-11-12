@@ -103,7 +103,7 @@ async function initializeApp() {
     }
 }
 
-// Handle URL hash routing for shared note links
+// Handle URL hash routing for shared note links and profiles
 async function handleHashRouting() {
     const hash = window.location.hash;
 
@@ -117,6 +117,24 @@ async function handleHashRouting() {
                 clearInterval(waitForReady);
                 console.log('✓ App ready, opening thread view for:', noteId);
                 window.openThreadView(noteId);
+            }
+        }, 500);
+
+        // Timeout after 10 seconds
+        setTimeout(() => {
+            clearInterval(waitForReady);
+            console.log('⚠️ Timeout waiting for app to be ready');
+        }, 10000);
+    } else if (hash.startsWith('#profile:')) {
+        const pubkey = hash.substring(9); // Remove '#profile:' prefix
+        console.log('📍 Opening profile:', pubkey);
+
+        // Wait for app to be fully initialized
+        const waitForReady = setInterval(() => {
+            if (State.publicKey && State.pool) {
+                clearInterval(waitForReady);
+                console.log('✓ App ready, opening profile view for:', pubkey);
+                window.viewUserProfilePage(pubkey);
             }
         }, 500);
 
@@ -1142,14 +1160,16 @@ function displayUserPosts(posts) {
                 await Posts.fetchProfiles([...new Set(parentAuthors)]);
             }
 
-            // Fetch disclosed tips for profile posts (pass full post objects for author moderation)
-            console.log('💰 Fetching disclosed tips for profile posts...');
-            const disclosedTipsData = await Posts.fetchDisclosedTips(posts);
+            // Fetch disclosed tips and engagement counts for profile posts
+            const [disclosedTipsData, engagementData] = await Promise.all([
+                Posts.fetchDisclosedTips(posts),
+                Posts.fetchEngagementCounts(posts.map(p => p.id))
+            ]);
             Object.assign(Posts.disclosedTipsCache, disclosedTipsData);
 
             const renderedPosts = await Promise.all(posts.map(async post => {
                 try {
-                    return await Posts.renderSinglePost(post, 'feed', null, parentPostsMap);
+                    return await Posts.renderSinglePost(post, 'feed', engagementData, parentPostsMap);
                 } catch (error) {
                     console.error('Error rendering profile post:', error);
                     // Fallback to simple rendering
@@ -1250,8 +1270,13 @@ async function loadMoreOwnPosts() {
             State.eventCache[post.id] = post;
         });
 
-        // Fetch parent posts and their authors for replies
-        const parentPostsMap = await Posts.fetchParentPosts(postsToRender);
+        // Fetch parent posts, disclosed tips, and engagement counts
+        const [parentPostsMap, disclosedTipsData, engagementData] = await Promise.all([
+            Posts.fetchParentPosts(postsToRender),
+            Posts.fetchDisclosedTips(postsToRender),
+            Posts.fetchEngagementCounts(postsToRender.map(p => p.id))
+        ]);
+
         const parentAuthors = Object.values(parentPostsMap)
             .filter(parent => parent)
             .map(parent => parent.pubkey);
@@ -1259,14 +1284,12 @@ async function loadMoreOwnPosts() {
             await Posts.fetchProfiles([...new Set(parentAuthors)]);
         }
 
-        // Fetch disclosed tips
-        const disclosedTipsData = await Posts.fetchDisclosedTips(postsToRender);
         Object.assign(Posts.disclosedTipsCache, disclosedTipsData);
 
         // Render new posts
         const renderedPosts = await Promise.all(postsToRender.map(async post => {
             try {
-                return await Posts.renderSinglePost(post, 'feed', null, parentPostsMap);
+                return await Posts.renderSinglePost(post, 'feed', engagementData, parentPostsMap);
             } catch (error) {
                 console.error('Error rendering profile post:', error);
                 const userProfile = State.profileCache[State.publicKey] || { name: 'Anonymous', picture: null };
