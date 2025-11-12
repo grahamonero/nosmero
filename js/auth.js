@@ -130,24 +130,38 @@ export async function createNewAccount() {
         // Convert Uint8Array to hex string if needed
         if (secretKey instanceof Uint8Array) {
             // nostr-tools v2+ returns Uint8Array, convert to hex
-            privateKey = utils && utils.bytesToHex ? utils.bytesToHex(secretKey) : 
+            privateKey = utils && utils.bytesToHex ? utils.bytesToHex(secretKey) :
                         Array.from(secretKey).map(b => b.toString(16).padStart(2, '0')).join('');
         } else {
             // Older versions might return hex string directly
             privateKey = secretKey;
         }
 
-        localStorage.setItem('nostr-private-key', privateKey);
+        // Prompt for PIN to encrypt the private key (mandatory for security)
+        console.log('🔐 Prompting for PIN to secure new account...');
+        const pin = await showPinModal('create');
+        if (!pin) {
+            console.log('PIN entry cancelled, aborting account creation');
+            alert('Account creation cancelled. A PIN is required to secure your private key.');
+            return;
+        }
+
+        console.log('✅ Encrypting private key with PIN...');
+
+        // Store encrypted private key
+        await storeSecurePrivateKey(privateKey, pin);
+
+        // Also store in state for immediate use
         setPrivateKey(privateKey);
-        
+
         // Generate and set public key
         const derivedPublicKey = getPublicKey(privateKey);
         setPublicKey(derivedPublicKey);
-        
+
         // Convert to nsec format for user display - use the original Uint8Array for encoding
         const nsec = nip19.nsecEncode(secretKey instanceof Uint8Array ? secretKey : privateKey);
-        
-        showNotification(`Account created! Private key: ${nsec.substring(0, 20)}...`, 'success');
+
+        showNotification(`Account created and secured with PIN! Save your backup: ${nsec.substring(0, 20)}...`, 'success');
 
         // Clear all home feed state to prevent anonymous posts from persisting
         if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
