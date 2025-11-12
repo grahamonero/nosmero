@@ -2,7 +2,7 @@
 // Phase 6: UI Components & Modals
 // Functions for modal management, forms, themes, navigation, file uploads, and QR codes
 
-import { showNotification, signEvent } from './utils.js';
+import { showNotification, signEvent, escapeHtml } from './utils.js';
 import { wrapGiftMessage } from './crypto.js';
 import { loadNostrLogin } from './nostr-login-loader.js';
 import * as State from './state.js';
@@ -368,7 +368,7 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
         // Show options to either zap immediately or add to queue
         details.innerHTML = `
             <div style="margin-bottom: 16px; text-align: center;">
-                <strong>Zap ${authorName}</strong>
+                <strong>Zap ${escapeHtml(authorName)}</strong>
             </div>
             <div style="margin-bottom: 16px;">
                 <label style="display: block; text-align: center; margin-bottom: 8px; color: #FF6600; font-weight: bold;">
@@ -376,13 +376,13 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                 </label>
                 <input type="number"
                        id="moneroZapAmount"
-                       value="${defaultAmount}"
+                       value="${escapeHtml(defaultAmount)}"
                        step="0.00001"
                        min="0.00001"
                        style="width: 100%; padding: 10px; border: 2px solid #FF6600; border-radius: 8px; font-size: 16px; text-align: center; background: #1a1a1a; color: #fff;">
             </div>
             <div style="margin-bottom: 20px; font-size: 12px; color: #666; word-break: break-all; text-align: center;">
-                ${moneroAddress}
+                ${escapeHtml(moneroAddress)}
             </div>
             <div style="display: flex; gap: 12px; justify-content: center;">
                 <button id="zapNowBtn"
@@ -419,14 +419,14 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
         // Show immediate zap QR code
         details.innerHTML = `
             <div style="margin-bottom: 16px; text-align: center;">
-                <strong>Zapping ${authorName}</strong><br>
-                <span style="color: #FF6600;">${amount} XMR</span>
+                <strong>Zapping ${escapeHtml(authorName)}</strong><br>
+                <span style="color: #FF6600;">${escapeHtml(amount)} XMR</span>
             </div>
             <div style="font-size: 12px; color: #666; word-break: break-all; text-align: center; margin-bottom: 16px;">
-                ${moneroAddress}
+                ${escapeHtml(moneroAddress)}
             </div>
             <div style="font-size: 12px; color: #999; text-align: center; margin-bottom: 12px;">
-                Note: nosmero.com/n/${postId}
+                Note: nosmero.com/n/${escapeHtml(postId)}
             </div>
             <div style="text-align: center; margin-top: 16px;">
                 <button id="copyPaymentUriBtn"
@@ -529,7 +529,7 @@ function generateMoneroQRCode(container, address, amount, postId) {
         });
     } catch (error) {
         console.error('QR code generation failed:', error);
-        container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">QR code generation failed<br><small>' + error.message + '</small></div>';
+        container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">QR code generation failed<br><small>' + escapeHtml(error.message) + '</small></div>';
     }
 }
 
@@ -3183,9 +3183,9 @@ export function showZapQueue() {
                 ${queue.map((item, index) => `
                     <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1;">
-                            <div style="font-weight: bold; color: #FF6600;">${item.authorName}</div>
-                            <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">${item.amount || '0.00018'} XMR</div>
-                            <div style="font-size: 12px; color: #666; margin-top: 4px; word-break: break-all;">${item.moneroAddress.substring(0, 20)}...${item.moneroAddress.substring(item.moneroAddress.length - 10)}</div>
+                            <div style="font-weight: bold; color: #FF6600;">${escapeHtml(item.authorName)}</div>
+                            <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">${escapeHtml(item.amount || '0.00018')} XMR</div>
+                            <div style="font-size: 12px; color: #666; margin-top: 4px; word-break: break-all;">${escapeHtml(item.moneroAddress.substring(0, 20))}...${escapeHtml(item.moneroAddress.substring(item.moneroAddress.length - 10))}</div>
                         </div>
                         <button onclick="removeFromZapQueue(${index})" style="background: #ff6b6b; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px;">
                             Remove
@@ -3300,18 +3300,18 @@ export function showBatchQrCodes() {
             <div style="text-align: center; padding: 20px;">
                 <div style="margin-bottom: 16px;">
                     <strong style="font-size: 18px;">QR Code ${currentIndex + 1} of ${queue.length}</strong>
-                    <p style="color: #FF6600; margin-top: 8px;">Zapping ${item.authorName}</p>
-                    <p style="color: #666; font-size: 14px;">${amount} XMR</p>
+                    <p style="color: #FF6600; margin-top: 8px;">Zapping ${escapeHtml(item.authorName)}</p>
+                    <p style="color: #666; font-size: 14px;">${escapeHtml(amount)} XMR</p>
                 </div>
 
                 <div id="batchQrCode" style="background: white; padding: 20px; border-radius: 8px; display: inline-block; margin-bottom: 16px;"></div>
 
                 <div style="font-size: 12px; color: #666; word-break: break-all; margin-bottom: 12px;">
-                    ${item.moneroAddress}
+                    ${escapeHtml(item.moneroAddress)}
                 </div>
 
                 <div style="font-size: 12px; color: #999; text-align: center; margin-bottom: 16px;">
-                    Note: nosmero.com/n/${item.postId}
+                    Note: nosmero.com/n/${escapeHtml(item.postId)}
                 </div>
 
                 <div style="margin-bottom: 20px;">
@@ -3672,17 +3672,6 @@ export function showInfoToast(message, title = '', duration = 3000) {
 
 export function showWarningToast(message, title = '', duration = 3500) {
     return showToast(message, 'warning', duration, title);
-}
-
-/**
- * Escape HTML to prevent XSS in toast messages
- * @param {string} text - Text to escape
- * @returns {string} Escaped text
- */
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 // Make toast functions available globally for onclick handlers

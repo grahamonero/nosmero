@@ -2,7 +2,7 @@
 // Phase 8: Search & Discovery
 // Functions for user search, hashtag search, content discovery, and search results
 
-import { showNotification } from './utils.js';
+import { showNotification, escapeHtml } from './utils.js';
 import { SEARCH_RELAYS } from './relays.js';
 import { showSkeletonLoader, hideSkeletonLoader } from './ui.js';
 import {
@@ -274,7 +274,7 @@ export async function performSearch() {
         updateSearchStatus(`Search failed: ${error.message}`);
         document.getElementById('searchResultsList').innerHTML = `
             <div class="error" style="color: #ff6666; text-align: center; padding: 40px;">
-                Search failed: ${error.message}
+                Search failed: ${escapeHtml(error.message)}
             </div>
         `;
     }
@@ -1269,6 +1269,13 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
     const moneroAddress = getMoneroAddress(post);
     const lightningAddress = getLightningAddress(post);
 
+    // JavaScript string escaping for onclick attributes
+    const jsEscapePubkey = post.pubkey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const jsEscapeId = post.id.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const jsEscapeName = author.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const jsEscapeLightning = lightningAddress ? lightningAddress.replace(/\\/g, '\\\\').replace(/'/g, "\\'") : '';
+    const jsEscapeMonero = moneroAddress ? moneroAddress.replace(/\\/g, '\\\\').replace(/'/g, "\\'") : '';
+
     // Highlight search term in content
     let highlightedContent = parseContent(post.content);
     if (currentSearchQuery && !currentSearchQuery.startsWith('#') && !currentSearchQuery.startsWith('@')) {
@@ -1280,36 +1287,36 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
         <div class="post" style="background: #1a1a1a; border-bottom: 1px solid #333; padding: 16px; margin-bottom: 1px;">
             <div class="post-header" style="display: flex; align-items: center; margin-bottom: 12px;">
                 ${author.picture ?
-                    `<img class="avatar" src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` :
-                    `<div class="avatar" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; background: #333; display: flex; align-items: center; justify-content: center; cursor: pointer;" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>`
+                    `<img class="avatar" src="${escapeHtml(author.picture)}" alt="${escapeHtml(author.name)}" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` :
+                    `<div class="avatar" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; background: #333; display: flex; align-items: center; justify-content: center; cursor: pointer;" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();">${author.name ? escapeHtml(author.name.charAt(0).toUpperCase()) : '?'}</div>`
                 }
                 <div class="post-info">
-                    <span class="username" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer; color: #fff; font-weight: bold; margin-right: 8px;">${author.name}</span>
-                    <span class="handle" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer; color: #999; margin-right: 8px;">@${author.handle}</span>
+                    <span class="username" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="cursor: pointer; color: #fff; font-weight: bold; margin-right: 8px;">${escapeHtml(author.name)}</span>
+                    <span class="handle" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="cursor: pointer; color: #999; margin-right: 8px;">@${escapeHtml(author.handle)}</span>
                     <span class="timestamp" style="color: #666;">${formatTime(post.created_at)}</span>
                 </div>
             </div>
-            <div class="post-content" onclick="openThreadView('${post.id}')" style="cursor: pointer; color: #fff; line-height: 1.4; margin-bottom: 12px;">${highlightedContent}</div>
+            <div class="post-content" onclick="openThreadView('${jsEscapeId}')" style="cursor: pointer; color: #fff; line-height: 1.4; margin-bottom: 12px;">${highlightedContent}</div>
             <div class="post-actions" onclick="event.stopPropagation();" style="display: flex; gap: 16px; align-items: center;">
-                <button class="action-btn" onclick="NostrPosts.replyToPost('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
+                <button class="action-btn" onclick="NostrPosts.replyToPost('${jsEscapeId}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
                     💬${engagement.replies > 0 ? ` <span style="font-size: 12px; color: #999;">${engagement.replies}</span>` : ''}
                 </button>
-                <button class="action-btn" onclick="NostrPosts.repostNote('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
+                <button class="action-btn" onclick="NostrPosts.repostNote('${jsEscapeId}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
                     🔄${engagement.reposts > 0 ? ` <span style="font-size: 12px; color: #999;">${engagement.reposts}</span>` : ''}
                 </button>
-                <button class="action-btn like-btn" id="like-${post.id}" onclick="NostrPosts.likePost('${post.id}')" data-post-id="${post.id}" title="Like this post" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
+                <button class="action-btn like-btn" id="like-${escapeHtml(post.id)}" onclick="NostrPosts.likePost('${jsEscapeId}')" data-post-id="${escapeHtml(post.id)}" title="Like this post" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
                     🤍${engagement.reactions > 0 ? ` <span style="font-size: 12px; color: #999;">${engagement.reactions}</span>` : ''}
                 </button>
-                <button class="action-btn" onclick="sharePost('${post.id}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">📤</button>
+                <button class="action-btn" onclick="sharePost('${jsEscapeId}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">📤</button>
                 ${lightningAddress ?
-                    `<button class="action-btn btc-zap" onclick="openLightningZapModal('${post.id}', '${author.name}', '${lightningAddress}')" style="background: none; border: none; color: #FFDF00; cursor: pointer; font-size: 14px;" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
+                    `<button class="action-btn btc-zap" onclick="openLightningZapModal('${jsEscapeId}', '${jsEscapeName}', '${jsEscapeLightning}')" style="background: none; border: none; color: #FFDF00; cursor: pointer; font-size: 14px;" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
                     '<button class="action-btn btc-zap" style="background: none; border: none; color: #333; cursor: not-allowed; font-size: 14px; opacity: 0.3;" title="No Lightning address">⚡BTC</button>'
                 }
                 ${moneroAddress ?
-                    `<button class="action-btn xmr-zap" onclick="openZapModal('${post.id}', '${author.name}', '${moneroAddress}', 'choose', null, '${post.pubkey}')" style="background: none; border: none; color: #FF6600; cursor: pointer; font-size: 14px;" title="Tip with Monero">💰XMR</button>` :
+                    `<button class="action-btn xmr-zap" onclick="openZapModal('${jsEscapeId}', '${jsEscapeName}', '${jsEscapeMonero}', 'choose', null, '${jsEscapePubkey}')" style="background: none; border: none; color: #FF6600; cursor: pointer; font-size: 14px;" title="Tip with Monero">💰XMR</button>` :
                     '<button class="action-btn xmr-zap" style="background: none; border: none; color: #333; cursor: not-allowed; font-size: 14px; opacity: 0.3;" title="No Monero address">💰XMR</button>'
                 }
-                <button class="action-btn" onclick="showNoteMenu('${post.id}', event)" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">⋯</button>
+                <button class="action-btn" onclick="showNoteMenu('${jsEscapeId}', event)" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px;">⋯</button>
             </div>
         </div>
     `;
@@ -1415,16 +1422,6 @@ function updateLikeButtonState(postId) {
     console.log('Would update like button for:', postId);
 }
 
-// Escape HTML to prevent XSS
-function escapeHtml(unsafe) {
-    return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
 // ==================== SAVED SEARCHES & EXPORT ====================
 
 // Load and display saved searches
@@ -1437,18 +1434,23 @@ export function loadSavedSearches() {
         return;
     }
     
-    savedSearchList.innerHTML = savedSearches.map((search, index) => `
-        <div style="display: flex; align-items: center; gap: 4px; background: #333; border-radius: 16px; padding: 6px 12px;">
-            <button onclick="searchFromSaved('${escapeHtml(search.query)}', '${search.type}')" 
-                    style="background: none; border: none; color: #fff; cursor: pointer; font-size: 14px;">
-                ${escapeHtml(search.query)}
-            </button>
-            <button onclick="removeSavedSearch(${index})" 
-                    style="background: none; border: none; color: #999; cursor: pointer; font-size: 12px; padding: 2px;" title="Remove">
-                ×
-            </button>
-        </div>
-    `).join('');
+    savedSearchList.innerHTML = savedSearches.map((search, index) => {
+        // Escape for JavaScript string context (single quotes and backslashes)
+        const jsEscapedQuery = search.query.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const jsEscapedType = search.type.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        return `
+            <div style="display: flex; align-items: center; gap: 4px; background: #333; border-radius: 16px; padding: 6px 12px;">
+                <button onclick="searchFromSaved('${jsEscapedQuery}', '${jsEscapedType}')"
+                        style="background: none; border: none; color: #fff; cursor: pointer; font-size: 14px;">
+                    ${escapeHtml(search.query)}
+                </button>
+                <button onclick="removeSavedSearch(${index})"
+                        style="background: none; border: none; color: #999; cursor: pointer; font-size: 12px; padding: 2px;" title="Remove">
+                    ×
+                </button>
+            </div>
+        `;
+    }).join('');
 }
 
 // Search from saved searches
