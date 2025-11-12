@@ -1681,15 +1681,18 @@ export async function loadWebOfTrustFeed() {
             // Fetch profiles for post authors
             await fetchProfiles(followYsArray);
 
-            // Fetch parent posts for replies
-            const parentPostsMap = await fetchParentPosts(postsToDisplay);
-            console.log(`✅ Fetched ${Object.keys(parentPostsMap).length} parent posts for replies`);
+            // Fetch parent posts and engagement counts for replies
+            const [parentPostsMap, engagementData] = await Promise.all([
+                fetchParentPosts(postsToDisplay),
+                fetchEngagementCounts(postsToDisplay.map(p => p.id))
+            ]);
+            console.log(`✅ Fetched ${Object.keys(parentPostsMap).length} parent posts and engagement data`);
 
-            // Render posts using existing renderSinglePost function with parent context
+            // Render posts with parent context and engagement data
             const renderedPosts = await Promise.all(
                 postsToDisplay.map(async (post) => {
                     try {
-                        return await renderSinglePost(post, 'feed', null, parentPostsMap);
+                        return await renderSinglePost(post, 'feed', engagementData, parentPostsMap);
                     } catch (error) {
                         console.error('Error rendering Web of Trust post:', error);
                         return '';
@@ -1829,15 +1832,18 @@ export async function loadMoreWebOfTrustPosts() {
             // Fetch profiles for new authors
             await fetchProfiles(followYsArray);
 
-            // Fetch parent posts for replies
-            const parentPostsMap = await fetchParentPosts(postsToDisplay);
-            console.log(`✅ Fetched ${Object.keys(parentPostsMap).length} parent posts for new replies`);
+            // Fetch parent posts and engagement counts for new posts
+            const [parentPostsMap, engagementData] = await Promise.all([
+                fetchParentPosts(postsToDisplay),
+                fetchEngagementCounts(postsToDisplay.map(p => p.id))
+            ]);
+            console.log(`✅ Fetched ${Object.keys(parentPostsMap).length} parent posts and engagement data for new posts`);
 
-            // Render new posts with parent context
+            // Render new posts with parent context and engagement data
             const renderedPosts = await Promise.all(
                 postsToDisplay.map(async (post) => {
                     try {
-                        return await renderSinglePost(post, 'feed', null, parentPostsMap);
+                        return await renderSinglePost(post, 'feed', engagementData, parentPostsMap);
                     } catch (error) {
                         console.error('Error rendering Web of Trust post:', error);
                         return '';
@@ -2255,28 +2261,23 @@ async function renderHomeFeedResults() {
     resultsEl.innerHTML = renderedPosts.join('');
     console.log('✅ Posts rendered instantly');
 
-    // 3. BACKGROUND: Fetch engagement counts and disclosed tips, update DOM as they arrive
+    // 3. BACKGROUND: Fetch all data (disclosed tips, parent posts, engagement), then re-render with everything
     const postIds = sortedResults.map(p => p.id);
-    fetchEngagementCounts(postIds).then(engagementData => {
-        console.log('📊 Updating engagement counts...');
-        updateEngagementCounts(engagementData);
-    });
-
-    // 4. BACKGROUND: Fetch disclosed tips and parent posts together, then re-render once
     Promise.all([
         fetchDisclosedTips(sortedResults),
-        fetchParentPosts(sortedResults)
-    ]).then(([disclosedTipsData, parentPostsMap]) => {
-        console.log('💰 Disclosed tips and 👨‍👩‍👧 parent posts loaded');
+        fetchParentPosts(sortedResults),
+        fetchEngagementCounts(postIds)
+    ]).then(([disclosedTipsData, parentPostsMap, engagementData]) => {
+        console.log('💰 Disclosed tips, 👨‍👩‍👧 parent posts, and 📊 engagement loaded');
         Object.assign(disclosedTipsCache, disclosedTipsData);
 
-        // Re-render posts with both disclosed tips and parent posts
+        // Re-render posts with disclosed tips, parent posts, AND engagement data
         const renderedPostsComplete = sortedResults.map(post => {
-            return renderSinglePost(post, 'feed', null, parentPostsMap);
+            return renderSinglePost(post, 'feed', engagementData, parentPostsMap);
         });
         Promise.all(renderedPostsComplete).then(posts => {
             resultsEl.innerHTML = posts.join('');
-            console.log('✅ Posts re-rendered with disclosed tips and parent context');
+            console.log('✅ Posts re-rendered with all data: disclosed tips, parent context, and engagement counts');
         });
     });
 
@@ -3158,10 +3159,18 @@ export function updateAllRepostButtons() {
 export async function fetchParentPosts(posts) {
     const parentMap = {};
     const parentIdsToFetch = [];
-    
-    // Extract parent post IDs from reply posts
+
+    // Extract parent post IDs from reply posts (excluding quote reposts)
     for (const post of posts) {
         if (post.tags) {
+            // Check if this is a quote repost (has 'q' tag)
+            const hasQuoteTag = post.tags.some(tag => tag[0] === 'q');
+
+            // Skip quote reposts - they should NOT show "Replying to" context
+            if (hasQuoteTag) {
+                continue;
+            }
+
             // Per NIP-10: Look for 'e' tag with 'reply' marker first
             // If not found, use last 'e' tag (positional fallback)
             const eTags = post.tags.filter(tag => tag[0] === 'e' && tag[1]);
@@ -3241,10 +3250,19 @@ export async function fetchParentPosts(posts) {
 }
 
 // Fetch engagement counts using NIPs 1, 18, 25, and 27
-export async function fetchEngagementCounts(postIds) {
+export async function fetchEngagementCounts(postIds, customRelays = null) {
     try {
-        // Use major public relays for engagement counts (same as profile fetching)
-        const majorRelays = [
+        if (!State.pool) {
+            console.error('State.pool is not initialized, cannot fetch engagement counts');
+            const counts = {};
+            postIds.forEach(id => {
+                counts[id] = { reactions: 0, reposts: 0, replies: 0, zaps: 0 };
+            });
+            return counts;
+        }
+
+        // Use custom relays if provided, otherwise use major public relays
+        const relays = customRelays || [
             'wss://relay.damus.io',
             'wss://nos.lol',
             'wss://relay.primal.net',
@@ -3260,11 +3278,10 @@ export async function fetchEngagementCounts(postIds) {
 
         return new Promise((resolve) => {
             const timeout = setTimeout(() => {
-                console.log('⏱️ Engagement fetch timeout (2s), returning current counts');
                 resolve(counts);
-            }, 2000); // Reduced to 2 second timeout for major relays
+            }, 8000); // 8 second timeout for engagement data collection
 
-            const sub = State.pool.subscribeMany(majorRelays, [
+            const sub = State.pool.subscribeMany(relays, [
                 // NIP-25: Reactions (kind 7) - likes/hearts
                 {
                     kinds: [7],
@@ -3297,9 +3314,9 @@ export async function fetchEngagementCounts(postIds) {
 
                         switch (event.kind) {
                             case 7: // NIP-25: Reactions
-                                // Check if it's a like (+ or ❤️ or 👍)
+                                // Check if it's a like (+ or ❤️ or 👍 or 🤍)
                                 const content = event.content.trim();
-                                if (content === '+' || content === '❤️' || content === '👍' || content === '') {
+                                if (content === '+' || content === '❤️' || content === '👍' || content === '🤍' || content === '') {
                                     counts[referencedPostId].reactions++;
                                 }
                                 break;
@@ -3329,7 +3346,6 @@ export async function fetchEngagementCounts(postIds) {
                 oneose() {
                     clearTimeout(timeout);
                     sub.close();
-                    console.log('Engagement counts fetched:', counts);
                     resolve(counts);
                 }
             });
@@ -3735,9 +3751,9 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
         const moneroAddress = getMoneroAddress(post);
         const lightningAddress = getLightningAddress(post);
 
-        // For thread context, we might want to show less engagement data to simplify
+        // Use engagement data for feed, highlight, and thread contexts
         let engagement = { reactions: 0, reposts: 0, replies: 0, zaps: 0 };
-        if (context === 'feed' || context === 'highlight') {
+        if (context === 'feed' || context === 'highlight' || context === 'thread') {
             // Use pre-fetched data if available (streaming render will update later)
             if (engagementData && engagementData[post.id]) {
                 engagement = engagementData[post.id];
