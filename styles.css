@@ -565,13 +565,6 @@
             min-height: calc(100vh - 80px);
         }
 
-        /* Mobile: Add bottom padding for feed to clear bottom nav */
-        @media (max-width: 768px) {
-            .feed {
-                padding-bottom: 120px; /* Space for bottom nav (64px) + interaction icons + buffer */
-            }
-        }
-
         /* Individual post/note container - Glassmorphism cards */
         .post {
             background: var(--card-bg);
@@ -1653,13 +1646,6 @@
         .thread-content {
             padding: 20px;
             max-width: 800px;
-        }
-
-        /* Mobile: Add bottom padding for thread view to clear bottom nav */
-        @media (max-width: 768px) {
-            .thread-content {
-                padding-bottom: 120px; /* Space for bottom nav (64px) + interaction icons + buffer */
-            }
         }
 
         /* ==================== MOBILE NAVIGATION ==================== */

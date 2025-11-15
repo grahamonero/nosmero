@@ -1,9 +1,9 @@
 {
-  "timestamp": 1763175626866,
-  "generated_at": "2025-11-15T03:00:26.866Z",
+  "timestamp": 1763172025380,
+  "generated_at": "2025-11-15T02:00:25.380Z",
   "time_window_days": 7,
-  "total_notes_found": 383,
-  "notes_cached": 173,
+  "total_notes_found": 384,
+  "notes_cached": 175,
   "notes": [
     {
       "id": "e2808bebfe13fffee56fdc0d2865e906d9983d04b8a613423656d10d127bd8af",
@@ -1315,6 +1315,21 @@
       }
     },
     {
+      "id": "1b4b00950708c2e6b95dbe0bfe92dea50b8056f46ea503497e31bbd2d5dc4846",
+      "pubkey": "e844b39d850acbb13bba1a20057250fe6b3deff5f1ecc95b6a99dc35adafb6a2",
+      "created_at": 1763117030,
+      "content": "Browsed through the hellscape of Linkedin this morning, its fucking scary to see how many of my old contacts are letting themselves be gobbled up by AI...\n\nForget about M & A, financialization and other horrible processes, this is total mayhem!\n\nYet I'll have to start using these tools myself, but with a plan and in extremely stubborn ways...\n\nAt least there is nano-gpt.com that is as anonymous as realistically possible, especially when you can fund it using Lightning and even Monero :-)",
+      "tags": [],
+      "sig": "e9cf0650d603e88c1b74a9bdd64d26448dbed49b7158c5ebd6588c56dce9ba97019fe012cb98c8ee590d7e8089fefc4488c45e23c6ea92fee8258193aaf84b64",
+      "score": 8,
+      "engagement": {
+        "reactions": 2,
+        "reposts": 0,
+        "replies": 2,
+        "zaps": 0
+      }
+    },
+    {
       "id": "6d5b1fec4d75963117bd15fd3e50f89b8a51e2417f4120ef38aa5c5237b6586b",
       "pubkey": "e096a89eeb90820895a6dfd7f369ec313654e5762e042d59ad06937659351479",
       "created_at": 1762794970,
@@ -1338,21 +1353,6 @@
         ]
       ],
       "sig": "5385b1802b957bdddecc8f5cab40a5b4abcb1065fee885955ec2716c1de8d3f965d7424aaba11efe1855cbbae02fcb63bc4e8dcc5ac9e16cec17110716a15d92",
-      "score": 8,
-      "engagement": {
-        "reactions": 2,
-        "reposts": 0,
-        "replies": 2,
-        "zaps": 0
-      }
-    },
-    {
-      "id": "1b4b00950708c2e6b95dbe0bfe92dea50b8056f46ea503497e31bbd2d5dc4846",
-      "pubkey": "e844b39d850acbb13bba1a20057250fe6b3deff5f1ecc95b6a99dc35adafb6a2",
-      "created_at": 1763117030,
-      "content": "Browsed through the hellscape of Linkedin this morning, its fucking scary to see how many of my old contacts are letting themselves be gobbled up by AI...\n\nForget about M & A, financialization and other horrible processes, this is total mayhem!\n\nYet I'll have to start using these tools myself, but with a plan and in extremely stubborn ways...\n\nAt least there is nano-gpt.com that is as anonymous as realistically possible, especially when you can fund it using Lightning and even Monero :-)",
-      "tags": [],
-      "sig": "e9cf0650d603e88c1b74a9bdd64d26448dbed49b7158c5ebd6588c56dce9ba97019fe012cb98c8ee590d7e8089fefc4488c45e23c6ea92fee8258193aaf84b64",
       "score": 8,
       "engagement": {
         "reactions": 2,
@@ -1467,6 +1467,49 @@
       }
     },
     {
+      "id": "202946c89a714f98ec3778104eb008a857a11e28ad6f82afecc87f35043c3715",
+      "pubkey": "14741f5e3b7efd355e8976beff137d0da10108806855cdf70ff107e17fd37c5f",
+      "created_at": 1762568746,
+      "content": "Is there a service that is lime nostr.build but accepts #monero #xmr? ",
+      "tags": [
+        [
+          "t",
+          "monero"
+        ],
+        [
+          "t",
+          "xmr"
+        ],
+        [
+          "r",
+          "nostr.build"
+        ]
+      ],
+      "sig": "3549563498182da5ff0b7eed83f5664c602d9a402fceac384eddd2b28acf2b136d2c424656a409c0f23981c9c7512fed31f95b6422354670fb87279f3fe4ad87",
+      "score": 7,
+      "engagement": {
+        "reactions": 1,
+        "reposts": 0,
+        "replies": 2,
+        "zaps": 0
+      }
+    },
+    {
+      "id": "5e621589b32188d45512bff9ab0e03bb02208e053d8b1024c1a572d120aff4ce",
+      "pubkey": "70441609369d77ea553d805ee9af58b29e4c39d5b08b3956741839c2f3feebcc",
+      "created_at": 1763160496,
+      "content": "Do you think this isn't planned?\n\nWhy hasn't Monero been delisted from all the major CEXs?\nTo manipulate its price.\n\nSpoiler: I think we'll see attacks on the price of XMR in a few days.\n\nZcash is part of the attack, as it will be used to demonstrate that the price continues to rise, manipulated by a significant amount of VC money from undercover bankers, who are leveraging the Cypherpunk privacy coin narrative, among other tactics.\n\nZcash is the honeypot.\nMonero is the Enemy of The Central Banks.\n\nMonero Pump&Dump = bankers + regulators",
+      "tags": [],
+      "sig": "d514ed9c8d5238282af078d0ea096f247338c3d53fdb6929dda723e62ba0eb997a9fc43436f7d6fe3fabf544335f3b9c249493df8437e8c8297f3d559e99d823",
+      "score": 7,
+      "engagement": {
+        "reactions": 3,
+        "reposts": 2,
+        "replies": 0,
+        "zaps": 0
+      }
+    },
+    {
       "id": "730769be28c49ddb100a05a9eb35a6f179a17d9d6ad71db90ff5a28106c890ae",
       "pubkey": "fbbbf7c8f17b7a59a1b955f363939b74d5cd79f52556acb0712ce4f3bc1cca4a",
       "created_at": 1763033210,
@@ -1492,21 +1535,6 @@
         "reactions": 4,
         "reposts": 0,
         "replies": 1,
-        "zaps": 0
-      }
-    },
-    {
-      "id": "5e621589b32188d45512bff9ab0e03bb02208e053d8b1024c1a572d120aff4ce",
-      "pubkey": "70441609369d77ea553d805ee9af58b29e4c39d5b08b3956741839c2f3feebcc",
-      "created_at": 1763160496,
-      "content": "Do you think this isn't planned?\n\nWhy hasn't Monero been delisted from all the major CEXs?\nTo manipulate its price.\n\nSpoiler: I think we'll see attacks on the price of XMR in a few days.\n\nZcash is part of the attack, as it will be used to demonstrate that the price continues to rise, manipulated by a significant amount of VC money from undercover bankers, who are leveraging the Cypherpunk privacy coin narrative, among other tactics.\n\nZcash is the honeypot.\nMonero is the Enemy of The Central Banks.\n\nMonero Pump&Dump = bankers + regulators",
-      "tags": [],
-      "sig": "d514ed9c8d5238282af078d0ea096f247338c3d53fdb6929dda723e62ba0eb997a9fc43436f7d6fe3fabf544335f3b9c249493df8437e8c8297f3d559e99d823",
-      "score": 7,
-      "engagement": {
-        "reactions": 3,
-        "reposts": 2,
-        "replies": 0,
         "zaps": 0
       }
     },
@@ -2859,6 +2887,21 @@
       }
     },
     {
+      "id": "5d3ccee7147769867875ff4c5afbf25e4ff0faebfcc7a763b0e1ecb138b78a4e",
+      "pubkey": "0cd00f38628f1ef135721df93d9584a40f3bb2cf43f68d301f021dd631c74fab",
+      "created_at": 1763148920,
+      "content": "The True Value of Monero with John Gotts of Digital Gold Talk | Tune-in to a LIVE MoneroTalk episode TONIGHT 11/14 at 7PM-EST!\n\nWatch here on X or on YT➡️: https://www.youtube.com/live/KW-eSkgEB0Q?si=CBujR2QHpN_8rijm\nTWITCH ➡️: twitch.tv/monerotalk\nRumble!➡️: rumble.com/user/monerotalk\n\nThank you to our show sponsors cakewallet.com / stealthex.io /  \n \n\n",
+      "tags": [],
+      "sig": "5e1b1c5aa1e4f2854db07dbd6bf8f73a6e9df46d72eafefbfed50a645149933e844274124c42af061263bb2115abe33a8442c6a9ff816dfceaf430ca31720d5f",
+      "score": 4,
+      "engagement": {
+        "reactions": 1,
+        "reposts": 0,
+        "replies": 1,
+        "zaps": 0
+      }
+    },
+    {
       "id": "22f32da09375a1a84145ce46e0c7af372858975665cd00c0c8398aa7cca47e2b",
       "pubkey": "f985d309197c805e1719c73185b574fc3ee407d7c1b6157dee99c6ace2599bbb",
       "created_at": 1762895605,
@@ -2926,21 +2969,6 @@
         ]
       ],
       "sig": "799775c4300d729c0d55982284a974391065230cc5fc1b58b8fc61973df95921e95cb8827229d7ed38f0e66aae75225aba5d4bd260e70cc6428caf0e0082ffc0",
-      "score": 4,
-      "engagement": {
-        "reactions": 1,
-        "reposts": 0,
-        "replies": 1,
-        "zaps": 0
-      }
-    },
-    {
-      "id": "5d3ccee7147769867875ff4c5afbf25e4ff0faebfcc7a763b0e1ecb138b78a4e",
-      "pubkey": "0cd00f38628f1ef135721df93d9584a40f3bb2cf43f68d301f021dd631c74fab",
-      "created_at": 1763148920,
-      "content": "The True Value of Monero with John Gotts of Digital Gold Talk | Tune-in to a LIVE MoneroTalk episode TONIGHT 11/14 at 7PM-EST!\n\nWatch here on X or on YT➡️: https://www.youtube.com/live/KW-eSkgEB0Q?si=CBujR2QHpN_8rijm\nTWITCH ➡️: twitch.tv/monerotalk\nRumble!➡️: rumble.com/user/monerotalk\n\nThank you to our show sponsors cakewallet.com / stealthex.io /  \n \n\n",
-      "tags": [],
-      "sig": "5e1b1c5aa1e4f2854db07dbd6bf8f73a6e9df46d72eafefbfed50a645149933e844274124c42af061263bb2115abe33a8442c6a9ff816dfceaf430ca31720d5f",
       "score": 4,
       "engagement": {
         "reactions": 1,
@@ -3672,6 +3700,30 @@
       }
     },
     {
+      "id": "aeffeee228401dd071a9b7650dbaad560bcf7a3fcc36c97da40235f3eb1d0de9",
+      "pubkey": "e93cd99fc75a88c03943a343aecca65e32a528659ed2d4b8a6d08b7652b4be5b",
+      "created_at": 1763109920,
+      "content": "Support local Monero businesses \nhttps://xmrbazaar.com/listing/ypPb/",
+      "tags": [
+        [
+          "alt",
+          "A short note: Support local Monero businesses \nhttps://xmrbazaar..."
+        ],
+        [
+          "r",
+          "https://xmrbazaar.com/listing/ypPb/"
+        ]
+      ],
+      "sig": "691d8b66e451413c7077397b17920387970060fb98f20d4250ebdc18b225b459c3a567accc43575a36110ba04506dd68a97ec6c6b8f5b5e0b6527e0339625523",
+      "score": 3,
+      "engagement": {
+        "reactions": 1,
+        "reposts": 1,
+        "replies": 0,
+        "zaps": 0
+      }
+    },
+    {
       "id": "1622c53f7546a4e81c8125ee6a29d9d146845a2d1c0352900152586eb5a80759",
       "pubkey": "fbbbf7c8f17b7a59a1b955f363939b74d5cd79f52556acb0712ce4f3bc1cca4a",
       "created_at": 1762773327,
@@ -3733,26 +3785,17 @@
       }
     },
     {
-      "id": "aeffeee228401dd071a9b7650dbaad560bcf7a3fcc36c97da40235f3eb1d0de9",
-      "pubkey": "e93cd99fc75a88c03943a343aecca65e32a528659ed2d4b8a6d08b7652b4be5b",
-      "created_at": 1763109920,
-      "content": "Support local Monero businesses \nhttps://xmrbazaar.com/listing/ypPb/",
-      "tags": [
-        [
-          "alt",
-          "A short note: Support local Monero businesses \nhttps://xmrbazaar..."
-        ],
-        [
-          "r",
-          "https://xmrbazaar.com/listing/ypPb/"
-        ]
-      ],
-      "sig": "691d8b66e451413c7077397b17920387970060fb98f20d4250ebdc18b225b459c3a567accc43575a36110ba04506dd68a97ec6c6b8f5b5e0b6527e0339625523",
+      "id": "502b180337de3101f2119ac35590056ceb093c9b72117e81f04a47d104d306bc",
+      "pubkey": "c02bedab495a8d73e23192fa161a0b8344821f48446811b1e810fac65b584f49",
+      "created_at": 1763069462,
+      "content": "Monero [XMR] gains defy privacy-token selloffs, but will it survive Bitcoin’s pullback?\nhttps://ambcrypto.com/monero-xmr-gains-defy-privacy-token-selloffs-but-will-it-survive-bitcoins-pullback/",
+      "tags": [],
+      "sig": "b0095a42a7aa1d20a7723dae1e923732e7d458986934a25ad83ea4236cb4ea3fb014bfdc8b34496d2ead105340379bc5b20a13a1325e2fd6d35b461710d6dc5a",
       "score": 3,
       "engagement": {
-        "reactions": 1,
-        "reposts": 1,
-        "replies": 0,
+        "reactions": 0,
+        "reposts": 0,
+        "replies": 1,
         "zaps": 0
       }
     },
@@ -4610,6 +4653,66 @@
       }
     },
     {
+      "id": "20dcca36ab952ac4726d094c0bc130f82089b4468a6f7d6e1305d822e33d8f13",
+      "pubkey": "2ca5e6a7505c0ab25fd68c1f541506842c4199d64f01aa905810bed5bb0f8149",
+      "created_at": 1762844402,
+      "content": "1 #XMR = 325.470 #EUR\n1 #XMR = 379.280 #USD\n1 #XMR = 2005.657 #BRL\n1 #XMR = 0.003605 #BTC\n1 #XMR = 0.106698 #ETH\n1 #XMR = 0.722475 #BCH\n1 #XMR = 3.664813 #LTC",
+      "tags": [
+        [
+          "t",
+          "haveno"
+        ],
+        [
+          "t",
+          "retoswap"
+        ],
+        [
+          "t",
+          "monero"
+        ],
+        [
+          "t",
+          "XMR"
+        ],
+        [
+          "t",
+          "EUR"
+        ],
+        [
+          "t",
+          "USD"
+        ],
+        [
+          "t",
+          "BRL"
+        ],
+        [
+          "t",
+          "BTC"
+        ],
+        [
+          "t",
+          "ETH"
+        ],
+        [
+          "t",
+          "LTC"
+        ],
+        [
+          "t",
+          "BCH"
+        ]
+      ],
+      "sig": "194558adfd46abaa4326cba7104cd176a1e3e14604da8094143c6da30391fec015e1e8d3e2be5e4aed145c944c6431c4334ecfdad1ae7d20671919edfd496326",
+      "score": 1,
+      "engagement": {
+        "reactions": 1,
+        "reposts": 0,
+        "replies": 0,
+        "zaps": 0
+      }
+    },
+    {
       "id": "93af0175e3b70825cafceff34ca43a9be1bcb4235a948410892113d034bef845",
       "pubkey": "b8d805ff911bc9e4d6ed57d17bb436f127ebd2d8187f1866932d48ec39851c75",
       "created_at": 1762799603,
@@ -5017,66 +5120,6 @@
       "score": 1,
       "engagement": {
         "reactions": 1,
-        "reposts": 0,
-        "replies": 0,
-        "zaps": 0
-      }
-    },
-    {
-      "id": "694fc23f03723728e86107e17a04029e77b64f81c2237b3ddcf9d97a4589f7d6",
-      "pubkey": "2ca5e6a7505c0ab25fd68c1f541506842c4199d64f01aa905810bed5bb0f8149",
-      "created_at": 1763175602,
-      "content": "1 #XMR = 358.630 #EUR\n1 #XMR = 416.655 #USD\n1 #XMR = 2217.529 #BRL\n1 #XMR = 0.004343 #BTC\n1 #XMR = 0.131108 #ETH\n1 #XMR = 0.852552 #BCH\n1 #XMR = 3.987458 #LTC",
-      "tags": [
-        [
-          "t",
-          "haveno"
-        ],
-        [
-          "t",
-          "retoswap"
-        ],
-        [
-          "t",
-          "monero"
-        ],
-        [
-          "t",
-          "XMR"
-        ],
-        [
-          "t",
-          "EUR"
-        ],
-        [
-          "t",
-          "USD"
-        ],
-        [
-          "t",
-          "BRL"
-        ],
-        [
-          "t",
-          "BTC"
-        ],
-        [
-          "t",
-          "ETH"
-        ],
-        [
-          "t",
-          "LTC"
-        ],
-        [
-          "t",
-          "BCH"
-        ]
-      ],
-      "sig": "b01fc2a473f7da4933363f8ef1ddbacdd4e95a72b43f2a2563167e8de20d477c8dd31df1d5be2a9e27c7c3d9b6bc9928fde2245918ff96767c4cdf0961d79254",
-      "score": 0,
-      "engagement": {
-        "reactions": 0,
         "reposts": 0,
         "replies": 0,
         "zaps": 0
@@ -6714,21 +6757,6 @@
       }
     },
     {
-      "id": "b0bd1ebadd1b9c2af365bd3b99265ef22d7d86d83c23cc6fbec08f16626bc7a4",
-      "pubkey": "a3c1a5ceda8b86b7cb64d5d6af58fc787ba400f2912b907969d27547f96545d0",
-      "created_at": 1763173945,
-      "content": "The contrarian stackers guide:\n- Only stack in the despair of a bear market - patience and discipline to only be buying 1 out of every 4 years.\n- in the other 3 years you will build up your non Bitcoin assets - this will keep you comfortable in the bear and will give you assets that perform when Bitcoin is not.\n- opportunity fund this is your elephant gun when there is a big opportunity you need to be able to capitalize.\n- emergency fund because shit happens and you should only sell an asset because you want to not because you have to.\n- if your overexposed in a bull market hedge with selling futures in a bear, keep your sats cold but lower your downside risk\n- learn constantly, stay agile, and always be ready for the market to change.\n- the influencers will tell you you only need bitcoin and the CAGR is the best in any asset. Unless you bought it 2015 or prior this is garbage advice, take away the first 5 of the last 10 years and this return is reduced incredibly. Ie look at 5yr chart vs gold no real return since 2021.\n- there is a second best it’s call Monero and it outperforms Bitcoin in bear market \n- becoming sovereign should be the goal everything else is noise, bitcoin is one piece of the puzzle not the entire puzzle as some claim.\n- what the fuck do I know it’s just like my opinion man.",
-      "tags": [],
-      "sig": "6b381a0738889d08311323b35d17254284d453ec73afe5e45f4d76ccc9ed3cce25ac808a8eba184e85f65144a744eaef3606d331f085aba0f0e0ae5d13a74d00",
-      "score": 0,
-      "engagement": {
-        "reactions": 0,
-        "reposts": 0,
-        "replies": 0,
-        "zaps": 0
-      }
-    },
-    {
       "id": "6526496fd2c9c8ec153a6d54cb1b9cbf42c29a448983dce14d50c73011b61b96",
       "pubkey": "fbbbf7c8f17b7a59a1b955f363939b74d5cd79f52556acb0712ce4f3bc1cca4a",
       "created_at": 1763119415,
@@ -6764,28 +6792,6 @@
         ]
       ],
       "sig": "037db239f6d1c8310fd89cf9c2a568613f07604d6e826ab0752759c0aa63e12f276139dd63fef2aea4543f8a58895129dc278453a3c4a7609bf116e5f06cd4b9",
-      "score": 0,
-      "engagement": {
-        "reactions": 0,
-        "reposts": 0,
-        "replies": 0,
-        "zaps": 0
-      }
-    },
-    {
-      "id": "e970779dddf26d56396a0904613ef10a2e2ebd4e5b74e2fcf928273fb2ca93dd",
-      "pubkey": "0c45d7d45edb0fadda4215d36ca0d9aba0c771b85d3717764b8a128d5e443e4d",
-      "created_at": 1763172937,
-      "content": "If it was my Bitcoin, Z-cash, or Goldback stack I’d show it\n\nIf it was my monero stack, y’all are seeing my penis instead 😂.\n\nI don’t got a lot of monero though but I still wouldn’t want to show my Monero stack.",
-      "tags": [
-        [
-          "e",
-          "778d90e32eb785068be28f0f5d5ef98cb91bd2709fd15f9013495a5a483aaf62",
-          "wss://relay.primal.net",
-          "root"
-        ]
-      ],
-      "sig": "f55cfc021e9f5c37ab733e2630dbc2da632c3c36f8e9aa0832afcda059b171612d8dc3eb9ca36c01a83b4c230416c4b5ec99d481a13c6adcb74d0213b722c490",
       "score": 0,
       "engagement": {
         "reactions": 0,
@@ -7165,12 +7171,108 @@
       }
     },
     {
+      "id": "d3cf077e0608d9a35bff329a90838d3cc20ee60bfff078400ce71cc30bf7a54b",
+      "pubkey": "052466631c6c0aed84171f83ef3c95cb81848d4dcdc1d1ee9dfdf75b850c1cb4",
+      "created_at": 1762710409,
+      "content": "ouro não: monouro manero monero mineiro 👾💃",
+      "tags": [
+        [
+          "alt",
+          "A short note: ouro não: monouro manero monero mineiro 👾💃"
+        ],
+        [
+          "e",
+          "29ed2a9271c1e01ed3b74a9a61f5875b5cbccfa17cfbb3c6978c6b2c415e28ae",
+          "wss://relay.nostrcheck.me/",
+          "root",
+          "c1a9282b7da213e4827e230f092f226223d42577f1086bb88e58081b75752c6d"
+        ],
+        [
+          "e",
+          "ec6b227e3840882537ea098b9370c564fcc736e5226a96dddb819554a60ba3a0",
+          "wss://lang.relays.land/pt",
+          "",
+          "c1a9282b7da213e4827e230f092f226223d42577f1086bb88e58081b75752c6d"
+        ],
+        [
+          "e",
+          "13b28c13d9466a50f1accbe579bcd49fe154be1b274b73d286a0fb4160a85139",
+          "wss://relay.primal.net/",
+          "",
+          "f9d7f0b271b5bb19ed400d8baeee1c22ac3a5be5cf20da55219c4929e523987a"
+        ],
+        [
+          "e",
+          "5b7e565eec13f7e0cd8c49ea6490860b622a92b46ab166322901adf7b74d6efb",
+          "wss://nos.lol/",
+          "",
+          "052466631c6c0aed84171f83ef3c95cb81848d4dcdc1d1ee9dfdf75b850c1cb4"
+        ],
+        [
+          "e",
+          "70123937a3dcd8aa1be7dc08c9ce13ef92907501ee4a6d9362e98a038d35ccc4",
+          "wss://lang.relays.land/pt",
+          "reply",
+          "c1a9282b7da213e4827e230f092f226223d42577f1086bb88e58081b75752c6d"
+        ],
+        [
+          "p",
+          "c1a9282b7da213e4827e230f092f226223d42577f1086bb88e58081b75752c6d",
+          "wss://relay.nostrcheck.me/"
+        ],
+        [
+          "p",
+          "052466631c6c0aed84171f83ef3c95cb81848d4dcdc1d1ee9dfdf75b850c1cb4",
+          "wss://relay.damus.io/"
+        ],
+        [
+          "p",
+          "f9d7f0b271b5bb19ed400d8baeee1c22ac3a5be5cf20da55219c4929e523987a",
+          "wss://relay.primal.net/"
+        ]
+      ],
+      "sig": "bb08aa8436f206d673d15713cbac91e2ea5b818a707d425e637dceb130602b4e69bf3067537d99ad57fcf9f5f4df42fe4a2d88ca50b9ce9bd0dd5b5ded1674da",
+      "score": 0,
+      "engagement": {
+        "reactions": 0,
+        "reposts": 0,
+        "replies": 0,
+        "zaps": 0
+      }
+    },
+    {
       "id": "2127ef47b78d146e5eab7f6a6fe1dfdafe495cd3e08e548eb48e6a9fbf54dd9b",
       "pubkey": "35320d73bba1d8e720c706471e92199976f794b35232ab9156eb15574d76a1a5",
       "created_at": 1763078402,
       "content": "#Monero info: 1 #XMR == 385.83 #USD, 1 #BTC == 258.5 #XMR, UTC time: Fri Nov 14 00:00:02 2025",
       "tags": [],
       "sig": "42713de539dc63f9d9f1caa2328c60999f32e56705113febd13da60e570cacd43e926a5217dc91fe1a900ed5c3954f3bbc539502fe4a0636b7a24e4cbf27503e",
+      "score": 0,
+      "engagement": {
+        "reactions": 0,
+        "reposts": 0,
+        "replies": 0,
+        "zaps": 0
+      }
+    },
+    {
+      "id": "f9a846a0e1021ffb3c1c5ab1928772d3a5d8df166fa71910ec36395d90c62553",
+      "pubkey": "916b7aca250f43b9f842faccc831db4d155088632a8c27c0d140f2043331ba57",
+      "created_at": 1763069924,
+      "content": "Monero exists in its own ecosystem, has an ecosystem for dark‑market use, is not listed on many exchanges, and lacks institutional adoption. I don’t think it will be affected much; on the contrary, with all the privacy concerns it may actually gain traction.",
+      "tags": [
+        [
+          "e",
+          "502b180337de3101f2119ac35590056ceb093c9b72117e81f04a47d104d306bc",
+          "",
+          "root"
+        ],
+        [
+          "p",
+          "c02bedab495a8d73e23192fa161a0b8344821f48446811b1e810fac65b584f49"
+        ]
+      ],
+      "sig": "6d3fc4138738272523cf619de74d264ccd16e18bad0f6dfc45802ea06b3eab95a839a8cb94b54df16d3b6a1d69fbe35e758b39531c92a28674c171f07fd99e76",
       "score": 0,
       "engagement": {
         "reactions": 0,
