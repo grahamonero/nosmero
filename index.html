@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nosmero - Nostr + Monero</title>
+    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
+    <link rel="stylesheet" href="/styles.css?v=1.9.13">
+
+
+</head>
+<body>
+    <!-- ==================================
+         NEW MINIMAL HEADER & HAMBURGER MENU
+         ================================== -->
+
+    <!-- Menu Overlay for Slide-out Menu -->
+    <div class="menu-overlay" id="menuOverlay" onclick="closeHamburgerMenu()"></div>
+
+    <!-- Slide-out Hamburger Menu -->
+    <nav class="slide-menu" id="slideMenu">
+        <div class="menu-header">
+            <span style="font-weight: 600; color: var(--text-primary);">Menu</span>
+            <button class="menu-close" onclick="closeHamburgerMenu()">✕</button>
+        </div>
+        <div class="menu-nav">
+            <!-- Feed Selection (at TOP of menu) -->
+            <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; padding: 0 16px; font-weight: 600;">FEEDS</div>
+                <div class="menu-item" onclick="handleFeedMenuClick('following')">
+                    <span class="menu-icon">👥</span>
+                    <span>Following</span>
+                </div>
+                <div class="menu-item" onclick="handleFeedMenuClick('global')">
+                    <span class="menu-icon">🌐</span>
+                    <span>Web of Trust Feed</span>
+                </div>
+                <div class="menu-item" onclick="handleFeedMenuClick('monero')">
+                    <span class="menu-icon">🔥</span>
+                    <span>Trending Monero Notes</span>
+                </div>
+            </div>
+
+            <!-- Navigation Items -->
+            <div class="menu-item" data-tab="home" onclick="handleMenuItemClick('home')">
+                <span class="menu-icon">🏠</span>
+                <span>Home</span>
+            </div>
+            <div class="menu-item" data-tab="search" onclick="handleMenuItemClick('search')">
+                <span class="menu-icon">🔍</span>
+                <span>Search</span>
+            </div>
+            <div class="menu-item" data-tab="messages" onclick="handleMenuItemClick('messages')">
+                <span class="menu-icon">💬</span>
+                <span>Messages</span>
+            </div>
+            <div class="menu-item" data-tab="profile" onclick="handleMenuItemClick('profile')">
+                <span class="menu-icon">👤</span>
+                <span>Profile</span>
+            </div>
+            <div class="menu-item" data-tab="settings" onclick="handleMenuItemClick('settings')">
+                <span class="menu-icon">⚙️</span>
+                <span>Settings</span>
+            </div>
+            <div class="menu-item" onclick="toggleTheme()">
+                <span class="menu-icon" id="themeIconMenu">🌙</span>
+                <span id="themeLabelMenu">Dark Mode</span>
+            </div>
+            <div class="menu-item" onclick="window.location.href='https://nosmero.com/set-desktop-preference'">
+                <span class="menu-icon">🖥️</span>
+                <span>Desktop Site</span>
+            </div>
+            <div class="menu-item" onclick="toggleCompose()" id="menuCreateNoteBtn" style="display: none;">
+                <span class="menu-icon">✏️</span>
+                <span>Create Note</span>
+            </div>
+            <!-- Login Options (shown when anonymous) -->
+            <div id="menuLoginOptions" style="display: none; margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                <div class="menu-item" onclick="showCreateAccount(); closeHamburgerMenu();">
+                    <span class="menu-icon">🆕</span>
+                    <span>Create Account</span>
+                </div>
+                <div class="menu-item" onclick="showLoginWithNsec(); closeHamburgerMenu();">
+                    <span class="menu-icon">🔑</span>
+                    <span>Login with nsec</span>
+                </div>
+                <div class="menu-item" onclick="loginWithExtension(); closeHamburgerMenu();">
+                    <span class="menu-icon">🔌</span>
+                    <span>Use Extension</span>
+                </div>
+                <div class="menu-item" onclick="showLoginWithNsecApp(); closeHamburgerMenu();">
+                    <span class="menu-icon">🌐</span>
+                    <span>Use nsec.app</span>
+                </div>
+                <div class="menu-item" onclick="showLoginWithAmber(); closeHamburgerMenu();">
+                    <span class="menu-icon">📱</span>
+                    <span>Use Amber</span>
+                </div>
+            </div>
+            <!-- Logged-in user info -->
+            <div id="menuUserInfo" style="display: none; margin-top: auto; padding: 1rem; border-top: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.02);">
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">Logged in as</div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <img id="menuUserPic" src="" alt="Profile" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid var(--border-color);">
+                    <div style="flex: 1; min-width: 0;">
+                        <div id="menuUserName" style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></div>
+                        <div id="menuUserNpub" style="font-size: 11px; font-family: monospace; color: var(--text-secondary);"></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Logout button at bottom -->
+            <div class="menu-item" onclick="logout()" id="menuLogoutBtn" style="display: none; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                <span class="menu-icon">🚪</span>
+                <span style="color: #ff6b6b;">Logout</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Minimal Fixed Header - Single Row Layout -->
+    <header class="minimal-header">
+        <div class="header-single-row">
+            <button class="mobile-menu-btn" onclick="openHamburgerMenu()" aria-label="Open menu">☰</button>
+            <div class="logo-container">
+                <img src="/nosmero-logo-new.png" alt="nosmero" class="header-logo">
+                <span class="tagline">nostr + monero</span>
+            </div>
+
+            <nav class="feed-selector">
+                <a href="#" class="feed-tab active" data-feed="following" onclick="handleFeedTabClick('following', event)">Following</a>
+                <a href="#" class="feed-tab" data-feed="tipactivity" onclick="handleFeedTabClick('tipactivity', event)">Monero Tip Activity</a>
+                <a href="#" class="feed-tab" data-feed="global" onclick="handleFeedTabClick('global', event)">Web of Trust Feed</a>
+                <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero Notes</a>
+                <button class="create-note-btn" id="headerCreateNoteBtn" onclick="handleCreateNoteClick()" style="display: none;">
+                    ✏️ <span>Post</span>
+                </button>
+                <button class="notifications-btn" id="headerNotificationsBtn" onclick="handleNavItemClick('notifications')" style="display: none; position: relative;">
+                    🔔
+                    <span id="notificationBadge" style="position: absolute; top: -4px; right: -4px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
+                </button>
+                <button class="login-btn-orange" id="headerLoginBtn" onclick="showLoginOptions()">
+                    Login
+                </button>
+            </nav>
+
+            <div class="quick-actions">
+                <div class="relay-indicator" id="relayIndicator">
+                    <div class="status-dot"></div>
+                    <span id="relayCount">0 relays connected</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ==================================
+         END NEW HEADER & MENU
+         ================================== -->
+
+    <!-- LEGACY: Keep existing sidebar hidden for backward compatibility -->
+    <div class="sidebar" style="display: none;">
+        <div class="logo">
+            <img src="/nosmero-logo-new.png" alt="nosmero" style="width: 120px; height: auto;">
+        </div>
+        
+        <div class="nav-item active" data-tab="home" onclick="handleNavItemClick('home')">
+            <span>🏠</span>
+            <span>Home</span>
+        </div>
+        
+        <div class="nav-item" data-tab="settings" onclick="handleNavItemClick('settings')">
+            <span>⚙️</span>
+            <span>Settings</span>
+        </div>
+        
+        <div class="nav-item" data-tab="search" onclick="handleNavItemClick('search')">
+            <span>🔍</span>
+            <span>Search</span>
+        </div>
+        
+        <div class="nav-item" data-tab="messages" onclick="handleNavItemClick('messages')" style="position: relative;">
+            <span>✉️</span>
+            <span>Messages</span>
+            <span id="messagesBadge" style="position: absolute; top: 8px; right: 8px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
+        </div>
+
+        <div class="nav-item" data-tab="notifications" onclick="handleNavItemClick('notifications')" style="position: relative;">
+            <span>🔔</span>
+            <span>Notifications</span>
+            <span id="notificationBadge" style="position: absolute; top: 8px; right: 8px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
+        </div>
+        
+        <div class="nav-item" data-tab="profile" onclick="handleNavItemClick('profile')">
+            <span>👤</span>
+            <span>Profile</span>
+        </div>
+
+        <!-- Theme Toggle -->
+        <div class="nav-item" onclick="toggleTheme()" style="cursor: pointer;">
+            <span id="themeIcon">🌙</span>
+            <span id="themeLabel">Dark</span>
+        </div>
+
+        <!-- Login/Create Account Options (shown when not logged in) -->
+        <div id="authOptions" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
+            <button class="login-option-btn" onclick="showCreateAccount()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: white; border-radius: 8px; cursor: pointer;">
+                🆕 Create Account
+            </button>
+            <button class="login-option-btn" onclick="showLoginWithNsec()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
+                🔑 Login with nsec
+            </button>
+            <button class="login-option-btn" onclick="loginWithExtension()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
+                🔌 Use Extension
+            </button>
+            <button class="login-option-btn" onclick="showLoginWithNsecApp()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
+                🌐 Use nsec.app
+            </button>
+            <button class="login-option-btn" onclick="showLoginWithAmber()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
+                📱 Use Amber
+            </button>
+        </div>
+        
+        <!-- Logout Option (shown when logged in) -->
+        <div id="logoutOption" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
+            <button onclick="logout()" style="width: 100%; padding: 10px; background: #333; border: none; color: #ff6b6b; border-radius: 8px; cursor: pointer;">
+                🚪 Logout
+            </button>
+        </div>
+        
+        <button class="post-button" onclick="toggleCompose()">✏️ Create Note</button>
+
+        <button class="post-button" onclick="showZapQueue()" style="position: relative; margin-top: 10px;">
+            💰 XMR Queue
+            <span class="zap-queue-indicator" style="position: absolute; top: -5px; right: -5px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; font-weight: bold; display: none; justify-content: center; align-items: center;">0</span>
+        </button>
+
+        <div class="nav-item" onclick="logout()" style="margin-top: 10px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border-radius: 12px; color: #fff;">
+            <span>🚪</span>
+            <span style="color: #fff; font-weight: bold;">Logout</span>
+        </div>
+    </div>
+
+    <div class="main">
+        <!-- Contact List Sync Status Indicator -->
+        <div id="contactSyncStatus" class="sync-status-banner" style="display: none; background: linear-gradient(135deg, #FF6600, #8B5CF6); padding: 10px 16px; margin: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13px; align-items: center; gap: 10px;">
+            <div class="spinner" style="width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+            <span id="contactSyncText">Syncing your follows...</span>
+        </div>
+
+        <div id="compose" class="compose-area" style="display: none;">
+            <textarea class="compose-textarea" placeholder="What's happening?" maxlength="4000" style="min-height: 120px; resize: vertical;" oninput="updateCharacterCount(this, 'mainCharCount')"></textarea>
+            <div style="text-align: right; color: #666; font-size: 12px; margin-bottom: 8px;">
+                <span id="mainCharCount">0/4000</span>
+            </div>
+            <div class="compose-actions">
+                <input type="text" class="xmr-address-input" placeholder="Your Monero address (optional)" id="composeMoneroAddress">
+                <div class="media-upload-section">
+                    <input type="file" id="composeMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'compose')">
+                    <div id="composeMediaPreview" class="media-preview" style="display: none;"></div>
+                </div>
+                <div class="compose-buttons">
+                    <button class="media-btn" onclick="document.getElementById('composeMediaInput').click()" title="Add Image/Video">
+                        📎 Media
+                    </button>
+                    <button class="cancel-btn" onclick="cancelCompose()">Cancel</button>
+                    <button class="send-btn" onclick="sendPost()">Publish</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="feed" id="feed">
+            <!-- Welcome Banner for First-Time Anonymous Users -->
+            <div class="welcome-banner hidden" id="welcomeBanner">
+                <button class="close-banner" onclick="closeWelcomeBanner()">✕</button>
+                <h2 class="welcome-title">Welcome to Nosmero 👋</h2>
+                <p class="welcome-text">
+                    You are viewing the top notes regarding the Monero community. To post or send tips, just generate your keys - takes 5 seconds, no email needed.
+                </p>
+                <div class="welcome-actions">
+                    <button class="welcome-btn primary" onclick="handleCreateKeysAndPost()">Create Keys & Post</button>
+                    <a href="#" class="welcome-btn secondary" onclick="showWhatIsNostr()">What's Nostr?</a>
+                    <a href="#" class="welcome-btn secondary" onclick="showWhatIsMonero()">What's Monero?</a>
+                </div>
+            </div>
+
+            <div class="loading">Loading nostr-tools...</div>
+        </div>
+        
+        <!-- Messages page (hidden by default) -->
+        <div id="messagesPage" class="messages-page" style="display: none;">
+            <div class="messages-container">
+                <div class="conversations-list">
+                    <div class="conversations-header">
+                        <h2>Messages</h2>
+                        <button class="new-message-btn" onclick="startNewMessage()">
+                            <span>✉️ New</span>
+                        </button>
+                    </div>
+                    <div id="conversationsList" class="conversations">
+                        <!-- Conversations will be listed here -->
+                    </div>
+                </div>
+                <div class="message-thread">
+                    <div id="messageHeader" class="message-header">
+                        <span>Select a conversation</span>
+                    </div>
+                    <div id="messageThread" class="messages-display">
+                        <!-- Messages will appear here -->
+                    </div>
+                    <div id="messageComposer" class="message-composer" style="display: none;">
+                        <textarea id="messageInput" placeholder="Type your message..." rows="3"></textarea>
+                        <button onclick="sendMessage()" class="send-message-btn">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Thread page (hidden by default) -->
+        <div id="threadPage" class="thread-page" style="display: none;">
+            <div class="thread-header">
+                <button onclick="goBackFromThread()" style="background: none; border: none; color: #fff; cursor: pointer; font-size: 18px; margin-right: 12px;">←</button>
+                <h2>Thread</h2>
+            </div>
+            <div id="threadPageContent" class="thread-content">
+                <!-- Thread will be displayed here -->
+            </div>
+        </div>
+
+        <div id="profilePage" class="profile-page" style="display: none;">
+            <!-- User profile will be displayed here -->
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div class="modal" id="loginModal">
+        <div class="modal-content">
+            <div class="modal-header">Welcome to nosmero</div>
+            <div style="margin-bottom: 20px; color: #ccc; text-align: left;">
+                Choose how you want to get started:
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+                <button class="login-option-btn" onclick="showCreateAccount()">
+                    🆕 Create New Account
+                </button>
+                <button class="login-option-btn" onclick="showLoginWithNsec()">
+                    🔑 Login with Private Key (nsec)
+                </button>
+                <button class="login-option-btn" onclick="loginWithExtension()">
+                    🔌 Login with Browser Extension
+                </button>
+                <button class="login-option-btn" onclick="showLoginWithNsecApp()">
+                    🌐 Login with nsec.app
+                </button>
+                <button class="login-option-btn" onclick="showLoginWithAmber()">
+                    📱 Login with Amber
+                </button>
+            </div>
+
+            <!-- Create Account Section -->
+            <div id="createAccountSection" style="display: none;">
+                <div style="margin-bottom: 16px; color: #ccc; font-size: 14px;">
+                    We'll generate a new private key for you. Make sure to save it!
+                </div>
+                <button class="send-btn" onclick="createNewAccount()">Generate New Keys</button>
+                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+            </div>
+
+            <!-- Login with nsec Section -->
+            <div id="loginWithNsecSection" style="display: none;">
+                <div style="margin-bottom: 16px;">
+                    <input type="password" id="nsecInput" placeholder="Enter your nsec..."
+                           style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
+                </div>
+                <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
+                    Your private key starts with "nsec1..."
+                </div>
+
+                <!-- Security warning about nsec exposure -->
+                <div style="margin-bottom: 16px; padding: 14px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">⚠️ Critical Security Warning</div>
+                    <div style="color: #ccc; font-size: 13px; line-height: 1.6; margin-bottom: 12px;">
+                        <strong style="color: #FF6600;">Anyone with your nsec can control your account permanently.</strong> There is no password reset or recovery - if your nsec is exposed or lost, your identity is compromised forever.
+                    </div>
+                </div>
+
+                <!-- Security notice about PIN encryption -->
+                <div style="margin-bottom: 16px; padding: 14px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
+                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">🔐 How We Protect Your Key</div>
+                    <div style="color: #ccc; font-size: 13px; line-height: 1.5;">
+                        Your private key will be encrypted with a PIN and stored in your browser.
+                        <strong style="color: #FF6600;">If you forget your PIN, you'll need to re-login with your nsec.</strong>
+                    </div>
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(139, 92, 246, 0.2);">
+                        <div style="color: #999; font-size: 12px; margin-bottom: 6px;">For better security, consider:</div>
+                        <ul style="margin: 0; padding-left: 20px; color: #999; font-size: 12px;">
+                            <li>Using a browser extension (Alby, nos2x)</li>
+                            <li>Using nsec.app for remote signing</li>
+                        </ul>
+                    </div>
+                    <div style="margin-top: 8px; color: #666; font-size: 11px; font-style: italic;">
+                        ⚠️ Only use this login method on devices you trust
+                    </div>
+                </div>
+
+                <button class="send-btn" onclick="loginWithNsec()">Login</button>
+                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+            </div>
+
+            <!-- Login with Amber Section -->
+            <div id="loginWithAmberSection" style="display: none;">
+                <div style="margin-bottom: 16px;">
+                    <input type="text" id="amberBunkerInput" placeholder="Paste your bunker URI from Amber..."
+                           style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
+                </div>
+                <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
+                    Get your bunker URI from the Amber app (Settings → Connections)
+                </div>
+
+                <div style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
+                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">📱 How to get your bunker URI:</div>
+                    <ol style="color: #ccc; font-size: 13px; margin: 0; padding-left: 20px; line-height: 1.8;">
+                        <li>Open <strong style="color: #8B5CF6;">Amber</strong> on your Android device</li>
+                        <li>Go to Settings → Connections</li>
+                        <li>Tap "Create Connection" or use an existing one</li>
+                        <li>Copy the <strong style="color: #8B5CF6;">bunker://</strong> URI</li>
+                        <li>Paste it here</li>
+                    </ol>
+                </div>
+
+                <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">🔐 What is Amber?</div>
+                    <div style="color: #ccc; font-size: 13px; line-height: 1.5;">
+                        Amber is a secure Nostr signer app for Android that keeps your private key on your phone.
+                        When you use Amber, your key never leaves your device - Nosmero requests signatures remotely.
+                    </div>
+                    <div style="margin-top: 8px; color: #999; font-size: 12px;">
+                        <strong>Benefits:</strong> Maximum security, works like a hardware wallet, approve each action
+                    </div>
+                </div>
+
+                <button class="send-btn" onclick="loginWithAmber()">Connect to Amber</button>
+                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+            </div>
+
+            <!-- Key Display Section -->
+            <div id="keyDisplaySection" style="display: none;">
+                <div style="margin-bottom: 20px;">
+                    <div style="margin-bottom: 12px; color: #ccc;">Your Private Key (SAVE THIS!):</div>
+                    <div id="privateKeyDisplay" style="padding: 12px; background: #1a1a1a; border-radius: 8px; font-family: monospace; font-size: 12px; word-break: break-all; margin-bottom: 12px; color: #FF6600;"></div>
+                    
+                    <div style="margin-bottom: 12px; color: #ccc;">Your Public Key:</div>
+                    <div id="publicKeyDisplay" style="padding: 12px; background: #1a1a1a; border-radius: 8px; font-family: monospace; font-size: 12px; word-break: break-all; color: #8B5CF6;"></div>
+                </div>
+                
+                <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.2), rgba(139, 92, 246, 0.2)); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">⚠️ IMPORTANT:</div>
+                    <div style="color: #ccc; font-size: 14px;">
+                        Save your private key (nsec) somewhere safe! You'll need it to login again. Never share it with anyone!
+                    </div>
+                </div>
+                
+                <button class="send-btn" onclick="proceedToApp()">I've Saved My Keys - Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Post Modal -->
+    <div class="modal" id="newPostModal">
+        <div class="modal-content">
+            <div class="modal-header">Create Note</div>
+            <textarea id="newPostContent" placeholder="What's happening?" maxlength="4000" style="width: 100%; min-height: 150px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;" oninput="updateCharacterCount(this, 'modalCharCount')"></textarea>
+            <div style="text-align: right; color: #666; font-size: 12px; margin-top: 4px;">
+                <span id="modalCharCount">0/4000</span>
+            </div>
+            <input type="text" id="modalMoneroAddress" placeholder="Your Monero address (optional)" style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-top: 12px;">
+            <div class="media-upload-section">
+                <input type="file" id="modalMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'modal')">
+                <div id="modalMediaPreview" class="media-preview" style="display: none;"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="media-btn" onclick="document.getElementById('modalMediaInput').click()" title="Add Image/Video">
+                    📎 Media
+                </button>
+                <button class="close-btn" onclick="closeNewPostModal()">Cancel</button>
+                <button class="send-btn" onclick="publishNewPost()">Publish</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Reply Modal -->
+    <div class="modal" id="replyModal">
+        <div class="modal-content">
+            <div class="modal-header">Reply to Post</div>
+            <div id="replyingTo" style="padding: 12px; background: #1a1a1a; border-radius: 8px; margin-bottom: 16px; font-size: 14px; color: #999;"></div>
+            <textarea id="replyContent" placeholder="Write your reply..." maxlength="1000" style="width: 100%; min-height: 120px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
+            
+            <!-- Media Upload Section for Replies -->
+            <div class="media-upload-section">
+                <input type="file" id="replyMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'reply')">
+                <div id="replyMediaPreview" class="media-preview" style="display: none;"></div>
+            </div>
+            
+            <div class="modal-actions">
+                <button type="button" class="media-btn" onclick="document.getElementById('replyMediaInput').click()" title="Add Image/Video">
+                    📎 Media
+                </button>
+                <button class="close-btn" onclick="closeReplyModal()">Cancel</button>
+                <button class="send-btn" onclick="sendReplyToCurrentPost()">Reply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Repost Modal -->
+    <div class="modal" id="repostModal">
+        <div class="modal-content">
+            <div class="modal-header">Repost</div>
+            <div id="repostingTo" style="padding: 12px; background: #1a1a1a; border-radius: 8px; margin-bottom: 16px; font-size: 14px; color: #999;"></div>
+
+            <!-- Repost Type Toggle -->
+            <div style="margin-bottom: 16px;">
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <button id="quickRepostBtn" onclick="setRepostType('quick')" style="flex: 1; padding: 8px 16px; border: 1px solid #FF6600; border-radius: 6px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold; cursor: pointer;">Quick Repost</button>
+                    <button id="addCommentBtn" onclick="setRepostType('comment')" style="flex: 1; padding: 8px 16px; border: 1px solid #333; border-radius: 6px; background: transparent; color: #fff; cursor: pointer;">Add Comment</button>
+                </div>
+                <div id="quickRepostDesc" style="color: #666; font-size: 14px;">Share this note to your followers without adding commentary</div>
+                <div id="addCommentDesc" style="color: #666; font-size: 14px; display: none;">Quote this note and add your own commentary</div>
+            </div>
+
+            <!-- Comment Section (hidden by default) -->
+            <div id="repostCommentSection" style="display: none; margin-bottom: 16px;">
+                <textarea id="repostComment" placeholder="Add your thoughts..." maxlength="1000" style="width: 100%; min-height: 100px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeRepostModal()">Cancel</button>
+                <button id="repostBtn" class="send-btn" onclick="sendRepost()">Repost</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">Settings</div>
+            
+            <div class="settings-section">
+                <h3>Lightning Address</h3>
+                <input type="text" id="defaultLightningAddress" placeholder="Your Lightning address (e.g., user@domain.com)" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                <p style="color: #999; font-size: 12px; margin-top: 8px;">Used for receiving Bitcoin zaps via Lightning Network</p>
+            </div>
+
+            <div class="settings-section">
+                <h3>Banner Image URL</h3>
+                <input type="text" id="defaultBannerImage" placeholder="Your profile banner image URL" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                <p style="color: #999; font-size: 12px; margin-top: 8px;">Banner image displayed on your profile page</p>
+            </div>
+
+            <div class="settings-section">
+                <h3>Default Monero Address</h3>
+                <input type="text" id="defaultMoneroAddress" placeholder="Your default XMR address" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+            </div>
+
+            <div class="settings-section">
+                <h3>Default Zap Amounts</h3>
+                <div style="display: flex; gap: 20px; margin-top: 12px;">
+                    <div style="flex: 1;">
+                        <label style="color: #FFDF00; display: block; margin-bottom: 8px;">⚡ Bitcoin (sats)</label>
+                        <input type="number" id="defaultBtcZapAmount" placeholder="1000" min="1" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="color: #FF6600; display: block; margin-bottom: 8px;">⚡ Monero (XMR)</label>
+                        <input type="text" id="defaultXmrZapAmount" placeholder="0.001" step="0.001" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                    </div>
+                </div>
+                <p style="color: #999; font-size: 12px; margin-top: 8px;">Set default amounts for quick zapping</p>
+            </div>
+
+            <div class="settings-section">
+                <h3>Relay Configuration (NIP-65)</h3>
+                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Configure which relays you read from and write to</p>
+                
+                <div style="display: flex; gap: 20px;">
+                    <div style="flex: 1;">
+                        <h4 style="color: #FF6600; margin-bottom: 8px;">Read Relays</h4>
+                        <div id="readRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
+                        <input type="text" id="newReadRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
+                        <button onclick="addReadRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Read Relay</button>
+                    </div>
+                    
+                    <div style="flex: 1;">
+                        <h4 style="color: #8B5CF6; margin-bottom: 8px;">Write Relays</h4>
+                        <div id="writeRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
+                        <input type="text" id="newWriteRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
+                        <button onclick="addWriteRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #8B5CF6, #FF6600); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Write Relay</button>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 12px; padding: 8px; background: #111; border-radius: 8px;">
+                    <button onclick="resetToDefaultRelays()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer; margin-right: 8px;">Reset to Defaults</button>
+                    <button onclick="importRelayList()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer;">Import from Profile</button>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Direct Messages</h3>
+                <div style="margin-top: 12px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="useNip17Dms" style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>Use NIP-17 encrypted DMs (enhanced privacy)</span>
+                    </label>
+                    <div style="margin-top: 8px; padding: 12px; background: #1a1a00; border-left: 3px solid #FFDF00; border-radius: 4px;">
+                        <p style="color: #FFDF00; font-size: 12px; margin: 0;">⚠️ <strong>Only works with other Nosmero users</strong> who have this enabled.</p>
+                        <p style="color: #999; font-size: 12px; margin: 4px 0 0 0;">Messages to other clients will automatically use standard encryption (NIP-04).</p>
+                    </div>
+                    <p style="color: #666; font-size: 11px; margin-top: 8px;">
+                        NIP-17 provides enhanced privacy by hiding message metadata from relays. However, it only works when both sender and recipient use Nosmero with this setting enabled.
+                    </p>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Muted Users</h3>
+                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Users you've muted won't appear in your feed or tip disclosures</p>
+                <div id="mutedUsersList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
+                    <!-- Muted users will be populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Notifications</h3>
+                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Choose which types of notifications to receive</p>
+                <div style="display: grid; gap: 12px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_replies" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>💬 Replies to my posts</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_mentions" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>📢 Mentions of me</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_likes" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>❤️ Likes on my posts</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_reposts" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>🔄 Reposts of my posts</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_zaps" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>⚡ Zaps & Tips (Lightning + Monero)</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notif_follows" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>👥 New followers</span>
+                    </label>
+                </div>
+                <p style="color: #666; font-size: 11px; margin-top: 12px;">
+                    Disabled notification types won't be fetched from relays. Changes take effect on next notification refresh.
+                </p>
+            </div>
+
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeSettingsModal()">Close</button>
+                <button class="send-btn" onclick="saveSettings()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Modal -->
+    <div class="modal" id="profileModal">
+        <div class="modal-content">
+            <div class="modal-header">Profile</div>
+            <div id="profileContent"></div>
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeProfileModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Profile Modal -->
+    <div class="modal" id="userProfileModal">
+        <div class="modal-content">
+            <div id="userProfileContent"></div>
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeUserProfileModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Thread View Modal -->
+    <div class="modal" id="threadModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">Thread</div>
+            <div id="threadContent" style="max-height: 70vh; overflow-y: auto;"></div>
+            <div class="modal-actions">
+                <button class="close-btn" onclick="closeThreadModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Zap Modal -->
+    <div class="modal" id="zapModal">
+        <div class="modal-content">
+            <div class="modal-header">Tip with Monero</div>
+            <div id="zapDetails"></div>
+            <div class="qr-container">
+                <div id="qrCode"></div>
+            </div>
+            <div class="modal-footer">
+                <div style="font-size: 12px; color: #666; margin-bottom: 16px;">
+                    Scan with your Monero wallet
+                </div>
+                <button class="close-btn" onclick="closeZapModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PIN Entry Modal (for encrypted key storage) -->
+    <div class="modal" id="pinModal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">🔐 Secure Your Account</div>
+            <div style="padding: 20px;">
+                <p id="pinModalMessage" style="margin-bottom: 20px; color: #ccc;">Create a PIN to encrypt your private key</p>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999;">Enter PIN (4-8 digits)</label>
+                    <input type="password" id="pinInput"
+                           placeholder="Enter PIN..."
+                           maxlength="8"
+                           style="width: 100%; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 4px;">
+                </div>
+
+                <div id="pinConfirmSection" style="margin-bottom: 20px; display: none;">
+                    <label style="display: block; margin-bottom: 8px; color: #999;">Confirm PIN</label>
+                    <input type="password" id="pinConfirmInput"
+                           placeholder="Confirm PIN..."
+                           maxlength="8"
+                           style="width: 100%; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 4px;">
+                </div>
+
+                <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 6px; padding: 12px; margin-top: 16px;">
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 4px;">⚠️ Important</div>
+                    <div style="color: #999; font-size: 13px;">
+                        Your PIN encrypts your private key in browser storage. Don't forget it - we cannot recover it!
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="send-btn" id="pinSubmitBtn" onclick="submitPin()"
+                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Continue</button>
+                <button class="close-btn" id="pinCancelBtn" onclick="cancelPin()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Disclosure Prompt Modal -->
+    <div class="modal" id="disclosurePromptModal">
+        <div class="modal-content" style="max-width: 650px;">
+            <div class="modal-header">💰 Tip Disclosure Options</div>
+            <div style="padding: 20px;">
+                <p style="margin-bottom: 20px; color: #ccc;">Choose how you want to handle this tip:</p>
+
+                <!-- Option A: Keep it Secret -->
+                <label style="display: block; padding: 14px; margin-bottom: 12px; background: rgba(100, 100, 100, 0.1); border: 2px solid #444; border-radius: 8px; cursor: pointer; transition: all 0.2s;"
+                       onmouseover="this.style.background='rgba(100,100,100,0.15)'; this.style.borderColor='#666';"
+                       onmouseout="this.style.background='rgba(100,100,100,0.1)'; this.style.borderColor='#444';">
+                    <div style="display: flex; align-items: start;">
+                        <input type="radio" name="disclosureOption" value="secret" checked onchange="updateDisclosureOption()"
+                               style="margin-right: 12px; margin-top: 4px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; font-size: 15px; color: #fff; margin-bottom: 4px;">🔒 Keep it Secret</div>
+                            <div style="font-size: 13px; color: #999;">No public record of this tip</div>
+                        </div>
+                    </div>
+                </label>
+
+                <!-- Option B: Disclose (No Verification) -->
+                <label style="display: block; padding: 14px; margin-bottom: 12px; background: rgba(255, 102, 0, 0.1); border: 2px solid rgba(255, 102, 0, 0.3); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
+                       onmouseover="this.style.background='rgba(255,102,0,0.15)'; this.style.borderColor='rgba(255,102,0,0.5)';"
+                       onmouseout="this.style.background='rgba(255,102,0,0.1)'; this.style.borderColor='rgba(255,102,0,0.3)';">
+                    <div style="display: flex; align-items: start;">
+                        <input type="radio" name="disclosureOption" value="disclose" onchange="updateDisclosureOption()"
+                               style="margin-right: 12px; margin-top: 4px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; font-size: 15px; color: #FF6600; margin-bottom: 4px;">💰 Disclose (No Verification)</div>
+                            <div style="font-size: 13px; color: #999;">Honor system, no cryptographic proof</div>
+                        </div>
+                    </div>
+                </label>
+
+                <!-- Option C: Disclose + Verify -->
+                <label style="display: block; padding: 14px; margin-bottom: 20px; background: rgba(16, 185, 129, 0.1); border: 2px solid rgba(16, 185, 129, 0.3); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
+                       onmouseover="this.style.background='rgba(16,185,129,0.15)'; this.style.borderColor='rgba(16,185,129,0.5)';"
+                       onmouseout="this.style.background='rgba(16,185,129,0.1)'; this.style.borderColor='rgba(16,185,129,0.3)';">
+                    <div style="display: flex; align-items: start;">
+                        <input type="radio" name="disclosureOption" value="verify" onchange="updateDisclosureOption()"
+                               style="margin-right: 12px; margin-top: 4px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; font-size: 15px; color: #10B981; margin-bottom: 4px;">✓ Disclose + Verify</div>
+                            <div style="font-size: 13px; color: #999;">Cryptographically verified with blockchain proof. Transaction details sent privately to recipient via encrypted DM.</div>
+                        </div>
+                    </div>
+                </label>
+
+                <!-- Message Field (shown for all public options) -->
+                <div id="messageSection" style="display: none; margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Message (optional)</label>
+                    <textarea id="disclosurePromptMessage" rows="3"
+                              placeholder="Add a message with your tip..."
+                              style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; resize: vertical;"></textarea>
+                </div>
+
+                <!-- Verification Fields (shown only for verify options) -->
+                <div id="verificationFields" style="display: none; padding: 16px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; margin-bottom: 16px;">
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 6px; color: #aaa; font-size: 13px;">Transaction ID (TXID)</label>
+                        <input type="text" id="verificationTxid"
+                               placeholder="Get from your wallet's transaction history..."
+                               style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-family: monospace; font-size: 12px;">
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 6px; color: #aaa; font-size: 13px;">Transaction Key (tx_key)</label>
+                        <input type="text" id="verificationTxKey"
+                               placeholder="Run: get_tx_key <txid> in your wallet..."
+                               style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-family: monospace; font-size: 12px;">
+                        <div style="font-size: 11px; color: #666; margin-top: 4px;">
+                            CLI: get_tx_key &lt;txid&gt; | GUI: Right-click transaction → Get transaction key
+                        </div>
+                    </div>
+
+                    <div style="padding: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px;">
+                        <div style="font-size: 12px; color: #aaa; line-height: 1.6;">
+                            <strong style="color: #10B981;">🔐 Privacy-First Verification</strong><br>
+                            Your transaction details (TXID & tx_key) will be:<br>
+                            • Verified instantly against the Monero blockchain<br>
+                            • Sent privately to the recipient via encrypted DM (NIP-17)<br>
+                            • Never stored in logs or published publicly<br>
+                            • Discarded immediately after verification
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="send-btn" onclick="submitDisclosurePrompt()"
+                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Confirm</button>
+                <button class="close-btn" onclick="closeDisclosurePromptModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Zap Queue Modal -->
+    <div class="modal" id="zapQueueModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">XMR Zap Queue</div>
+            <div id="zapQueueContent">
+                <!-- Queue content will be dynamically populated -->
+            </div>
+            <div class="modal-footer">
+                <button class="send-btn" onclick="showBatchQrCodes()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Process Queue</button>
+                <button class="close-btn" onclick="closeZapQueueModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Post Menu -->
+    <div id="postMenu" class="post-menu" style="display: none;">
+        <button onclick="copyPostLink()">Copy Link</button>
+        <button onclick="copyPostId()">Copy Note ID</button>
+        <button onclick="copyPostJson()">Copy JSON</button>
+        <button onclick="viewPostSource()">View Source</button>
+        <button onclick="requestDeletion()" style="color: #ff6b6b;">Request Deletion</button>
+        <button onclick="muteUser()">Mute User</button>
+        <button onclick="reportPost()">Report</button>
+    </div>
+
+    <!-- Generated Key Modal -->
+    <div class="modal" id="keyModal">
+        <!-- Content will be generated by JavaScript -->
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer"></div>
+
+    <!-- Mobile Bottom Navigation Bar -->
+    <nav class="mobile-bottom-nav">
+        <button class="nav-btn" onclick="handleBottomNavClick('home')" data-nav="home">
+            <span class="nav-icon">🏠</span>
+            <span class="nav-label">Home</span>
+        </button>
+        <button class="nav-btn" onclick="handleBottomNavClick('search')" data-nav="search">
+            <span class="nav-icon">🔍</span>
+            <span class="nav-label">Search</span>
+        </button>
+        <button class="nav-btn nav-btn-primary" onclick="handleBottomNavClick('compose')" data-nav="compose" id="bottomNavCompose" style="display: none;">
+            <span class="nav-icon">✏️</span>
+            <span class="nav-label">Post</span>
+        </button>
+        <button class="nav-btn" onclick="handleBottomNavClick('messages')" data-nav="messages">
+            <span class="nav-icon">💬</span>
+            <span class="nav-label">Messages</span>
+        </button>
+        <button class="nav-btn" onclick="handleBottomNavClick('notifications')" data-nav="notifications" style="position: relative;">
+            <span class="nav-icon">🔔</span>
+            <span class="nav-label">Alerts</span>
+            <span id="bottomNotificationBadge" style="position: absolute; top: 4px; right: 8px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
+        </button>
+    </nav>
+
+    <!-- Security: DOMPurify for XSS protection -->
+    <script src="/lib/purify.min.js"></script>
+
+    <!-- Load nostr-tools from local copy -->
+    <script src="/lib/nostr-tools.bundle.js"></script>
+
+    <!-- UI Redesign JS - New minimal header, hamburger menu, feed tabs -->
+    <script src="/js/ui-redesign.js?v=3.2.0"></script>
+
+    <!-- Load the modular v2 application -->
+    <script type="module" src="/js/app.js?v=2.9.29"></script>
+</body>
+</html>
