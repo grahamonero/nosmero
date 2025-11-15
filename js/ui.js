@@ -1342,7 +1342,7 @@ function buildThreadTree(posts, mainEventId) {
     return rootPosts;
 }
 
-export async function openThreadView(eventId) {
+export async function openThreadView(eventId, skipHistory = false) {
     try {
         // Check if user is selecting text - if so, don't navigate to thread
         const selection = window.getSelection();
@@ -1359,15 +1359,24 @@ export async function openThreadView(eventId) {
 
         // Store current page to go back to
         previousPage = StateModule.currentPage || 'home';
-        
+
+        // Push thread view to history (unless we're restoring from history)
+        if (!skipHistory) {
+            history.pushState(
+                { page: 'thread', eventId: eventId },
+                '',
+                `/thread/${eventId}`
+            );
+        }
+
         // Hide all other pages and show thread page
         document.getElementById('feed')?.style.setProperty('display', 'none');
         document.getElementById('messagesPage')?.style.setProperty('display', 'none');
         document.getElementById('profilePage')?.style.setProperty('display', 'none');
-        
+
         const threadPage = document.getElementById('threadPage');
         const threadContent = document.getElementById('threadPageContent');
-        
+
         if (!threadPage || !threadContent) {
             console.error('Thread page elements not found');
             return;
@@ -1376,7 +1385,7 @@ export async function openThreadView(eventId) {
         // Show skeleton loading screen
         showSkeletonLoader('threadPageContent', 3);
         threadPage.style.display = 'block';
-        
+
         // Update current page state
         StateModule.setCurrentPage('thread');
 
@@ -1771,31 +1780,9 @@ export function closeThreadModal() {
 }
 
 export async function goBackFromThread() {
-    // Import State module
-    const StateModule = await import('./state.js');
-    
-    // Hide thread page
-    const threadPage = document.getElementById('threadPage');
-    if (threadPage) {
-        threadPage.style.display = 'none';
-    }
-    
-    // Show the previous page
-    if (previousPage === 'messages') {
-        const messagesPage = document.getElementById('messagesPage');
-        if (messagesPage) {
-            messagesPage.style.display = 'block';
-        }
-    } else {
-        // Default back to feed
-        const feed = document.getElementById('feed');
-        if (feed) {
-            feed.style.display = 'block';
-        }
-    }
-    
-    // Update current page state
-    StateModule.setCurrentPage(previousPage);
+    // Use browser's back button functionality
+    // This will trigger the popstate event which handles showing the previous page
+    history.back();
 }
 
 // ==================== USER PROFILE VIEWING ====================
