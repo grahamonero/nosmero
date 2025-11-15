@@ -298,6 +298,28 @@
             box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
         }
 
+        /* Notifications Button in Header */
+        .notifications-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.6rem 0.8rem;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 44px;
+            min-width: 44px;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .notifications-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--monero-orange);
+        }
+
         /* Slide-out Hamburger Menu */
         .slide-menu {
             position: fixed;
@@ -541,6 +563,13 @@
         /* Main feed container for posts */
         .feed {
             min-height: calc(100vh - 80px);
+        }
+
+        /* Mobile: Add bottom padding for feed to clear bottom nav */
+        @media (max-width: 768px) {
+            .feed {
+                padding-bottom: 120px; /* Space for bottom nav (64px) + interaction icons + buffer */
+            }
         }
 
         /* Individual post/note container - Glassmorphism cards */
@@ -1624,6 +1653,13 @@
         .thread-content {
             padding: 20px;
             max-width: 800px;
+        }
+
+        /* Mobile: Add bottom padding for thread view to clear bottom nav */
+        @media (max-width: 768px) {
+            .thread-content {
+                padding-bottom: 120px; /* Space for bottom nav (64px) + interaction icons + buffer */
+            }
         }
 
         /* ==================== MOBILE NAVIGATION ==================== */
