@@ -31,10 +31,6 @@
                 <span class="menu-icon">🔍</span>
                 <span>Search</span>
             </div>
-            <div class="menu-item" data-tab="notifications" onclick="handleMenuItemClick('notifications')">
-                <span class="menu-icon">🔔</span>
-                <span>Notifications</span>
-            </div>
             <div class="menu-item" data-tab="messages" onclick="handleMenuItemClick('messages')">
                 <span class="menu-icon">💬</span>
                 <span>Messages</span>
@@ -82,6 +78,17 @@
                 <span class="menu-icon">🚪</span>
                 <span style="color: #ff6b6b;">Logout</span>
             </div>
+            <!-- Logged-in user info -->
+            <div id="menuUserInfo" style="display: none; margin-top: auto; padding: 1rem; border-top: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.02);">
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">Logged in as</div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <img id="menuUserPic" src="" alt="Profile" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid var(--border-color);">
+                    <div style="flex: 1; min-width: 0;">
+                        <div id="menuUserName" style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></div>
+                        <div id="menuUserNpub" style="font-size: 11px; font-family: monospace; color: var(--text-secondary);"></div>
+                    </div>
+                </div>
+            </div>
         </div>
     </nav>
 
@@ -101,6 +108,10 @@
                 <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero Notes</a>
                 <button class="create-note-btn" id="headerCreateNoteBtn" onclick="handleCreateNoteClick()" style="display: none;">
                     ✏️ <span>Post</span>
+                </button>
+                <button class="notifications-btn" id="headerNotificationsBtn" onclick="handleNavItemClick('notifications')" style="display: none; position: relative;">
+                    🔔
+                    <span id="notificationBadge" style="position: absolute; top: -4px; right: -4px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
                 </button>
                 <button class="login-btn-orange" id="headerLoginBtn" onclick="showLoginOptions()">
                     Login
