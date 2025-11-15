@@ -48,3 +48,6 @@ nosmeroav.png
 .DS_Store
 Thumbs.db
 analytics.html
+
+# Internal documentation (never push to GitHub)
+PENDING_FIXES.md
