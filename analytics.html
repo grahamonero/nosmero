@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nosmero Analytics</title>
+    <script src="https://unpkg.com/nostr-tools@2.7.2/lib/nostr.bundle.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            color: #e0e0e0;
+            padding: 2rem;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #FF6600, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #888;
+            margin-bottom: 2rem;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        select, button {
+            padding: 0.75rem 1.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button {
+            background: linear-gradient(135deg, #FF6600, #8B5CF6);
+            border: none;
+            font-weight: 600;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #FF6600, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stat-label {
+            color: #888;
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .events-section {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .events-section h2 {
+            margin-bottom: 1rem;
+            color: #fff;
+        }
+
+        .event-item {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            border-left: 3px solid #FF6600;
+        }
+
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .event-type {
+            background: linear-gradient(135deg, #FF6600, #8B5CF6);
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .event-time {
+            color: #888;
+            font-size: 0.85rem;
+        }
+
+        .event-author {
+            color: #8B5CF6;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+            font-family: monospace;
+        }
+
+        .event-content {
+            color: #ccc;
+            line-height: 1.5;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #888;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #FF6600;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid rgba(255, 0, 0, 0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            color: #ff6b6b;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Nosmero Analytics</h1>
+        <p class="subtitle">Track Nosmero usage across the Nostr network</p>
+        <div style="background: rgba(255, 165, 0, 0.1); border: 1px solid rgba(255, 165, 0, 0.3); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <strong>ℹ️ Note:</strong> Most relays don't index the 'client' tag, so we fetch recent events and filter locally.
+            This means analytics are limited to the last 24-48 hours with reasonable accuracy.
+        </div>
+
+        <div class="controls">
+            <select id="timeRange">
+                <option value="3600">Last Hour</option>
+                <option value="86400" selected>Last 24 Hours</option>
+                <option value="604800">Last 7 Days</option>
+                <option value="2592000">Last 30 Days</option>
+            </select>
+            <button id="refreshBtn" onclick="loadAnalytics()">Refresh Data</button>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalEvents">-</div>
+                <div class="stat-label">Total Events</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="uniqueUsers">-</div>
+                <div class="stat-label">Unique Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="notesCount">-</div>
+                <div class="stat-label">Notes Posted</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="reactionsCount">-</div>
+                <div class="stat-label">Reactions</div>
+            </div>
+        </div>
+
+        <div class="events-section">
+            <h2>Recent Events</h2>
+            <div id="eventsContainer">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading events...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const RELAYS = [
+            'wss://relay.damus.io',
+            'wss://relay.primal.net',
+            'wss://nos.lol',
+            'wss://relay.nostr.band',
+            'wss://nostr.wine',
+            'wss://nostr.xmr.rocks',
+            'wss://xmr.ithurtswhenip.ee',
+            'wss://xmr.usenostr.org'
+        ];
+
+        async function loadAnalytics() {
+            const timeRange = parseInt(document.getElementById('timeRange').value);
+            const since = Math.floor(Date.now() / 1000) - timeRange;
+
+            const refreshBtn = document.getElementById('refreshBtn');
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = 'Loading...';
+
+            const eventsContainer = document.getElementById('eventsContainer');
+            eventsContainer.innerHTML = '<div class="loading"><div class="spinner"></div><p>Querying relays...</p></div>';
+
+            try {
+                const pool = new window.NostrTools.SimplePool();
+
+                console.log('⚠️ Note: Relays may not index the client tag, so we query all recent events and filter locally');
+
+                // Query for all recent events (relays don't index 'client' tag)
+                // We filter locally instead
+                const allEvents = await pool.querySync(RELAYS, {
+                    kinds: [1, 6, 7],
+                    since: since,
+                    limit: 5000 // Increased limit to catch more events
+                });
+
+                console.log(`📊 Fetched ${allEvents.length} total events, filtering for client=nosmero...`);
+
+                // Filter locally for events with client=nosmero tag
+                const events = allEvents.filter(event => {
+                    return event.tags && event.tags.some(tag =>
+                        tag[0] === 'client' && tag[1] === 'nosmero'
+                    );
+                });
+
+                console.log(`✅ Found ${events.length} events with client=nosmero tag`);
+
+                pool.close(RELAYS);
+
+                // Calculate statistics
+                const uniqueUsers = new Set(events.map(e => e.pubkey));
+                const notes = events.filter(e => e.kind === 1);
+                const reposts = events.filter(e => e.kind === 6);
+                const reactions = events.filter(e => e.kind === 7);
+
+                // Update stats
+                document.getElementById('totalEvents').textContent = events.length;
+                document.getElementById('uniqueUsers').textContent = uniqueUsers.size;
+                document.getElementById('notesCount').textContent = notes.length;
+                document.getElementById('reactionsCount').textContent = reactions.length;
+
+                // Display recent events
+                if (events.length === 0) {
+                    eventsContainer.innerHTML = '<p style="text-align: center; color: #888;">No events found in this time range</p>';
+                } else {
+                    // Sort by created_at (newest first)
+                    const sortedEvents = events.sort((a, b) => b.created_at - a.created_at).slice(0, 50);
+
+                    eventsContainer.innerHTML = sortedEvents.map(event => {
+                        const kindName = event.kind === 1 ? 'Note' : event.kind === 6 ? 'Repost' : 'Reaction';
+                        const npub = window.NostrTools.nip19.npubEncode(event.pubkey);
+                        const shortNpub = npub.substring(0, 12) + '...' + npub.substring(npub.length - 6);
+                        const timeAgo = getTimeAgo(event.created_at);
+                        const truncatedContent = event.content.substring(0, 200);
+
+                        // Create note ID for linking
+                        const noteId = window.NostrTools.nip19.noteEncode(event.id);
+
+                        return `
+                            <div class="event-item" style="cursor: pointer;" onclick="viewEvent('${event.id}')">
+                                <div class="event-header">
+                                    <span class="event-type">${kindName}</span>
+                                    <span class="event-time">${timeAgo}</span>
+                                </div>
+                                <div class="event-author" style="cursor: pointer; color: #8B5CF6; text-decoration: underline;" onclick="event.stopPropagation(); viewProfile('${event.pubkey}')" title="Click to view profile">${shortNpub}</div>
+                                <div class="event-content">${escapeHtml(truncatedContent)}${event.content.length > 200 ? '...' : ''}</div>
+                                <div style="font-size: 11px; color: #666; margin-top: 8px; font-family: monospace;">${noteId}</div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+            } catch (error) {
+                console.error('Error loading analytics:', error);
+                eventsContainer.innerHTML = `<div class="error">Error loading data: ${error.message}</div>`;
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = 'Refresh Data';
+            }
+        }
+
+        function getTimeAgo(timestamp) {
+            const seconds = Math.floor(Date.now() / 1000) - timestamp;
+
+            if (seconds < 60) return 'just now';
+            if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+            if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+            if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
+            return Math.floor(seconds / 604800) + 'w ago';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Navigate to profile page
+        function viewProfile(pubkey) {
+            // Open profile in new tab using hash routing
+            window.open(`https://nosmero.com/#profile:${pubkey}`, '_blank');
+        }
+
+        // Navigate to event/note page
+        function viewEvent(eventId) {
+            // Open note/thread in new tab using hash routing
+            window.open(`https://nosmero.com/#note:${eventId}`, '_blank');
+        }
+
+        // Load analytics on page load
+        loadAnalytics();
+
+        // Auto-refresh every 60 seconds
+        setInterval(loadAnalytics, 60000);
+    </script>
+</body>
+</html>

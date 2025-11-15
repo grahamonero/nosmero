@@ -3185,6 +3185,14 @@ window.addEventListener('popstate', async (event) => {
             // Restore thread view without pushing to history again
             const UI = await import('./ui.js');
             await UI.openThreadView(event.state.eventId, true);
+        } else if (event.state.page === 'home' && event.state.feed) {
+            // Restore feed tab selection
+            navigateTo('home', true);
+            // Click the appropriate feed tab
+            const feedTab = document.querySelector(`[data-feed="${event.state.feed}"]`);
+            if (feedTab) {
+                feedTab.click();
+            }
         } else {
             // User clicked back/forward - navigate without creating new history
             navigateTo(event.state.page, true);
@@ -3272,6 +3280,7 @@ window.toggleMobileMenu = toggleMobileMenu;
 window.openMobileMenu = openMobileMenu;
 window.closeMobileMenu = closeMobileMenu;
 window.handleNavItemClick = handleNavItemClick;
+window.navigateTo = navigateTo;
 
 // Make compose functions globally available
 window.toggleCompose = async () => {
