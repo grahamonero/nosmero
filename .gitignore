@@ -47,3 +47,10 @@ nosmeroav.png
 # System files
 .DS_Store
 Thumbs.db
+
+# Internal documentation (never push to GitHub)
+PENDING_FIXES.md
+
+# Dev-only files (never push to production or GitHub)
+analytics.html
+test-client-tags.html
