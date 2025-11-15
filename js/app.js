@@ -3174,18 +3174,29 @@ function closeMobileMenu() {
     document.body.style.overflow = '';
 }
 
-// Close mobile menu when a nav item is clicked
-function handleNavItemClick(tabName) {
+/**
+ * Navigate to a page using History API
+ * This enables back/forward buttons to work within the app
+ * @param {string} page - Page name (home, search, messages, notifications, profile, settings)
+ * @param {boolean} skipHistory - If true, don't push to history (used by popstate)
+ */
+function navigateTo(page, skipHistory = false) {
+    // Update browser history (unless we're responding to popstate)
+    if (!skipHistory) {
+        const url = page === 'home' ? '/' : `/${page}`;
+        history.pushState({ page }, '', url);
+    }
+
     // Close mobile menu if open
     if (window.innerWidth <= 768) {
         closeMobileMenu();
     }
-    
+
     // Continue with normal tab switching - create a synthetic event
     const syntheticEvent = {
         currentTarget: {
             dataset: {
-                tab: tabName
+                tab: page
             },
             classList: {
                 add: () => {},
@@ -3194,6 +3205,36 @@ function handleNavItemClick(tabName) {
         }
     };
     handleNavigation(syntheticEvent);
+}
+
+// Handle browser back/forward buttons
+window.addEventListener('popstate', async (event) => {
+    if (event.state && event.state.page) {
+        if (event.state.page === 'thread' && event.state.eventId) {
+            // Restore thread view without pushing to history again
+            const UI = await import('./ui.js');
+            await UI.openThreadView(event.state.eventId, true);
+        } else if (event.state.page === 'home' && event.state.feed) {
+            // Restore feed tab selection
+            navigateTo('home', true);
+            // Click the appropriate feed tab
+            const feedTab = document.querySelector(`[data-feed="${event.state.feed}"]`);
+            if (feedTab) {
+                feedTab.click();
+            }
+        } else {
+            // User clicked back/forward - navigate without creating new history
+            navigateTo(event.state.page, true);
+        }
+    } else {
+        // No state (initial page load or external link) - go to home
+        navigateTo('home', true);
+    }
+});
+
+// Close mobile menu when a nav item is clicked
+function handleNavItemClick(tabName) {
+    navigateTo(tabName);
 }
 
 // Handle window resize - close mobile menu if switching to desktop
@@ -3257,6 +3298,7 @@ window.toggleMobileMenu = toggleMobileMenu;
 window.openMobileMenu = openMobileMenu;
 window.closeMobileMenu = closeMobileMenu;
 window.handleNavItemClick = handleNavItemClick;
+window.navigateTo = navigateTo;
 
 // Make compose functions globally available
 window.toggleCompose = async () => {
