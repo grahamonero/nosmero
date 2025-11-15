@@ -77,6 +77,32 @@ function handleFeedMenuClick(feedType) {
 async function handleFeedTabClick(feedType, event) {
     event.preventDefault();
 
+    // Load State module to check current page
+    const StateModule = await ensureStateLoaded();
+
+    // First, navigate to home page (this will hide thread/messages/profile/etc and show feed)
+    // Only navigate if we're not already on home page
+    // Use skipHistory=true since we're about to push our own history state
+    if (StateModule.currentPage !== 'home' && typeof navigateTo === 'function') {
+        navigateTo('home', true);
+        // Wait for page transition and contact loading to complete
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    // Push feed change to browser history
+    const feedNames = {
+        'global': 'weboftrust',
+        'following': 'following',
+        'monero': 'trending',
+        'tipactivity': 'tipactivity'
+    };
+    const feedPath = feedNames[feedType] || feedType;
+    history.pushState(
+        { page: 'home', feed: feedType },
+        '',
+        `/feed/${feedPath}`
+    );
+
     // Update active tab styling
     document.querySelectorAll('.feed-tab').forEach(tab => {
         tab.classList.remove('active');
