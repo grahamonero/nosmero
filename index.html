@@ -103,9 +103,10 @@
 
             <nav class="feed-selector">
                 <a href="#" class="feed-tab active" data-feed="following" onclick="handleFeedTabClick('following', event)">Following</a>
+                <a href="#" class="feed-tab" data-feed="global" onclick="handleFeedTabClick('global', event)">Suggested Follows</a>
                 <a href="#" class="feed-tab" data-feed="tipactivity" onclick="handleFeedTabClick('tipactivity', event)">Monero Tip Activity</a>
-                <a href="#" class="feed-tab" data-feed="global" onclick="handleFeedTabClick('global', event)">Web of Trust Feed</a>
-                <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero Notes</a>
+                <a href="#" class="feed-tab" data-feed="trending" onclick="handleFeedTabClick('trending', event)">Popular Notes</a>
+                <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero</a>
                 <button class="create-note-btn" id="headerCreateNoteBtn" onclick="handleCreateNoteClick()" style="display: none;">
                     ✏️ <span>Post</span>
                 </button>
@@ -302,6 +303,223 @@
 
         <div id="profilePage" class="profile-page" style="display: none;">
             <!-- User profile will be displayed here -->
+        </div>
+
+        <!-- Settings page (hidden by default) -->
+        <div id="settingsPage" class="settings-page" style="display: none;">
+            <div class="settings-header">
+                <button onclick="goBackFromSettings()" style="background: none; border: none; color: #fff; cursor: pointer; font-size: 18px; margin-right: 12px;">←</button>
+                <h2>Settings</h2>
+            </div>
+            <div id="settingsPageContent" class="settings-content">
+                <div class="settings-section">
+                    <h3>Lightning Address</h3>
+                    <input type="text" id="defaultLightningAddress" placeholder="Your Lightning address (e.g., user@domain.com)" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                    <p style="color: #999; font-size: 12px; margin-top: 8px;">Used for receiving Bitcoin zaps via Lightning Network</p>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Banner Image URL</h3>
+                    <input type="text" id="defaultBannerImage" placeholder="Your profile banner image URL" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                    <p style="color: #999; font-size: 12px; margin-top: 8px;">Banner image displayed on your profile page</p>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Default Monero Address</h3>
+                    <input type="text" id="defaultMoneroAddress" placeholder="Your default XMR address" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                </div>
+
+                <div class="settings-section">
+                    <h3>Default Zap Amounts</h3>
+                    <div style="display: flex; gap: 20px; margin-top: 12px;">
+                        <div style="flex: 1;">
+                            <label style="color: #FFDF00; display: block; margin-bottom: 8px;">⚡ Bitcoin (sats)</label>
+                            <input type="number" id="defaultBtcZapAmount" placeholder="1000" min="1" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="color: #FF6600; display: block; margin-bottom: 8px;">⚡ Monero (XMR)</label>
+                            <input type="text" id="defaultXmrZapAmount" placeholder="0.001" step="0.001" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
+                        </div>
+                    </div>
+                    <p style="color: #999; font-size: 12px; margin-top: 8px;">Set default amounts for quick zapping</p>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Relay Configuration (NIP-65)</h3>
+                    <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Configure which relays you read from and write to</p>
+
+                    <div style="display: flex; gap: 20px;">
+                        <div style="flex: 1;">
+                            <h4 style="color: #FF6600; margin-bottom: 8px;">Read Relays</h4>
+                            <div id="readRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
+                            <input type="text" id="newReadRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
+                            <button onclick="addReadRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Read Relay</button>
+                        </div>
+
+                        <div style="flex: 1;">
+                            <h4 style="color: #8B5CF6; margin-bottom: 8px;">Write Relays</h4>
+                            <div id="writeRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
+                            <input type="text" id="newWriteRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
+                            <button onclick="addWriteRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #8B5CF6, #FF6600); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Write Relay</button>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 12px; padding: 8px; background: #111; border-radius: 8px;">
+                        <button onclick="resetToDefaultRelays()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer; margin-right: 8px;">Reset to Defaults</button>
+                        <button onclick="importRelayList()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer;">Import from Profile</button>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Direct Messages</h3>
+                    <div style="margin-top: 12px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="useNip17Dms" style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>Use NIP-17 encrypted DMs (enhanced privacy)</span>
+                        </label>
+                        <div style="margin-top: 8px; padding: 12px; background: #1a1a00; border-left: 3px solid #FFDF00; border-radius: 4px;">
+                            <p style="color: #FFDF00; font-size: 12px; margin: 0;">⚠️ <strong>Only works with other Nosmero users</strong> who have this enabled.</p>
+                            <p style="color: #999; font-size: 12px; margin: 4px 0 0 0;">Messages to other clients will automatically use standard encryption (NIP-04).</p>
+                        </div>
+                        <p style="color: #666; font-size: 11px; margin-top: 8px;">
+                            NIP-17 provides enhanced privacy by hiding message metadata from relays. However, it only works when both sender and recipient use Nosmero with this setting enabled.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Muted Users</h3>
+                    <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Users you've muted won't appear in your feed or tip disclosures. Your mute list is private and encrypted.</p>
+                    <div id="mutedUsersList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
+                        <!-- Muted users will be populated by JavaScript -->
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>🔐 Web of Trust</h3>
+                    <p style="color: #999; font-size: 12px; margin-bottom: 16px;">NIP-85 trust scoring powered by Relatr</p>
+
+                    <!-- Master Switch -->
+                    <div class="trust-badges-toggle" style="margin-bottom: 16px;">
+                        <div>
+                            <div class="trust-badges-label">Enable Web of Trust</div>
+                            <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                                Calculate trust scores using Relatr
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="enableWebOfTrust" checked onchange="toggleWebOfTrust(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- Sub-options (enabled when Web of Trust is on) -->
+                    <div id="webOfTrustOptions" style="margin-left: 20px; padding-left: 16px; border-left: 2px solid #333;">
+
+                        <!-- Always show on Suggested Follows & New Voices -->
+                        <div style="margin-bottom: 12px; padding: 8px; background: rgba(255, 102, 0, 0.05); border-radius: 6px;">
+                            <div style="color: #FF6600; font-size: 12px; font-weight: 600; margin-bottom: 4px;">
+                                ✓ Badges shown on Suggested Follows & New Voices
+                            </div>
+                            <div style="color: #999; font-size: 11px;">
+                                Trust scores help discover quality accounts
+                            </div>
+                        </div>
+
+                        <!-- Show badges on all feeds -->
+                        <div class="trust-badges-toggle" style="margin-bottom: 16px;">
+                            <div>
+                                <div class="trust-badges-label">Show badges on all feeds</div>
+                                <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                                    Display scores on home feed, profiles, threads, etc.
+                                </div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="showTrustBadgesEverywhere" onchange="toggleTrustBadgesEverywhere(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <!-- Personalize scores -->
+                        <div class="trust-badges-toggle" style="margin-bottom: 16px;">
+                            <div>
+                                <div class="trust-badges-label">Personalize scores to my network</div>
+                                <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                                    Calculate from your perspective vs global network
+                                </div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="personalizeScores" checked onchange="togglePersonalizeScores(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <!-- Share data with network -->
+                        <div class="trust-badges-toggle">
+                            <div>
+                                <div class="trust-badges-label">Share my scores with the network</div>
+                                <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                                    Help improve trust calculations for others
+                                </div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="shareDataWithRelatr" onchange="toggleShareData(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div style="margin-top: 8px; padding: 8px; background: rgba(139, 92, 246, 0.05); border-left: 3px solid #8B5CF6; border-radius: 4px;">
+                            <p style="color: #ccc; font-size: 11px; margin: 0;">
+                                ℹ️ Your follow list is already public on Nostr. This allows the Nosmero trust server to use it for network-wide calculations.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Info box -->
+                    <div style="margin-top: 16px; padding: 12px; background: rgba(255, 102, 0, 0.05); border-left: 3px solid #FF6600; border-radius: 4px;">
+                        <p style="color: #ccc; font-size: 12px; margin: 0;">
+                            Trust scores are calculated based on social graph distance, NIP-05 verification, Lightning addresses, and relay list publication. Scores range from 0-100, with higher scores indicating more trusted users.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Notifications</h3>
+                    <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Choose which types of notifications to receive</p>
+                    <div style="display: grid; gap: 12px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="notif_replies" checked style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>💬 Replies to my posts</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="notif_mentions" checked style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>📢 Mentions of me</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="notif_likes" checked style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>❤️ Likes on my posts</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="notif_reposts" checked style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>🔄 Reposts of my posts</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="notif_zaps" checked style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>⚡ Zaps & Tips (Lightning + Monero)</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="notif_follows" checked style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>👥 New followers</span>
+                        </label>
+                    </div>
+                    <p style="color: #666; font-size: 11px; margin-top: 12px;">
+                        Disabled notification types won't be fetched from relays. Changes take effect on next notification refresh.
+                    </p>
+                </div>
+
+                <div style="position: sticky; bottom: 0; background: #000; padding: 16px 0; border-top: 1px solid #333; margin-top: 24px;">
+                    <button class="send-btn" onclick="saveSettings()" style="width: 100%; padding: 12px; font-size: 16px;">Save Settings</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -509,135 +727,6 @@
             <div class="modal-actions">
                 <button class="close-btn" onclick="closeRepostModal()">Cancel</button>
                 <button id="repostBtn" class="send-btn" onclick="sendRepost()">Repost</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Settings Modal -->
-    <div class="modal" id="settingsModal">
-        <div class="modal-content">
-            <div class="modal-header">Settings</div>
-            
-            <div class="settings-section">
-                <h3>Lightning Address</h3>
-                <input type="text" id="defaultLightningAddress" placeholder="Your Lightning address (e.g., user@domain.com)" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-                <p style="color: #999; font-size: 12px; margin-top: 8px;">Used for receiving Bitcoin zaps via Lightning Network</p>
-            </div>
-
-            <div class="settings-section">
-                <h3>Banner Image URL</h3>
-                <input type="text" id="defaultBannerImage" placeholder="Your profile banner image URL" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-                <p style="color: #999; font-size: 12px; margin-top: 8px;">Banner image displayed on your profile page</p>
-            </div>
-
-            <div class="settings-section">
-                <h3>Default Monero Address</h3>
-                <input type="text" id="defaultMoneroAddress" placeholder="Your default XMR address" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-            </div>
-
-            <div class="settings-section">
-                <h3>Default Zap Amounts</h3>
-                <div style="display: flex; gap: 20px; margin-top: 12px;">
-                    <div style="flex: 1;">
-                        <label style="color: #FFDF00; display: block; margin-bottom: 8px;">⚡ Bitcoin (sats)</label>
-                        <input type="number" id="defaultBtcZapAmount" placeholder="1000" min="1" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-                    </div>
-                    <div style="flex: 1;">
-                        <label style="color: #FF6600; display: block; margin-bottom: 8px;">⚡ Monero (XMR)</label>
-                        <input type="text" id="defaultXmrZapAmount" placeholder="0.001" step="0.001" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-                    </div>
-                </div>
-                <p style="color: #999; font-size: 12px; margin-top: 8px;">Set default amounts for quick zapping</p>
-            </div>
-
-            <div class="settings-section">
-                <h3>Relay Configuration (NIP-65)</h3>
-                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Configure which relays you read from and write to</p>
-                
-                <div style="display: flex; gap: 20px;">
-                    <div style="flex: 1;">
-                        <h4 style="color: #FF6600; margin-bottom: 8px;">Read Relays</h4>
-                        <div id="readRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
-                        <input type="text" id="newReadRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
-                        <button onclick="addReadRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Read Relay</button>
-                    </div>
-                    
-                    <div style="flex: 1;">
-                        <h4 style="color: #8B5CF6; margin-bottom: 8px;">Write Relays</h4>
-                        <div id="writeRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
-                        <input type="text" id="newWriteRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
-                        <button onclick="addWriteRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #8B5CF6, #FF6600); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Write Relay</button>
-                    </div>
-                </div>
-                
-                <div style="margin-top: 12px; padding: 8px; background: #111; border-radius: 8px;">
-                    <button onclick="resetToDefaultRelays()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer; margin-right: 8px;">Reset to Defaults</button>
-                    <button onclick="importRelayList()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer;">Import from Profile</button>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>Direct Messages</h3>
-                <div style="margin-top: 12px;">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="useNip17Dms" style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>Use NIP-17 encrypted DMs (enhanced privacy)</span>
-                    </label>
-                    <div style="margin-top: 8px; padding: 12px; background: #1a1a00; border-left: 3px solid #FFDF00; border-radius: 4px;">
-                        <p style="color: #FFDF00; font-size: 12px; margin: 0;">⚠️ <strong>Only works with other Nosmero users</strong> who have this enabled.</p>
-                        <p style="color: #999; font-size: 12px; margin: 4px 0 0 0;">Messages to other clients will automatically use standard encryption (NIP-04).</p>
-                    </div>
-                    <p style="color: #666; font-size: 11px; margin-top: 8px;">
-                        NIP-17 provides enhanced privacy by hiding message metadata from relays. However, it only works when both sender and recipient use Nosmero with this setting enabled.
-                    </p>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>Muted Users</h3>
-                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Users you've muted won't appear in your feed or tip disclosures</p>
-                <div id="mutedUsersList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
-                    <!-- Muted users will be populated by JavaScript -->
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>Notifications</h3>
-                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Choose which types of notifications to receive</p>
-                <div style="display: grid; gap: 12px;">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_replies" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>💬 Replies to my posts</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_mentions" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>📢 Mentions of me</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_likes" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>❤️ Likes on my posts</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_reposts" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>🔄 Reposts of my posts</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_zaps" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>⚡ Zaps & Tips (Lightning + Monero)</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_follows" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>👥 New followers</span>
-                    </label>
-                </div>
-                <p style="color: #666; font-size: 11px; margin-top: 12px;">
-                    Disabled notification types won't be fetched from relays. Changes take effect on next notification refresh.
-                </p>
-            </div>
-
-            <div class="modal-actions">
-                <button class="close-btn" onclick="closeSettingsModal()">Close</button>
-                <button class="send-btn" onclick="saveSettings()">Save</button>
             </div>
         </div>
     </div>
@@ -868,6 +957,6 @@
     <script src="/js/ui-redesign.js?v=3.0.4"></script>
 
     <!-- Load the modular v2 application -->
-    <script type="module" src="/js/app.js?v=2.9.16"></script>
+    <script type="module" src="/js/app.js?v=2.9.38-following-feed-fix"></script>
 </body>
 </html>

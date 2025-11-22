@@ -1,0 +1,97 @@
+{
+  "generated_at": "2025-11-16T04:35:56.332Z",
+  "source": "Curated Monero Community + Nostr.band validation",
+  "total_accounts": 15,
+  "accounts": [
+    {
+      "pubkey": "a341f45ff9758f570a21b000c17d4e53a3a497c8397f26c0e6d61e5acffc7a98",
+      "followers": 80077,
+      "following": 40,
+      "posts": 97
+    },
+    {
+      "pubkey": "97c70a44366a6535c145b333f973ea86dfdc2d7a99da618c40c64705ad98e322",
+      "followers": 76958,
+      "following": 482,
+      "posts": 1839
+    },
+    {
+      "pubkey": "9989500413fb756d8437912cc32be0730dbe1bfc6b5d2eef759e1456c239f905",
+      "followers": 52874,
+      "following": 1316,
+      "posts": 1720
+    },
+    {
+      "pubkey": "3d82e8f6cc6c096544bf33e4875a03f5600acff7ec467e150a1cc7712d214dc9",
+      "followers": 9015,
+      "following": 1510,
+      "posts": 855
+    },
+    {
+      "pubkey": "07ecf9838136fe430fac43fa0860dbc62a0aac0729c5a33df1192ce75e330c9f",
+      "followers": 951,
+      "following": 35,
+      "posts": 32
+    },
+    {
+      "pubkey": "ff858e19f5c0a3196045f508499b05629a1167564d7d097f0fdcca8bca86b6a8",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    },
+    {
+      "pubkey": "4c24a14657da2d3c5b8e2b66c2a27c36d786f1fb38f5e925e71f18b98c73f034",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    },
+    {
+      "pubkey": "db5cd3f2c7717191f3a35a057e99236c5c17c43f1c69a002008bfde91e41cdc6",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    },
+    {
+      "pubkey": "c07a2ea48b6753d11ad29d622925cb48bab48a8f38e954e85aec46953a0e78af",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    },
+    {
+      "pubkey": "1577e4599d2c1563b7e924458ff62dffb2c1fa7fa7f50c6c1cf908e698621599",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    },
+    {
+      "pubkey": "13129df33f47e06c20e197c30a110c91d1bc80bb54620fc8ebc65e0ec4e19e4c",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    },
+    {
+      "pubkey": "97b92c4f0e6be25db05bb5355ac80fea8e04c9cb2a6284ef04e3dde0dcb6bce9",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    },
+    {
+      "pubkey": "9a8e38f1f07a05e5bc18e390c67cb2e9bb35f0a9f1d88f8c8c45e6e23c0e3055",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    },
+    {
+      "pubkey": "b85e9d2ce43f8dc0b2fd88ba0a4b2c3b2bb45f5c5d3db7e6f03f6e3e44a3f0c1",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    },
+    {
+      "pubkey": "420000000000000000000000000000000000000000000000000000000000001a",
+      "followers": 0,
+      "following": 0,
+      "posts": 0
+    }
+  ]
+}

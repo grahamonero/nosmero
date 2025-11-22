@@ -12,6 +12,7 @@ import * as Auth from './auth.js';
 import * as UI from './ui.js';
 import * as Messages from './messages.js';
 import * as Search from './search.js';
+import * as TrustBadges from './trust-badges.js';
 
 // Make modules available globally
 window.NostrState = State;
@@ -25,7 +26,19 @@ window.NostrUI = UI;
 window.NostrMessages = Messages;
 window.NostrSearch = Search;
 
+// Debug: Check TrustBadges module before assignment
+console.log('[DEBUG] TrustBadges module:', TrustBadges);
+console.log('[DEBUG] TrustBadges type:', typeof TrustBadges);
+console.log('[DEBUG] TrustBadges keys:', Object.keys(TrustBadges));
+
+window.NostrTrustBadges = TrustBadges;
+
+// Debug: Verify assignment
+console.log('[DEBUG] window.NostrTrustBadges:', window.NostrTrustBadges);
+console.log('[DEBUG] window.NostrTrustBadges === TrustBadges:', window.NostrTrustBadges === TrustBadges);
+
 console.log('🚀 Starting Nosmero v0.95 - Modular Architecture');
+console.log('🔐 Web of Trust (NIP-85) - Enabled');
 
 // ==================== NIP-78 RELAY CONFIGURATION ====================
 // Nosmero relay for NIP-78 Monero address storage
@@ -465,6 +478,11 @@ async function handleNavigation(event) {
     const profilePage = document.getElementById('profilePage');
     if (profilePage) {
         profilePage.style.display = 'none';
+    }
+
+    const settingsPage = document.getElementById('settingsPage');
+    if (settingsPage) {
+        settingsPage.style.display = 'none';
     }
 
     // Show main feed container
@@ -2795,7 +2813,7 @@ function renderFollowersPage(type, users) {
                         `<div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">${name.charAt(0).toUpperCase()}</div>`
                     }
                     <div style="flex: 1;">
-                        <div style="color: #fff; font-weight: bold;">${name}</div>
+                        <div class="username" data-pubkey="${pubkey}" style="color: #fff; font-weight: bold;">${name}</div>
                         <div style="color: #888; font-size: 12px;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</div>
                         ${profile.about ? `<div style="color: #ccc; font-size: 12px; margin-top: 2px;">${profile.about.substring(0, 80)}${profile.about.length > 80 ? '...' : ''}</div>` : ''}
                     </div>
@@ -2810,6 +2828,33 @@ function renderFollowersPage(type, users) {
     html += '</div>'; // Close the background div
     html += '</div>'; // Close the container div
     profilePage.innerHTML = html;
+
+    // Add trust badges to all users in the list
+    if (users.length > 0) {
+        addTrustBadgesToFollowersList(users).catch(error => {
+            console.error('[TrustBadges] Error adding badges to followers list:', error);
+        });
+    }
+}
+
+// Add trust badges to followers/following list
+async function addTrustBadgesToFollowersList(pubkeys) {
+    try {
+        // Import trust badges module
+        const TrustBadges = await import('./trust-badges.js');
+
+        // Fetch all trust scores in batch
+        const { getTrustScores } = await import('./relatr.js');
+        await getTrustScores(pubkeys);
+
+        // Add badges to all username elements
+        const profilePage = document.getElementById('profilePage');
+        if (profilePage) {
+            TrustBadges.addTrustBadgesToContainer(profilePage);
+        }
+    } catch (error) {
+        console.error('[TrustBadges] Failed to load trust badges module:', error);
+    }
 }
 
 // Get detailed following list with user info
@@ -3084,6 +3129,7 @@ window.reportPost = UI.reportPost;
 window.requestDeletion = UI.requestDeletion;
 window.viewUserProfilePage = UI.viewUserProfilePage;
 window.goBackFromProfile = UI.goBackFromProfile;
+window.goBackFromSettings = goBackFromSettings;
 window.loadMoreOwnPosts = loadMoreOwnPosts;
 
 // ==================== MOBILE NAVIGATION ====================
@@ -3623,17 +3669,23 @@ async function forceFreshProfileFetch() {
     });
 }
 
-// Open modal settings (separate from page-based loadSettings)
-async function openSettingsModal() {
-    console.log('🔧 Opening Settings modal...');
+// Load Settings page
+async function loadSettings() {
+    console.log('🔧 Loading Settings page...');
     if (!State.publicKey) {
         showAuthUI();
         return;
     }
 
-    const settingsModal = document.getElementById('settingsModal');
-    if (!settingsModal) return;
-    settingsModal.style.display = 'flex';
+    State.setCurrentPage('settings');
+
+    // Hide feed, show settings page
+    const feed = document.getElementById('feed');
+    if (feed) feed.style.display = 'none';
+
+    const settingsPage = document.getElementById('settingsPage');
+    if (!settingsPage) return;
+    settingsPage.style.display = 'block';
 
     const lightningField = document.getElementById('defaultLightningAddress');
     const moneroField = document.getElementById('defaultMoneroAddress');
@@ -3643,6 +3695,11 @@ async function openSettingsModal() {
     console.log('🔄 Settings: Fetching fresh profile from relays...');
     await forceFreshProfileFetch();
     await populateSettingsForm();
+}
+
+// Go back from Settings page
+function goBackFromSettings() {
+    navigateTo('home');
 }
 
 // Populate settings form with current user data
@@ -3974,10 +4031,8 @@ async function saveSettings() {
 
 // Close settings modal
 function closeSettingsModal() {
-    const settingsModal = document.getElementById('settingsModal');
-    if (settingsModal) {
-        settingsModal.style.display = 'none';
-    }
+    // Settings is now a page, navigate back to home
+    goBackFromSettings();
 }
 
 // Change theme immediately when selected
@@ -4329,7 +4384,7 @@ async function removeWriteRelayFromModal(relayUrl) {
 }
 
 // Override loadSettings to use modal approach
-window.loadSettings = openSettingsModal;
+window.loadSettings = loadSettings;
 window.saveSettings = saveSettings;
 window.closeSettingsModal = closeSettingsModal;
 window.changeTheme = changeTheme;
@@ -4421,3 +4476,134 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+// ==================== TRUST BADGE SETTINGS ====================
+
+// ==================== WEB OF TRUST PRIVACY CONTROLS ====================
+
+// Toggle Web of Trust (master switch)
+window.toggleWebOfTrust = function(enabled) {
+    localStorage.setItem('webOfTrustEnabled', enabled.toString());
+    console.log('Web of Trust ' + (enabled ? 'enabled' : 'disabled'));
+
+    // Update UI - enable/disable sub-options
+    const optionsContainer = document.getElementById('webOfTrustOptions');
+    if (optionsContainer) {
+        optionsContainer.style.opacity = enabled ? '1' : '0.5';
+        optionsContainer.style.pointerEvents = enabled ? 'auto' : 'none';
+    }
+
+    // If disabled, clear cache and hide all badges
+    if (!enabled) {
+        import('./relatr.js').then(Relatr => {
+            Relatr.clearTrustScoreCache();
+        });
+        TrustBadges.setTrustBadgesEnabled(false);
+    } else {
+        // Re-enable badges based on settings
+        const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true';
+        TrustBadges.setTrustBadgesEnabled(true);
+    }
+};
+
+// Toggle trust badges on all feeds (vs only Suggested Follows & New Voices)
+window.toggleTrustBadgesEverywhere = function(enabled) {
+    localStorage.setItem('showTrustBadgesEverywhere', enabled.toString());
+    console.log('Trust badges everywhere ' + (enabled ? 'enabled' : 'disabled'));
+
+    // Refresh badges with new context
+    TrustBadges.refreshAllTrustBadges();
+};
+
+// Toggle personalized scores (send source pubkey to API)
+window.togglePersonalizeScores = function(enabled) {
+    localStorage.setItem('personalizeScores', enabled.toString());
+    console.log('Personalized scores ' + (enabled ? 'enabled' : 'disabled'));
+
+    // Clear cache to force refetch with new perspective
+    import('./relatr.js').then(Relatr => {
+        Relatr.clearTrustScoreCache();
+    });
+};
+
+// Toggle data sharing with Relatr
+window.toggleShareData = function(enabled) {
+    localStorage.setItem('shareDataWithRelatr', enabled.toString());
+    console.log('Share data with Relatr ' + (enabled ? 'enabled' : 'disabled'));
+};
+
+// Legacy function - kept for backward compatibility
+window.toggleTrustBadges = function(enabled) {
+    toggleWebOfTrust(enabled);
+};
+
+// Initialize Web of Trust settings on settings page open
+document.addEventListener('DOMContentLoaded', () => {
+    const settingsPage = document.getElementById('settingsPage');
+    if (settingsPage) {
+        const observer = new MutationObserver(() => {
+            if (settingsPage.style.display === 'block') {
+                // Settings page opened - sync toggles with current state
+                const webOfTrustEnabled = localStorage.getItem('webOfTrustEnabled') !== 'false'; // Default: true
+                const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true'; // Default: false
+                const personalizeScores = localStorage.getItem('personalizeScores') !== 'false'; // Default: true
+                const shareData = localStorage.getItem('shareDataWithRelatr') === 'true'; // Default: false
+
+                const enableToggle = document.getElementById('enableWebOfTrust');
+                const everywhereToggle = document.getElementById('showTrustBadgesEverywhere');
+                const personalizeToggle = document.getElementById('personalizeScores');
+                const shareToggle = document.getElementById('shareDataWithRelatr');
+
+                if (enableToggle) enableToggle.checked = webOfTrustEnabled;
+                if (everywhereToggle) everywhereToggle.checked = showEverywhere;
+                if (personalizeToggle) personalizeToggle.checked = personalizeScores;
+                if (shareToggle) shareToggle.checked = shareData;
+
+                // Update options container state
+                const optionsContainer = document.getElementById('webOfTrustOptions');
+                if (optionsContainer) {
+                    optionsContainer.style.opacity = webOfTrustEnabled ? '1' : '0.5';
+                    optionsContainer.style.pointerEvents = webOfTrustEnabled ? 'auto' : 'none';
+                }
+            }
+        });
+        observer.observe(settingsPage, { attributes: true, attributeFilter: ['style'] });
+    }
+});
+
+// ==================== DEBUG FUNCTION ====================
+// Call this in the console to debug trust badge module loading
+window.debugTrustBadges = function() {
+    console.log('=== Trust Badges Debug Info ===');
+    console.log('window.NostrTrustBadges:', window.NostrTrustBadges);
+    console.log('typeof window.NostrTrustBadges:', typeof window.NostrTrustBadges);
+    
+    if (window.NostrTrustBadges) {
+        console.log('Module exports:', Object.keys(window.NostrTrustBadges));
+        console.log('addTrustBadgeToElement:', typeof window.NostrTrustBadges.addTrustBadgeToElement);
+        console.log('getTrustBadgesEnabled:', typeof window.NostrTrustBadges.getTrustBadgesEnabled);
+        console.log('setTrustBadgesEnabled:', typeof window.NostrTrustBadges.setTrustBadgesEnabled);
+        
+        // Try to get enabled state
+        try {
+            const enabled = window.NostrTrustBadges.getTrustBadgesEnabled();
+            console.log('Trust badges enabled:', enabled);
+        } catch (error) {
+            console.error('Error calling getTrustBadgesEnabled:', error);
+        }
+    } else {
+        console.log('❌ window.NostrTrustBadges is undefined or null');
+        
+        // Try to dynamically import
+        console.log('Attempting dynamic import...');
+        import('./trust-badges.js').then(module => {
+            console.log('✅ Dynamic import succeeded:', module);
+            console.log('Module exports:', Object.keys(module));
+        }).catch(error => {
+            console.error('❌ Dynamic import failed:', error);
+        });
+    }
+    
+    console.log('=== End Debug Info ===');
+};
+
+console.log('💡 Debug helper added: Run debugTrustBadges() in console to check module loading');
