@@ -738,6 +738,11 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
         const firstPageNotes = topNotes.slice(0, TRENDING_POSTS_PER_PAGE);
         displayedTrendingPostCount = firstPageNotes.length;
 
+        // Fetch disclosed tips for first page notes
+        console.log('💰 Fetching disclosed tips for trending notes');
+        const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+        Object.assign(disclosedTipsCache, disclosedTipsData);
+
         const renderedPosts = await Promise.all(
             firstPageNotes.map(({ note, engagement }) => renderSinglePost(note, 'feed', { [note.id]: engagement }, null))
         );
@@ -772,6 +777,19 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
 
         if (homeFeedList) {
             homeFeedList.innerHTML = anonymousBanner + renderedPosts.join('') + loadMoreButton;
+        }
+
+        // Add trust badges to trending feed notes
+        try {
+            const TrustBadges = await import('./trust-badges.js');
+            console.log('[Trending] Trust badges module imported');
+
+            // Add trust badges for all rendered notes
+            await TrustBadges.addFeedTrustBadges(firstPageNotes.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })), '#homeFeedList');
+            console.log(`[Trending] Trust badges added for ${firstPageNotes.length} notes`);
+        } catch (error) {
+            console.error('[Trending] Error adding trust badges:', error);
+            console.error('[Trending] Error stack:', error.stack);
         }
 
         // Hide the home feed header for anonymous users (trending feed has its own banner)
@@ -865,6 +883,11 @@ async function renderCachedTrendingFeed(cache) {
     const firstPageNotes = cachedTrendingPosts.slice(0, TRENDING_POSTS_PER_PAGE);
     displayedTrendingPostCount = firstPageNotes.length;
 
+    // Fetch disclosed tips for first page notes
+    console.log('💰 Fetching disclosed tips for cached trending notes');
+    const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+    Object.assign(disclosedTipsCache, disclosedTipsData);
+
     const renderedPosts = await Promise.all(
         firstPageNotes.map(async ({ note, engagement }) => {
             try {
@@ -923,6 +946,19 @@ async function renderCachedTrendingFeed(cache) {
     ` : '';
 
     homeFeedList.innerHTML = anonymousBanner + renderedPosts.join('') + loadMoreButton;
+
+    // Add trust badges to cached trending feed notes
+    try {
+        const TrustBadges = await import('./trust-badges.js');
+        console.log('[Trending Cache] Trust badges module imported');
+
+        // Add trust badges for all rendered notes
+        await TrustBadges.addFeedTrustBadges(firstPageNotes.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })), '#homeFeedList');
+        console.log(`[Trending Cache] Trust badges added for ${firstPageNotes.length} notes`);
+    } catch (error) {
+        console.error('[Trending Cache] Error adding trust badges:', error);
+        console.error('[Trending Cache] Error stack:', error.stack);
+    }
 
     // Hide the home feed header for anonymous users (trending feed has its own banner)
     const header = document.getElementById('homeFeedHeader');
@@ -983,6 +1019,11 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
     // Render first page
     const firstPageNotes = cachedTrendingPosts.slice(0, TRENDING_POSTS_PER_PAGE);
     displayedTrendingPostCount = firstPageNotes.length;
+
+    // Fetch disclosed tips for first page notes
+    console.log('💰 Fetching disclosed tips for cached trending notes');
+    const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+    Object.assign(disclosedTipsCache, disclosedTipsData);
 
     const renderedPosts = await Promise.all(
         firstPageNotes.map(async ({ note, engagement }) => {
@@ -1073,6 +1114,11 @@ async function loadMoreTrendingPosts() {
     if (postsToRender.length === 0) return;
 
     try {
+        // Fetch disclosed tips for next page posts
+        console.log('💰 Fetching disclosed tips for more trending notes');
+        const disclosedTipsData = await fetchDisclosedTips(postsToRender.map(({ note }) => note));
+        Object.assign(disclosedTipsCache, disclosedTipsData);
+
         // Render new posts
         const renderedPosts = await Promise.all(
             postsToRender.map(async ({ note, engagement }) => {
@@ -1115,6 +1161,18 @@ async function loadMoreTrendingPosts() {
         const homeFeedList = document.getElementById('homeFeedList');
         if (homeFeedList) {
             homeFeedList.insertAdjacentHTML('beforeend', renderedPosts.join('') + loadMoreButton);
+        }
+
+        // Add trust badges to newly loaded notes
+        try {
+            const TrustBadges = await import('./trust-badges.js');
+            console.log('[Trending Load More] Trust badges module imported');
+
+            // Add trust badges for newly rendered notes
+            await TrustBadges.addFeedTrustBadges(postsToRender.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })), '#homeFeedList');
+            console.log(`[Trending Load More] Trust badges added for ${postsToRender.length} notes`);
+        } catch (badgeError) {
+            console.error('[Trending Load More] Error adding trust badges:', badgeError);
         }
 
         console.log(`📄 Loaded ${postsToRender.length} more trending posts (showing ${displayedTrendingPostCount} of ${cachedTrendingPosts.length})`);
@@ -3405,8 +3463,8 @@ export async function fetchDisclosedTips(postsOrIds) {
 
         // Query Nosmero relay for disclosures
         const nosmeroRelay = window.location.port === '8080'
-            ? 'ws://nosmero.com:8080/nip78-relay'
-            : 'wss://nosmero.com/nip78-relay';
+            ? `ws://${window.location.hostname}:8080/nip78-relay`
+            : `wss://${window.location.hostname}/nip78-relay`;
 
         console.log('🔍 Fetching disclosed tips for', postIds.length, 'posts from', nosmeroRelay);
 
@@ -4755,8 +4813,8 @@ export async function fetchWidgetNetworkStats() {
     try {
         // Query from Nosmero relay where tips are published
         const nosmeroRelay = window.location.port === '8080'
-            ? 'ws://nosmero.com:8080/nip78-relay'
-            : 'wss://nosmero.com/nip78-relay';
+            ? `ws://${window.location.hostname}:8080/nip78-relay`
+            : `wss://${window.location.hostname}/nip78-relay`;
 
         // Query kind 9736 events (all-time)
         const events = await State.pool.querySync([nosmeroRelay], {
@@ -4809,8 +4867,8 @@ export async function fetchWidgetPersonalStats() {
     try {
         // Query from Nosmero relay where tips are published
         const nosmeroRelay = window.location.port === '8080'
-            ? 'ws://nosmero.com:8080/nip78-relay'
-            : 'wss://nosmero.com/nip78-relay';
+            ? `ws://${window.location.hostname}:8080/nip78-relay`
+            : `wss://${window.location.hostname}/nip78-relay`;
 
         // Query tips where user is recipient
         const events = await State.pool.querySync([nosmeroRelay], {
@@ -4882,8 +4940,8 @@ export async function fetchWidgetSentStats() {
     try {
         // Query from Nosmero relay where tips are published
         const nosmeroRelay = window.location.port === '8080'
-            ? 'ws://nosmero.com:8080/nip78-relay'
-            : 'wss://nosmero.com/nip78-relay';
+            ? `ws://${window.location.hostname}:8080/nip78-relay`
+            : `wss://${window.location.hostname}/nip78-relay`;
 
         // Query tips where user is sender (author of the event)
         const events = await State.pool.querySync([nosmeroRelay], {

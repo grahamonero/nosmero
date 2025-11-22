@@ -33,8 +33,8 @@ console.log('🚀 Starting Nosmero v0.95 - Modular Architecture');
 // Write policy enforced at relay level - only accepts NIP-78 Monero address events
 const NIP78_STORAGE_RELAYS = [
     window.location.port === '8080'
-        ? 'ws://nosmero.com:8080/nip78-relay'  // Dev
-        : 'wss://nosmero.com/nip78-relay'       // Production
+        ? `ws://${window.location.hostname}:8080/nip78-relay`  // Dev
+        : `wss://${window.location.hostname}/nip78-relay`       // Production
 ];
 
 console.log('📡 NIP-78 relay configured:', NIP78_STORAGE_RELAYS);
