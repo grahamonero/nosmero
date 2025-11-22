@@ -1245,12 +1245,12 @@ async function loadFreshFollowingList() {
 
 // ==================== MUTE LIST MANAGEMENT (NIP-51) ====================
 
-// Fetch mute list from relays (kind 10000)
+// Fetch private encrypted mute list from relays (kind 30000)
 export async function fetchMuteList() {
-    console.log('🔇 Fetching mute list (kind 10000)...');
+    console.log('🔇 Fetching private encrypted mute list (kind 30000)...');
 
-    if (!State.publicKey) {
-        console.log('🔇 No publicKey, skipping mute list fetch');
+    if (!State.publicKey || !State.privateKey) {
+        console.log('🔇 No keys available, skipping mute list fetch');
         return;
     }
 
@@ -1260,21 +1260,36 @@ export async function fetchMuteList() {
 
         await new Promise((resolve) => {
             const sub = State.pool.subscribeMany(readRelays, [
-                { kinds: [10000], authors: [State.publicKey], limit: 1 }
+                {
+                    kinds: [30000],
+                    authors: [State.publicKey],
+                    '#d': ['mute'],
+                    limit: 1
+                }
             ], {
-                onevent(event) {
+                async onevent(event) {
                     try {
+                        // Decrypt the content
+                        const decryptedContent = await window.NostrTools.nip04.decrypt(
+                            State.privateKey,
+                            State.publicKey,
+                            event.content
+                        );
+
+                        // Parse the decrypted tags
+                        const tags = JSON.parse(decryptedContent);
+
                         const mutedPubkeys = new Set();
-                        event.tags.forEach(tag => {
+                        tags.forEach(tag => {
                             if (tag[0] === 'p' && tag[1]) {
                                 mutedPubkeys.add(tag[1]);
                             }
                         });
 
                         State.setMutedUsers(mutedPubkeys);
-                        console.log('✅ Mute list loaded:', mutedPubkeys.size, 'users');
+                        console.log('✅ Private mute list loaded (decrypted):', mutedPubkeys.size, 'users');
                     } catch (error) {
-                        console.error('Error parsing mute list:', error);
+                        console.error('Error decrypting/parsing mute list:', error);
                     }
                 },
                 oneose: () => {
@@ -1296,9 +1311,9 @@ export async function fetchMuteList() {
     }
 }
 
-// Publish updated mute list to relays (kind 10000)
+// Publish updated mute list to relays (kind 30000 - encrypted private list)
 export async function publishMuteList() {
-    console.log('📤 Publishing mute list...');
+    console.log('📤 Publishing private encrypted mute list...');
 
     if (!State.privateKey || !State.publicKey) {
         console.error('Cannot publish mute list - no keys available');
@@ -1312,12 +1327,24 @@ export async function publishMuteList() {
         // Build tags array from muted users
         const tags = Array.from(State.mutedUsers || new Set()).map(pubkey => ['p', pubkey]);
 
-        // Create kind 10000 event
+        // Prepare content to encrypt (tags as JSON)
+        const contentToEncrypt = JSON.stringify(tags);
+
+        // Encrypt content using NIP-04 (encrypt to self)
+        const encryptedContent = await window.NostrTools.nip04.encrypt(
+            State.privateKey,
+            State.publicKey,
+            contentToEncrypt
+        );
+
+        // Create kind 30000 event (parameterized replaceable private list)
         const muteListEvent = {
-            kind: 10000,
+            kind: 30000,
             created_at: Math.floor(Date.now() / 1000),
-            tags: tags,
-            content: '', // Public mutes only (no encryption for simplicity)
+            tags: [
+                ['d', 'mute'] // "d" tag identifier for mute list
+            ],
+            content: encryptedContent, // Encrypted private mute list
             pubkey: State.publicKey
         };
 
@@ -1328,7 +1355,7 @@ export async function publishMuteList() {
         const publishPromises = State.pool.publish(writeRelays, signedEvent);
         await Promise.allSettled(publishPromises);
 
-        console.log('✅ Mute list published');
+        console.log('✅ Private mute list published (encrypted)');
         return true;
     } catch (error) {
         console.error('Error publishing mute list:', error);
@@ -1524,16 +1551,66 @@ async function getWebOfTrustUsers(offset = 0) {
             }, 5000);
         });
 
-        // Step 3: Pick 2 follow Ys from each follow X
-        const followYs = new Set();
+        // Step 3: Get ALL follow Ys from each follow X
+        const allFollowYs = new Set();
         followXtoYsMap.forEach((theirFollows, followXPubkey) => {
-            // Take first 2 from their following list
-            const selectedYs = theirFollows.slice(0, 2);
-            selectedYs.forEach(y => followYs.add(y));
+            // Take up to 10 from each follow X's list to get good sample
+            const selectedYs = theirFollows.slice(0, 10);
+            selectedYs.forEach(y => allFollowYs.add(y));
             console.log(`  Follow X ${followXPubkey.slice(0, 8)}: selected ${selectedYs.length} follow Ys`);
         });
 
-        console.log(`✅ Collected ${followYs.size} follow Ys from ${followXtoYsMap.size} follow Xs`);
+        console.log(`✅ Collected ${allFollowYs.size} follow Ys from ${followXtoYsMap.size} follow Xs`);
+
+        // Step 4: Fetch trust scores for all follow Ys
+        console.log(`📊 Fetching trust scores for ${allFollowYs.size} users...`);
+        const followYsArray = Array.from(allFollowYs);
+
+        const usersWithScores = [];
+
+        try {
+            // Batch fetch trust scores
+            const response = await fetch('/api/relatr/trust-scores', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pubkeys: followYsArray })
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.results) {
+                data.results.forEach(result => {
+                    if (!result.error && result.score !== undefined) {
+                        usersWithScores.push({
+                            pubkey: result.pubkey,
+                            score: result.score
+                        });
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Error fetching trust scores:', error);
+            // Fall back to using all users without scoring
+            followYsArray.forEach(pubkey => {
+                usersWithScores.push({ pubkey, score: 0 });
+            });
+        }
+
+        // Step 5: Sort by trust score (highest first)
+        usersWithScores.sort((a, b) => b.score - a.score);
+        console.log(`✅ Sorted ${usersWithScores.length} users by trust score`);
+
+        // Log top 10 scores for debugging
+        console.log(`📊 Top 10 trust scores:`);
+        usersWithScores.slice(0, 10).forEach((user, i) => {
+            console.log(`  ${i + 1}. ${user.pubkey.slice(0, 8)}: ${user.score}/100`);
+        });
+
+        // Step 6: Take top 20 users
+        const topUsers = usersWithScores.slice(0, 20).map(u => u.pubkey);
+        const followYs = new Set(topUsers);
+
+        console.log(`✅ Selected top ${followYs.size} high-scoring follow Ys`);
 
         // Always return hasMore: true for infinite cycling
         return { followYs, hasMore: true };
@@ -1567,7 +1644,7 @@ export async function loadWebOfTrustFeed() {
     feed.innerHTML = `
         <div style="padding: 20px; text-align: center; color: #999;">
             <div class="spinner" style="width: 40px; height: 40px; border: 3px solid rgba(255, 255, 255, 0.1); border-top-color: #FF6600; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
-            <p>Discovering your Web of Trust network...</p>
+            <p>Discovering suggested users...</p>
         </div>
     `;
 
@@ -1576,9 +1653,9 @@ export async function loadWebOfTrustFeed() {
         if (!State.publicKey) {
             feed.innerHTML = `
                 <div style="text-align: center; color: #666; padding: 40px;">
-                    <p>Please log in to see your Web of Trust feed.</p>
+                    <p>Please log in to see suggested follows.</p>
                     <p style="font-size: 14px; margin-top: 10px;">
-                        Your Web of Trust shows posts from users followed by people you follow.
+                        This feed shows posts from users followed by people you follow.
                     </p>
                 </div>
             `;
@@ -1591,9 +1668,9 @@ export async function loadWebOfTrustFeed() {
         if (followYs.size === 0) {
             feed.innerHTML = `
                 <div style="text-align: center; color: #666; padding: 40px;">
-                    <p>No Web of Trust users found.</p>
+                    <p>No suggested users found.</p>
                     <p style="font-size: 14px; margin-top: 10px;">
-                        Follow more users to expand your Web of Trust network!
+                        Follow more users to expand your network!
                     </p>
                 </div>
             `;
@@ -1671,7 +1748,7 @@ export async function loadWebOfTrustFeed() {
         if (postsToDisplay.length === 0) {
             feed.innerHTML = `
                 <div style="text-align: center; color: #666; padding: 40px;">
-                    <p>No recent posts from your Web of Trust.</p>
+                    <p>No recent posts from suggested follows.</p>
                     <p style="font-size: 14px; margin-top: 10px;">
                         Check back later for new content from your extended network!
                     </p>
@@ -1716,9 +1793,9 @@ export async function loadWebOfTrustFeed() {
 
             feed.innerHTML = `
                 <div style="padding: 16px 20px; border-bottom: 1px solid #333; background: rgba(255, 255, 255, 0.02);">
-                    <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Web of Trust Feed</h3>
+                    <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Suggested Follows</h3>
                     <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
-                        Posts from users followed by people you follow (past 24 hours)
+                        Posts from high-scoring users in your extended network (past 24 hours)
                     </p>
                 </div>
                 <div id="homeFeedList">
@@ -2275,9 +2352,22 @@ async function renderHomeFeedResults() {
         const renderedPostsComplete = sortedResults.map(post => {
             return renderSinglePost(post, 'feed', engagementData, parentPostsMap);
         });
-        Promise.all(renderedPostsComplete).then(posts => {
+        Promise.all(renderedPostsComplete).then(async posts => {
             resultsEl.innerHTML = posts.join('');
             console.log('✅ Posts re-rendered with all data: disclosed tips, parent context, and engagement counts');
+
+            // Add trust badges to posts
+            try {
+                const TrustBadges = await import('./trust-badges.js');
+                console.log('[Posts] Trust badges module imported');
+
+                console.log(`[Posts] Adding trust badges for ${sortedResults.length} users...`);
+                await TrustBadges.addFeedTrustBadges(sortedResults.map(p => ({ id: p.id, pubkey: p.pubkey })), '#homeFeedList');
+                console.log('[Posts] Trust badges added');
+            } catch (error) {
+                console.error('[Posts] Error adding trust badges:', error);
+                console.error('[Posts] Error stack:', error.stack);
+            }
         });
     });
 
@@ -2467,7 +2557,7 @@ export async function renderFeed(loadMore = false) {
                             `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
                         }
                         <div class="post-info">
-                            <span class="username" style="font-size: 14px;">${parentAuthor.name}</span>
+                            <span class="username" data-pubkey="${parentPost.pubkey}" style="font-size: 14px;">${parentAuthor.name}</span>
                             <span class="timestamp" style="font-size: 12px;">${Utils.formatTime(parentPost.created_at)}</span>
                         </div>
                     </div>
@@ -2487,7 +2577,7 @@ export async function renderFeed(loadMore = false) {
                     }
                     <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
                     <div class="post-info">
-                        <span class="username" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
+                        <span class="username" data-pubkey="${post.pubkey}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
                         <span class="handle" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">@${author.handle}</span>
                         <span class="timestamp">${Utils.formatTime(post.created_at)}</span>
                     </div>
@@ -2579,6 +2669,23 @@ export async function renderFeed(loadMore = false) {
     // Update like button states
     updateAllLikeButtons();
     updateAllRepostButtons();
+
+    // Add trust badges to feed notes
+    try {
+        const TrustBadges = await import('./trust-badges.js');
+        console.log('[Posts] Trust badges module imported');
+
+        // Collect all pubkeys from rendered posts
+        const pubkeys = postsToRender.map(p => p.pubkey).filter(pk => pk);
+        console.log(`[Posts] Adding trust badges for ${pubkeys.length} users...`);
+
+        // Queue trust scores for batch fetch
+        await TrustBadges.addFeedTrustBadges(postsToRender.map(p => ({ id: p.id, pubkey: p.pubkey })));
+        console.log('[Posts] Trust badges added');
+    } catch (error) {
+        console.error('[Posts] Error adding trust badges:', error);
+        console.error('[Posts] Error stack:', error.stack);
+    }
 
     // Process any embedded notes after rendering
     try {
@@ -3815,7 +3922,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                     }
                     <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
                     <div class="post-info">
-                        <span class="username" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
+                        <span class="username" data-pubkey="${post.pubkey}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
                         <span class="handle" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">@${author.handle}</span>
                         <span class="timestamp">${Utils.formatTime(post.created_at)}</span>
                     </div>
@@ -5342,6 +5449,328 @@ function renderTipActivityWidget() {
             </div>
         </div>
     `;
+}
+
+// ====================
+// TRENDING ALL FEED (Popular notes across all topics)
+// ====================
+
+let trendingAllNotes = [];
+let trendingAllOffset = 0;
+let trendingAllEngagement = {};
+
+export async function loadTrendingAllFeed() {
+    console.log('📈 Loading Trending Notes feed (all topics)...');
+
+    // Set current page to prevent other feeds from loading
+    State.setCurrentPage('trending');
+
+    // Reset state
+    trendingAllNotes = [];
+    trendingAllOffset = 0;
+    trendingAllEngagement = {};
+
+    const feed = document.getElementById('feed');
+    if (!feed) return;
+
+    // Show loading state
+    feed.innerHTML = `
+        <div style="padding: 20px; text-align: center; color: #999;">
+            <div class="spinner" style="width: 40px; height: 40px; border: 3px solid rgba(255, 255, 255, 0.1); border-top-color: #FF6600; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
+            <p>Loading trending notes...</p>
+        </div>
+    `;
+
+    try {
+        const Relays = await import('./relays.js');
+        const relays = Relays.DEFAULT_RELAYS;
+
+        // Query for recent notes from last 24 hours
+        const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
+
+        const notes = await State.pool.querySync(relays, {
+            kinds: [1],
+            since: oneDayAgo,
+            limit: 200
+        });
+
+        console.log(`Found ${notes.length} recent notes`);
+
+        if (notes.length === 0) {
+            feed.innerHTML = `
+                <div style="text-align: center; color: #666; padding: 40px;">
+                    <p>No trending notes found.</p>
+                    <p style="font-size: 14px; margin-top: 10px;">Check back later!</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Fetch engagement data (replies, reactions, zaps)
+        trendingAllEngagement = await fetchEngagementCounts(notes.map(n => n.id));
+
+        // Sort by total engagement
+        notes.sort((a, b) => {
+            const engageA = (trendingAllEngagement[a.id]?.replies || 0) +
+                           (trendingAllEngagement[a.id]?.reactions || 0) +
+                           (trendingAllEngagement[a.id]?.zaps || 0);
+            const engageB = (trendingAllEngagement[b.id]?.replies || 0) +
+                           (trendingAllEngagement[b.id]?.reactions || 0) +
+                           (trendingAllEngagement[b.id]?.zaps || 0);
+            return engageB - engageA;
+        });
+
+        // Store all notes for pagination
+        trendingAllNotes = notes;
+
+        // Show first page
+        await showMoreTrendingAll();
+
+    } catch (error) {
+        console.error('Error loading trending notes:', error);
+        feed.innerHTML = `
+            <div style="text-align: center; color: #999; padding: 40px;">
+                <p>Error loading trending notes. Please try again.</p>
+            </div>
+        `;
+    }
+}
+
+async function showMoreTrendingAll() {
+    const feed = document.getElementById('feed');
+    if (!feed) return;
+
+    const pagesToShow = trendingAllNotes.slice(trendingAllOffset, trendingAllOffset + 20);
+
+    if (pagesToShow.length === 0) {
+        return; // No more notes
+    }
+
+    // Fetch profiles for authors
+    const authors = [...new Set(pagesToShow.map(n => n.pubkey))];
+    await fetchProfiles(authors);
+
+    // Fetch parent posts for replies
+    const parentPostsMap = await fetchParentPosts(pagesToShow);
+
+    // Render notes
+    const renderedNotes = await Promise.all(
+        pagesToShow.map(async (note) => {
+            try {
+                return await renderSinglePost(note, 'feed', trendingAllEngagement, parentPostsMap);
+            } catch (error) {
+                console.error('Error rendering note:', error);
+                return '';
+            }
+        })
+    );
+
+    // Update offset
+    trendingAllOffset += 20;
+
+    // Create Load More button if there are more notes
+    const hasMore = trendingAllOffset < trendingAllNotes.length;
+    const loadMoreButton = hasMore ? `
+        <div id="loadMoreContainer" style="text-align: center; padding: 20px;">
+            <button onclick="window.loadMoreTrendingAll()" style="padding: 12px 24px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500;">
+                Load More
+            </button>
+        </div>
+    ` : '';
+
+    if (trendingAllOffset === 20) {
+        // First page - replace everything
+        feed.innerHTML = `
+            <div style="padding: 16px 20px; border-bottom: 1px solid #333; background: rgba(255, 255, 255, 0.02);">
+                <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Popular Notes</h3>
+                <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
+                    Popular notes across Nostr (past 24 hours)
+                </p>
+            </div>
+            <div id="homeFeedList">
+                ${renderedNotes.filter(n => n).join('')}
+            </div>
+            ${loadMoreButton}
+        `;
+    } else {
+        // Subsequent pages - append
+        const homeFeedList = document.getElementById('homeFeedList');
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+
+        if (homeFeedList) {
+            homeFeedList.insertAdjacentHTML('beforeend', renderedNotes.filter(n => n).join(''));
+        }
+
+        if (loadMoreContainer) {
+            loadMoreContainer.remove();
+        }
+
+        if (hasMore) {
+            feed.insertAdjacentHTML('beforeend', loadMoreButton);
+        }
+    }
+
+    // Add trust badges to rendered notes
+    try {
+        const TrustBadges = await import('./trust-badges.js');
+        console.log('[TrendingAll] Adding trust badges for Popular Notes feed...');
+
+        // Collect all pubkeys from rendered posts
+        const pubkeys = pagesToShow.map(n => n.pubkey).filter(pk => pk);
+        console.log(`[TrendingAll] Adding trust badges for ${pubkeys.length} users...`);
+
+        // Add trust badges to feed
+        await TrustBadges.addFeedTrustBadges(
+            pagesToShow.map(n => ({ id: n.id, pubkey: n.pubkey })),
+            '#homeFeedList'
+        );
+        console.log('[TrendingAll] Trust badges added');
+    } catch (error) {
+        console.error('[TrendingAll] Error adding trust badges:', error);
+        console.error('[TrendingAll] Error stack:', error.stack);
+    }
+}
+
+window.loadMoreTrendingAll = () => {
+    showMoreTrendingAll().catch(error => console.error('Error loading more trending notes:', error));
+};
+
+// ====================
+// DISCOVER FEED (Random quality notes from trusted users)
+// ====================
+
+export async function loadDiscoverFeed() {
+    console.log('🎲 Loading Discover feed (random quality notes)...');
+
+    const feed = document.getElementById('feed');
+    if (!feed) return;
+
+    // Show loading state
+    feed.innerHTML = `
+        <div style="padding: 20px; text-align: center; color: #999;">
+            <div class="spinner" style="width: 40px; height: 40px; border: 3px solid rgba(255, 255, 255, 0.1); border-top-color: #FF6600; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
+            <p>Discovering quality content...</p>
+        </div>
+    `;
+
+    try {
+        const Relays = await import('./relays.js');
+        const relays = Relays.DEFAULT_RELAYS;
+
+        // Query for recent notes from last 24 hours
+        const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
+
+        const notes = await State.pool.querySync(relays, {
+            kinds: [1],
+            since: oneDayAgo,
+            limit: 300 // Get more notes for better randomization
+        });
+
+        console.log(`Found ${notes.length} recent notes`);
+
+        if (notes.length === 0) {
+            feed.innerHTML = `
+                <div style="text-align: center; color: #666; padding: 40px;">
+                    <p>No notes found.</p>
+                    <p style="font-size: 14px; margin-top: 10px;">Check back later!</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Get unique authors
+        const authors = [...new Set(notes.map(n => n.pubkey))];
+        console.log(`Found ${authors.length} unique authors`);
+
+        // Fetch trust scores for authors
+        feed.innerHTML = `
+            <div style="padding: 20px; text-align: center; color: #999;">
+                <div class="spinner" style="width: 40px; height: 40px; border: 3px solid rgba(255, 255, 255, 0.1); border-top-color: #FF6600; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
+                <p>Filtering for quality accounts (score ≥70)...</p>
+            </div>
+        `;
+
+        const response = await fetch('/api/relatr/trust-scores', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pubkeys: authors })
+        });
+
+        const data = await response.json();
+
+        // Filter for authors with score ≥70
+        const qualityAuthors = new Set();
+        if (data.success && data.results) {
+            data.results.forEach(result => {
+                if (!result.error && result.score >= 70) {
+                    qualityAuthors.add(result.pubkey);
+                }
+            });
+        }
+
+        console.log(`Found ${qualityAuthors.size} quality authors (score ≥70)`);
+
+        // Filter notes to only quality authors
+        const qualityNotes = notes.filter(n => qualityAuthors.has(n.pubkey));
+
+        if (qualityNotes.length === 0) {
+            feed.innerHTML = `
+                <div style="text-align: center; color: #666; padding: 40px;">
+                    <p>No quality notes found (score ≥70).</p>
+                    <p style="font-size: 14px; margin-top: 10px;">Try again later for fresh discoveries!</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Shuffle for randomness
+        for (let i = qualityNotes.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [qualityNotes[i], qualityNotes[j]] = [qualityNotes[j], qualityNotes[i]];
+        }
+
+        // Take first 20
+        const displayNotes = qualityNotes.slice(0, 20);
+
+        // Fetch profiles for authors
+        await fetchProfiles([...qualityAuthors]);
+
+        // Fetch engagement and parent posts
+        const engagementData = await fetchEngagementCounts(displayNotes.map(n => n.id));
+        const parentPostsMap = await fetchParentPosts(displayNotes);
+
+        // Render notes
+        const renderedNotes = await Promise.all(
+            displayNotes.map(async (note) => {
+                try {
+                    return await renderSinglePost(note, 'feed', engagementData, parentPostsMap);
+                } catch (error) {
+                    console.error('Error rendering note:', error);
+                    return '';
+                }
+            })
+        );
+
+        feed.innerHTML = `
+            <div style="padding: 16px 20px; border-bottom: 1px solid #333; background: rgba(255, 255, 255, 0.02);">
+                <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Discover</h3>
+                <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
+                    Random notes from quality accounts (trust score ≥70)
+                </p>
+            </div>
+            <div id="homeFeedList">
+                ${renderedNotes.filter(n => n).join('')}
+            </div>
+        `;
+
+    } catch (error) {
+        console.error('Error loading discover feed:', error);
+        feed.innerHTML = `
+            <div style="text-align: center; color: #999; padding: 40px;">
+                <p>Error loading discover feed. Please try again.</p>
+            </div>
+        `;
+    }
 }
 
 window.removeMedia = removeMedia;
