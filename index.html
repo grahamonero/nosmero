@@ -797,7 +797,7 @@
                                style="margin-right: 12px; margin-top: 4px;">
                         <div style="flex: 1;">
                             <div style="font-weight: 600; font-size: 15px; color: #10B981; margin-bottom: 4px;">✓ Disclose + Verify</div>
-                            <div style="font-size: 13px; color: #999;">Cryptographically verified with blockchain proof. Transaction details sent privately to recipient via encrypted DM.</div>
+                            <div style="font-size: 13px; color: #999;">Cryptographically verified with blockchain proof. Verified badge displayed publicly on the note.</div>
                         </div>
                     </div>
                 </label>
@@ -834,8 +834,8 @@
                             <strong style="color: #10B981;">🔐 Privacy-First Verification</strong><br>
                             Your transaction details (TXID & tx_key) will be:<br>
                             • Verified instantly against the Monero blockchain<br>
-                            • Sent privately to the recipient via encrypted DM (NIP-17)<br>
-                            • Never stored in logs or published publicly<br>
+                            • Proof hash published publicly (not the TXID or tx_key)<br>
+                            • Never stored in logs or databases<br>
                             • Discarded immediately after verification
                         </div>
                     </div>
@@ -917,6 +917,10 @@
     <script src="/js/ui-redesign.js?v=3.2.1"></script>
 
     <!-- Load the modular v2 application -->
-    <script type="module" src="/js/app.js?v=2.9.34-relatr-mobile-fix"></script>
+    <script type="module" src="/js/app.js?v=2.9.40-verify-text-fix"></script>
+
+    <!-- Eruda Mobile Debugging Console (DEV ONLY) -->
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>eruda.init();</script>
 </body>
 </html>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Trust Badge Display Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/styles.css?v=1.9.14-relatr">
+    <style>
+        body {
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test-user {
+            background: var(--bg-secondary);
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        .username {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .pubkey {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+            word-break: break-all;
+        }
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            background: var(--bg-primary);
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        button {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: var(--accent-color);
+            color: var(--bg-primary);
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            opacity: 0.8;
+        }
+        .info {
+            background: var(--bg-secondary);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid var(--accent-color);
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 Trust Badge Display Test</h1>
+
+    <div class="info">
+        <h3>Test Instructions:</h3>
+        <ol>
+            <li>This page tests if trust badges are actually displaying</li>
+            <li>Click "Add Badge" to fetch trust scores and display badges</li>
+            <li>You should see colored pill badges (70-100 = green, 50-69 = blue, etc.)</li>
+            <li>Check browser console for debug logs</li>
+        </ol>
+        <p><strong>Note:</strong> Make sure you've visited the main site first so modules are loaded!</p>
+        <p><a href="https://m.nosmero.com:8443" style="color: var(--accent-color);">← Back to Mobile Site</a></p>
+    </div>
+
+    <div class="test-user">
+        <div class="username" id="user1">jb55 (Damus creator)</div>
+        <div class="pubkey">32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245</div>
+        <button onclick="testBadge('user1', '32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245')">Add Badge</button>
+        <div class="status" id="status1">Waiting...</div>
+    </div>
+
+    <div class="test-user">
+        <div class="username" id="user2">fiatjaf</div>
+        <div class="pubkey">3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d</div>
+        <button onclick="testBadge('user2', '3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d')">Add Badge</button>
+        <div class="status" id="status2">Waiting...</div>
+    </div>
+
+    <div class="test-user">
+        <div class="username" id="user3">Lyn Alden</div>
+        <div class="pubkey">eab0e756d32b80bcd464f3d844b8040303075a13eabc3599a762c9ac7ab91f4f</div>
+        <button onclick="testBadge('user3', 'eab0e756d32b80bcd464f3d844b8040303075a13eabc3599a762c9ac7ab91f4f')">Add Badge</button>
+        <div class="status" id="status3">Waiting...</div>
+    </div>
+
+    <script type="module">
+        // Import trust badge module
+        import { addTrustBadgeToElement } from './js/trust-badges.js';
+
+        // Make test function globally available
+        window.testBadge = async function(userId, pubkey) {
+            console.log(`Testing badge for ${userId}, pubkey: ${pubkey}`);
+
+            const usernameElement = document.getElementById(userId);
+            const statusElement = document.getElementById(`status${userId.slice(-1)}`);
+
+            // Clear any existing badge
+            const existingBadge = usernameElement.querySelector('.trust-badge');
+            if (existingBadge) {
+                existingBadge.remove();
+            }
+
+            statusElement.textContent = 'Fetching trust score...';
+
+            try {
+                // Add trust badge
+                await addTrustBadgeToElement(usernameElement, pubkey, true);
+
+                // Check if badge was added
+                const badge = usernameElement.querySelector('.trust-badge');
+                if (badge) {
+                    statusElement.textContent = `✅ Badge added! Score: ${badge.textContent}`;
+                    statusElement.style.color = '#0f0';
+                } else {
+                    statusElement.textContent = '⚠️ No badge added (check console for errors)';
+                    statusElement.style.color = '#ff0';
+                }
+            } catch (error) {
+                console.error('Error adding badge:', error);
+                statusElement.textContent = `❌ Error: ${error.message}`;
+                statusElement.style.color = '#f00';
+            }
+        };
+
+        // Auto-test on load
+        console.log('Trust badge test page loaded');
+        console.log('LocalStorage settings:');
+        console.log('- webOfTrustEnabled:', localStorage.getItem('webOfTrustEnabled'));
+        console.log('- showTrustBadgesEverywhere:', localStorage.getItem('showTrustBadgesEverywhere'));
+        console.log('- personalizeScores:', localStorage.getItem('personalizeScores'));
+        console.log('- shareDataWithRelatr:', localStorage.getItem('shareDataWithRelatr'));
+    </script>
+</body>
+</html>

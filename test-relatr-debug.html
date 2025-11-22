@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Relatr Debug Test - Mobile</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .section {
+            background: #2a2a2a;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+        }
+        .section h3 {
+            margin-top: 0;
+            color: #f90;
+        }
+        button {
+            background: #f90;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #fa0;
+        }
+        .result {
+            background: #1a1a1a;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .success { color: #0f0; }
+        .error { color: #f00; }
+        .warning { color: #ff0; }
+    </style>
+</head>
+<body>
+    <h1>🐛 Relatr Mobile Debug Test</h1>
+    <p>This page tests if Relatr trust badges should be displaying on mobile.</p>
+    <p><strong>FIX APPLIED:</strong> Mobile now forces "showTrustBadgesEverywhere" to true on every page load.</p>
+    <p><a href="https://m.nosmero.com:8443" style="color: #f90;">← Back to Mobile Site</a></p>
+
+    <div class="section">
+        <h3>1. LocalStorage Check</h3>
+        <button onclick="checkLocalStorage()">Check LocalStorage Values</button>
+        <div id="localStorageResult" class="result"></div>
+    </div>
+
+    <div class="section">
+        <h3>2. Initialize Settings</h3>
+        <button onclick="initializeSettings()">Run Initialization Code</button>
+        <div id="initResult" class="result"></div>
+    </div>
+
+    <div class="section">
+        <h3>3. Test shouldShowBadgesInContext()</h3>
+        <button onclick="testShouldShow()">Test Badge Display Logic</button>
+        <div id="shouldShowResult" class="result"></div>
+    </div>
+
+    <div class="section">
+        <h3>4. API Connection Test</h3>
+        <button onclick="testAPI()">Test Relatr API</button>
+        <div id="apiResult" class="result"></div>
+    </div>
+
+    <div class="section">
+        <h3>5. Force Reset</h3>
+        <button onclick="clearAll()">Clear All LocalStorage</button>
+        <button onclick="setCorrectDefaults()">Set Correct Defaults</button>
+        <div id="resetResult" class="result"></div>
+    </div>
+
+    <script>
+        function checkLocalStorage() {
+            const result = document.getElementById('localStorageResult');
+            const values = {
+                'webOfTrustEnabled': localStorage.getItem('webOfTrustEnabled'),
+                'showTrustBadgesEverywhere': localStorage.getItem('showTrustBadgesEverywhere'),
+                'personalizeScores': localStorage.getItem('personalizeScores'),
+                'shareDataWithRelatr': localStorage.getItem('shareDataWithRelatr')
+            };
+
+            let html = '<strong>Current LocalStorage Values:</strong>\n';
+            for (const [key, value] of Object.entries(values)) {
+                const valueStr = value === null ? '<span class="warning">null</span>' : `"${value}"`;
+                html += `${key}: ${valueStr}\n`;
+            }
+
+            // Test the actual logic
+            const webOfTrustEnabled = localStorage.getItem('webOfTrustEnabled') !== 'false';
+            const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true';
+
+            html += '\n<strong>Computed Values:</strong>\n';
+            html += `webOfTrustEnabled (computed): <span class="${webOfTrustEnabled ? 'success' : 'error'}">${webOfTrustEnabled}</span>\n`;
+            html += `showEverywhere (computed): <span class="${showEverywhere ? 'success' : 'error'}">${showEverywhere}</span>\n`;
+
+            result.innerHTML = html;
+        }
+
+        function initializeSettings() {
+            const result = document.getElementById('initResult');
+            let html = '';
+
+            // Mimic the mobile initialization code
+            if (localStorage.getItem('showTrustBadgesEverywhere') === null) {
+                localStorage.setItem('showTrustBadgesEverywhere', 'true');
+                html += '<span class="success">✓ Set showTrustBadgesEverywhere to "true"</span>\n';
+            } else {
+                html += '<span class="warning">⚠ showTrustBadgesEverywhere already set to: "' + localStorage.getItem('showTrustBadgesEverywhere') + '"</span>\n';
+                html += '(Initialization skipped because value is not null)\n';
+            }
+
+            result.innerHTML = html;
+            checkLocalStorage(); // Refresh the localStorage display
+        }
+
+        function testShouldShow() {
+            const result = document.getElementById('shouldShowResult');
+
+            // Replicate the shouldShowBadgesInContext() logic
+            const webOfTrustEnabled = localStorage.getItem('webOfTrustEnabled') !== 'false';
+            const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true';
+            const currentPath = window.location.pathname;
+
+            let html = '<strong>shouldShowBadgesInContext() Test:</strong>\n\n';
+            html += `Step 1: Check webOfTrustEnabled\n`;
+            html += `  Value: <span class="${webOfTrustEnabled ? 'success' : 'error'}">${webOfTrustEnabled}</span>\n`;
+
+            if (!webOfTrustEnabled) {
+                html += `  Result: <span class="error">❌ Badges DISABLED (master switch off)</span>\n`;
+                result.innerHTML = html;
+                return;
+            }
+
+            html += '\nStep 2: Check showEverywhere\n';
+            html += `  Value: <span class="${showEverywhere ? 'success' : 'error'}">${showEverywhere}</span>\n`;
+
+            if (showEverywhere) {
+                html += `  Result: <span class="success">✅ Badges should show EVERYWHERE</span>\n`;
+                result.innerHTML = html;
+                return;
+            }
+
+            html += '\nStep 3: Check current page path\n';
+            html += `  Current path: "${currentPath}"\n`;
+
+            const isSpecialFeed = currentPath.includes('/suggestedfollows') ||
+                                  currentPath.includes('/feed/suggestedfollows') ||
+                                  currentPath.includes('/trending') ||
+                                  currentPath.includes('/feed/trending');
+
+            html += `  Is special feed: <span class="${isSpecialFeed ? 'success' : 'error'}">${isSpecialFeed}</span>\n`;
+
+            if (isSpecialFeed) {
+                html += `  Result: <span class="success">✅ Badges should show (special feed page)</span>\n`;
+            } else {
+                html += `  Result: <span class="error">❌ Badges HIDDEN (not a special feed page)</span>\n`;
+            }
+
+            result.innerHTML = html;
+        }
+
+        async function testAPI() {
+            const result = document.getElementById('apiResult');
+            result.innerHTML = 'Testing API connection...\n';
+
+            try {
+                const response = await fetch('/api/relatr/stats');
+                const data = await response.json();
+
+                let html = '<span class="success">✅ API Connection Successful!</span>\n\n';
+                html += `Users analyzed: ${data.socialGraph?.stats?.users || 'N/A'}\n`;
+                html += `Follow relationships: ${data.socialGraph?.stats?.follows || 'N/A'}\n`;
+
+                result.innerHTML = html;
+            } catch (error) {
+                result.innerHTML = `<span class="error">❌ API Error: ${error.message}</span>`;
+            }
+        }
+
+        function clearAll() {
+            const keys = ['webOfTrustEnabled', 'showTrustBadgesEverywhere', 'personalizeScores', 'shareDataWithRelatr'];
+            keys.forEach(key => localStorage.removeItem(key));
+
+            document.getElementById('resetResult').innerHTML = '<span class="success">✓ All trust badge settings cleared</span>';
+            checkLocalStorage();
+        }
+
+        function setCorrectDefaults() {
+            // Mobile defaults
+            localStorage.setItem('webOfTrustEnabled', 'true');
+            localStorage.setItem('showTrustBadgesEverywhere', 'true');
+            localStorage.setItem('personalizeScores', 'true');
+            localStorage.setItem('shareDataWithRelatr', 'false');
+
+            document.getElementById('resetResult').innerHTML = '<span class="success">✓ Set correct mobile defaults</span>';
+            checkLocalStorage();
+        }
+
+        // Auto-run on load
+        window.addEventListener('DOMContentLoaded', () => {
+            checkLocalStorage();
+        });
+    </script>
+</body>
+</html>

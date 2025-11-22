@@ -8,9 +8,9 @@ import * as Utils from './utils.js';
 import * as Crypto from './crypto.js';
 import * as Relays from './relays.js';
 import * as Nip05 from './nip05.js';
-import * as Posts from './posts.js';
+import * as Posts from './posts.js?v=2.9.39';
 import * as Auth from './auth.js';
-import * as UI from './ui.js';
+import * as UI from './ui.js?v=2.9.38';
 import * as Messages from './messages.js';
 import * as Search from './search.js';
 
