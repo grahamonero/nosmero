@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Status - Mobile Relatr</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .section {
+            background: #2a2a2a;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+        }
+        h1 { color: #f90; }
+        h3 { color: #f90; margin-top: 0; }
+        .good { color: #0f0; }
+        .bad { color: #f00; }
+        .warning { color: #ff0; }
+        pre {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        button {
+            background: #f90;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Mobile Relatr Debug Status</h1>
+    <p><strong>Site:</strong> m.nosmero.com:8443 (Mobile Dev)</p>
+    <p><a href="https://m.nosmero.com:8443" style="color: #f90;">← Back to Mobile Site</a></p>
+
+    <div class="section">
+        <h3>1. LocalStorage Status</h3>
+        <button onclick="checkStorage()">Check Now</button>
+        <button onclick="localStorage.clear(); location.reload()">Clear & Reload</button>
+        <pre id="storageResult">Click "Check Now" to see localStorage values...</pre>
+    </div>
+
+    <div class="section">
+        <h3>2. Module Loading Status</h3>
+        <pre id="moduleResult">Loading...</pre>
+    </div>
+
+    <div class="section">
+        <h3>3. Console Errors</h3>
+        <pre id="consoleErrors">Check browser console (F12) for errors...</pre>
+    </div>
+
+    <div class="section">
+        <h3>4. Quick Fixes</h3>
+        <button onclick="forceInitialize()">Force Initialize Settings</button>
+        <button onclick="testBadgeFunction()">Test Badge Function</button>
+        <pre id="fixResult"></pre>
+    </div>
+
+    <script type="module">
+        // Auto-check on load
+        window.addEventListener('DOMContentLoaded', () => {
+            checkStorage();
+            checkModules();
+        });
+
+        window.checkStorage = function() {
+            const result = document.getElementById('storageResult');
+            const keys = [
+                'showTrustBadges',
+                'showTrustBadgesEverywhere',
+                'webOfTrustEnabled',
+                'personalizeScores',
+                'shareDataWithRelatr'
+            ];
+
+            let output = '';
+            keys.forEach(key => {
+                const value = localStorage.getItem(key);
+                const status = value === 'true' ? '✅' : value === 'false' ? '⚠️' : '❌';
+                output += `${status} ${key}: ${value === null ? 'NULL' : `"${value}"`}\n`;
+            });
+
+            output += '\n🎯 Required for badges to show:\n';
+            output += `   showTrustBadges = "true" ${localStorage.getItem('showTrustBadges') === 'true' ? '✅' : '❌'}\n`;
+            output += `   showTrustBadgesEverywhere = "true" OR on special page ${localStorage.getItem('showTrustBadgesEverywhere') === 'true' ? '✅' : '❌'}\n`;
+            output += `   webOfTrustEnabled ≠ "false" ${localStorage.getItem('webOfTrustEnabled') !== 'false' ? '✅' : '❌'}\n`;
+
+            result.textContent = output;
+        };
+
+        async function checkModules() {
+            const result = document.getElementById('moduleResult');
+            let output = '';
+
+            try {
+                const TrustBadges = await import('./js/trust-badges.js');
+                output += '✅ trust-badges.js loaded\n';
+                output += `   Functions: ${Object.keys(TrustBadges).join(', ')}\n`;
+
+                const Relatr = await import('./js/relatr.js');
+                output += '✅ relatr.js loaded\n';
+
+                // Test API
+                const response = await fetch('/api/relatr/stats');
+                if (response.ok) {
+                    output += '✅ Relatr API accessible\n';
+                } else {
+                    output += `❌ Relatr API error: ${response.status}\n`;
+                }
+            } catch (error) {
+                output += `❌ Module error: ${error.message}\n`;
+            }
+
+            result.textContent = output;
+        }
+
+        window.forceInitialize = function() {
+            localStorage.setItem('showTrustBadges', 'true');
+            localStorage.setItem('showTrustBadgesEverywhere', 'true');
+            localStorage.setItem('webOfTrustEnabled', 'true');
+            localStorage.setItem('personalizeScores', 'true');
+            localStorage.setItem('shareDataWithRelatr', 'false');
+
+            document.getElementById('fixResult').textContent = '✅ Settings forced to correct values!\n\nNow reload the main site: https://m.nosmero.com:8443';
+            checkStorage();
+        };
+
+        window.testBadgeFunction = async function() {
+            const result = document.getElementById('fixResult');
+            try {
+                const TrustBadges = await import('./js/trust-badges.js');
+
+                // Test shouldShowBadgesInContext logic
+                const webOfTrustEnabled = localStorage.getItem('webOfTrustEnabled') !== 'false';
+                const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true';
+
+                let output = '🔍 Testing badge display logic:\n\n';
+                output += `webOfTrustEnabled: ${webOfTrustEnabled} ${webOfTrustEnabled ? '✅' : '❌'}\n`;
+                output += `showEverywhere: ${showEverywhere} ${showEverywhere ? '✅' : '❌'}\n`;
+                output += `\nResult: Badges ${(webOfTrustEnabled && showEverywhere) ? 'SHOULD' : 'SHOULD NOT'} display\n`;
+
+                if (webOfTrustEnabled && showEverywhere) {
+                    output += '\n✅ Settings look correct!\n';
+                    output += 'If badges still not showing, check:\n';
+                    output += '1. Browser console for JS errors\n';
+                    output += '2. Network tab for failed API calls\n';
+                    output += '3. Whether renderFeed() is being called\n';
+                } else {
+                    output += '\n❌ Settings incorrect! Click "Force Initialize Settings" above.\n';
+                }
+
+                result.textContent = output;
+            } catch (error) {
+                result.textContent = `❌ Error: ${error.message}`;
+            }
+        };
+    </script>
+</body>
+</html>

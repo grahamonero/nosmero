@@ -830,8 +830,20 @@ async function publishVerifiedDisclosure(postId, recipientPubkey, moneroAddress,
 
         // Call backend verification API
         const apiUrl = window.location.port === '8443'
-            ? 'https://nosmero.com:8443/api/verify-and-publish'
-            : 'https://nosmero.com/api/verify-and-publish';
+            ? `https://${window.location.hostname}:8443/api/verify-and-publish`
+            : `https://${window.location.hostname}/api/verify-and-publish`;
+
+        console.log('[TIP VERIFY DEBUG] Calling API:', apiUrl);
+        console.log('[TIP VERIFY DEBUG] Request body:', {
+            txid: verificationData.txid,
+            tx_key: verificationData.txKey,
+            recipient_address: moneroAddress,
+            amount: parseFloat(amount),
+            recipient_pubkey: recipientPubkey,
+            note_id: postId,
+            message: message,
+            tipper_pubkey: senderPubkey
+        });
 
         const response = await fetch(apiUrl, {
             method: 'POST',
@@ -904,8 +916,8 @@ async function publishVerifiedDisclosure(postId, recipientPubkey, moneroAddress,
 // Helper: Publish event to Nosmero relay
 async function publishToNosmeroRelay(signedEvent, successMessage) {
     const nosmeroRelay = window.location.port === '8080'
-        ? 'ws://nosmero.com:8080/nip78-relay'
-        : 'wss://nosmero.com/nip78-relay';
+        ? `ws://${window.location.hostname}:8080/nip78-relay`
+        : `wss://${window.location.hostname}/nip78-relay`;
 
     console.log('📍 Publishing to Nosmero relay:', nosmeroRelay);
 
