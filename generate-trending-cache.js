@@ -9,11 +9,29 @@ const fs = require('fs');
 const path = require('path');
 
 // Auto-detect environment based on script location
-const IS_PRODUCTION = __dirname.includes('/var/www/html');
-const SITE_URL = IS_PRODUCTION ? 'https://nosmero.com' : 'https://nosmero.com:8443';
-const CACHE_FILE = IS_PRODUCTION
-    ? '/var/www/html/trending-cache.json'
-    : '/var/www/dev.nosmero.com/trending-cache.json';
+const IS_PRODUCTION = __dirname.includes('/var/www/html') || __dirname.includes('/var/www/m.nosmero.com');
+const IS_MOBILE = __dirname.includes('m.nosmero.com');
+
+// Determine URLs and cache file based on environment
+let SITE_URL, CACHE_FILE;
+if (__dirname.includes('/var/www/html')) {
+    // Desktop production
+    SITE_URL = 'https://nosmero.com';
+    CACHE_FILE = '/var/www/html/trending-cache.json';
+} else if (__dirname.includes('/var/www/m.nosmero.com')) {
+    // Mobile production
+    SITE_URL = 'https://m.nosmero.com';
+    CACHE_FILE = '/var/www/m.nosmero.com/trending-cache.json';
+} else if (__dirname.includes('/var/www/dev.m.nosmero.com')) {
+    // Mobile dev
+    SITE_URL = 'https://m.nosmero.com:8443';
+    CACHE_FILE = '/var/www/dev.m.nosmero.com/trending-cache.json';
+} else {
+    // Desktop dev (default)
+    SITE_URL = 'https://nosmero.com:8443';
+    CACHE_FILE = '/var/www/dev.nosmero.com/trending-cache.json';
+}
+
 const TIMEOUT = 120000; // 2 minutes max
 
 async function generateCache() {
