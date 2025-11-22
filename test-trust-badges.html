@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trust Badges Test</title>
+</head>
+<body>
+    <h1>Trust Badges Module Test</h1>
+    <div id="output"></div>
+
+    <script type="module">
+        console.log('Test page loaded');
+
+        try {
+            // Test 1: Import relatr.js
+            console.log('Test 1: Importing relatr.js...');
+            const Relatr = await import('./js/relatr.js');
+            console.log('✅ Relatr imported successfully:', Relatr);
+            console.log('Relatr exports:', Object.keys(Relatr));
+
+            // Test 2: Import trust-badges.js
+            console.log('\nTest 2: Importing trust-badges.js...');
+            const TrustBadges = await import('./js/trust-badges.js');
+            console.log('✅ TrustBadges imported successfully:', TrustBadges);
+            console.log('TrustBadges exports:', Object.keys(TrustBadges));
+
+            // Test 3: Check specific exports
+            console.log('\nTest 3: Checking specific exports...');
+            console.log('addTrustBadgeToElement:', typeof TrustBadges.addTrustBadgeToElement);
+            console.log('getTrustBadgesEnabled:', typeof TrustBadges.getTrustBadgesEnabled);
+            console.log('setTrustBadgesEnabled:', typeof TrustBadges.setTrustBadgesEnabled);
+
+            // Test 4: Make module globally available
+            console.log('\nTest 4: Making module globally available...');
+            window.TestTrustBadges = TrustBadges;
+            console.log('window.TestTrustBadges:', window.TestTrustBadges);
+            console.log('window.TestTrustBadges is undefined:', window.TestTrustBadges === undefined);
+
+            document.getElementById('output').innerHTML = '<p style="color: green;">✅ All tests passed! Check console for details.</p>';
+
+        } catch (error) {
+            console.error('❌ Error during import:', error);
+            console.error('Error stack:', error.stack);
+            document.getElementById('output').innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p><pre>${error.stack}</pre>`;
+        }
+    </script>
+</body>
+</html>

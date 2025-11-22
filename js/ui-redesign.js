@@ -56,16 +56,28 @@ async function handleFeedTabClick(feedType, event) {
     // Use skipHistory=true since we're about to push our own history state
     if (StateModule.currentPage !== 'home' && typeof navigateTo === 'function') {
         navigateTo('home', true);
-        // Wait for page transition and contact loading to complete
-        await new Promise(resolve => setTimeout(resolve, 300));
+        // Wait for page transition and following list to load (needed for Web of Trust feed)
+        // Web of Trust requires State.followingUsers to be populated
+        if (feedType === 'global' && StateModule.publicKey) {
+            // Wait for following list to be loaded (up to 2 seconds)
+            let attempts = 0;
+            while (StateModule.followingUsers.size === 0 && attempts < 20) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
+            }
+        } else {
+            // Standard 300ms delay for other feeds
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
     }
 
     // Push feed change to browser history
     const feedNames = {
-        'global': 'weboftrust',
+        'global': 'suggestedfollows',
         'following': 'following',
-        'monero': 'trending',
-        'tipactivity': 'tipactivity'
+        'monero': 'trendingmonero',
+        'tipactivity': 'tipactivity',
+        'trending': 'trending'
     };
     const feedPath = feedNames[feedType] || feedType;
     history.pushState(
@@ -105,6 +117,11 @@ async function handleFeedTabClick(feedType, event) {
             // Tip Activity feed: Shows disclosed Monero tips
             console.log('Loading Tip Activity feed...');
             PostsModule.loadTipActivityFeed();
+            break;
+        case 'trending':
+            // Trending feed: Popular notes across all topics
+            console.log('Loading Trending Notes feed...');
+            PostsModule.loadTrendingAllFeed();
             break;
     }
 }

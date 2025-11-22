@@ -1626,6 +1626,7 @@ export async function openThreadView(eventId, skipHistory = false) {
         }
         
         threadContent.innerHTML = threadHtml || '<div style="text-align: center; padding: 40px; color: #999;">No notes found in thread</div>';
+        console.log('[Thread] Set innerHTML, length:', threadContent.innerHTML.length, 'children:', threadContent.children.length);
 
         // Process any embedded notes in the thread content
         try {
@@ -1633,6 +1634,16 @@ export async function openThreadView(eventId, skipHistory = false) {
             await Utils.processEmbeddedNotes('threadPageContent');
         } catch (error) {
             console.error('Error processing embedded notes in thread:', error);
+        }
+
+        // Add trust badges to all posts in thread
+        try {
+            console.log('[Thread] Before trust badges, innerHTML length:', threadContent.innerHTML.length, 'children:', threadContent.children.length);
+            const TrustBadges = await import('./trust-badges.js');
+            // Pass the actual DOM element, not a selector - there may be multiple elements with this ID
+            await TrustBadges.addFeedTrustBadges(threadPosts.map(p => ({ id: p.id, pubkey: p.pubkey })), threadContent);
+        } catch (error) {
+            console.error('Error adding trust badges to thread:', error);
         }
 
     } catch (error) {
@@ -1991,6 +2002,15 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
             console.error('Error processing embedded notes in profile posts:', error);
         }
 
+        // Add trust badges to all posts
+        try {
+            const TrustBadges = await import('./trust-badges.js');
+            // Pass the actual DOM element, not a selector
+            await TrustBadges.addFeedTrustBadges(posts.map(p => ({ id: p.id, pubkey: p.pubkey })), userPostsContainer);
+        } catch (error) {
+            console.error('Error adding trust badges to profile posts:', error);
+        }
+
     } catch (error) {
         console.error('Error rendering user posts:', error);
         userPostsContainer.innerHTML = `
@@ -2158,7 +2178,7 @@ export async function viewUserProfilePage(pubkey) {
                             `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>`
                         }
                         <div style="flex: 1; min-width: 0; word-wrap: break-word; overflow-wrap: break-word;">
-                            <h1 style="color: #fff; font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${userProfile.name || 'Anonymous'}</h1>
+                            <h1 class="profile-name" data-pubkey="${pubkey}" style="color: #fff; font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${userProfile.name || 'Anonymous'}</h1>
                             <p style="margin: 0 0 8px 0; color: #888; font-family: monospace; font-size: 14px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
                             ${userProfile.nip05 ? `<div style="color: #10B981; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;">✅ ${userProfile.nip05}</div>` : ''}
                             ${userProfile.about ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 8px; word-wrap: break-word;">${userProfile.about}</div>` : ''}
@@ -2202,9 +2222,24 @@ export async function viewUserProfilePage(pubkey) {
         // Load and display Monero address for this user
         await loadAndDisplayMoneroAddress(pubkey, userProfile);
 
+        // Add trust badge to profile (function has built-in retry logic)
+        try {
+            const TrustBadges = await import('./trust-badges.js');
+            // Use setTimeout to ensure DOM is fully painted before first attempt
+            setTimeout(async () => {
+                try {
+                    await TrustBadges.addProfileTrustBadge(pubkey);
+                } catch (err) {
+                    console.error('[Profile] Failed to add trust badge:', err);
+                }
+            }, 50);
+        } catch (error) {
+            console.error('Error importing trust badge module:', error);
+        }
+
         // Fetch and display user's posts
         await fetchUserPosts(pubkey);
-        
+
     } catch (error) {
         console.error('Error viewing user profile:', error);
     }

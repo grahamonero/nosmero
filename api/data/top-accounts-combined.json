@@ -1,0 +1,667 @@
+{
+  "generated_at": "2025-11-16T04:35:56.357Z",
+  "sources": [
+    "Top Nostr Accounts",
+    "Monero Community"
+  ],
+  "total_accounts": 84,
+  "accounts": [
+    {
+      "pubkey": "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245",
+      "followers": 1159534,
+      "following": 929,
+      "posts": 5584,
+      "reactions": 461591,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "91c9a5e1a9744114c6fe2d61ae4de82629eaaa0fb52f48288093c7e7e036f832",
+      "followers": 347503,
+      "following": 732,
+      "posts": 681,
+      "reactions": 64180,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "3efdaebb1d8923ebd99c9e7ace3b4194ab45512e2be79c1b7d68d9243e0d2681",
+      "followers": 322814,
+      "following": 8,
+      "posts": 99,
+      "reactions": 50649,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2",
+      "followers": 295436,
+      "following": 693,
+      "posts": 1921,
+      "reactions": 429136,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "04c915daefee38317fa734444acee390a8269fe5810b2241e5e6dd343dfbecc9",
+      "followers": 228205,
+      "following": 1723,
+      "posts": 4127,
+      "reactions": 436079,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "6e468422dfb74a5738702a8823b9b28168abab8655faacb6853cd0ee15deee93",
+      "followers": 217228,
+      "following": 973,
+      "posts": 4538,
+      "reactions": 367376,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+      "followers": 215714,
+      "following": 409,
+      "posts": 2437,
+      "reactions": 114121,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "e33fe65f1fde44c6dc17eeb38fdad0fceaf1cae8722084332ed1e32496291d42",
+      "followers": 163460,
+      "following": 252,
+      "posts": 21,
+      "reactions": 2577,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "84dee6e676e5bb67b4ad4e042cf70cbd8681155db535942fcc6a0533858a7240",
+      "followers": 158487,
+      "following": 354,
+      "posts": 47,
+      "reactions": 45451,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "85080d3bad70ccdcd7f74c29a44f55bb85cbcd3dd0cbb957da1d215bdb931204",
+      "followers": 125072,
+      "following": 369,
+      "posts": 397,
+      "reactions": 53836,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "b9e76546ba06456ed301d9e52bc49fa48e70a6bf2282be7a1ae72947612023dc",
+      "followers": 116652,
+      "following": 1111,
+      "posts": 1969,
+      "reactions": 122386,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "472f440f29ef996e92a186b8d320ff180c855903882e59d50de1b8bd5669301e",
+      "followers": 105804,
+      "following": 344,
+      "posts": 1207,
+      "reactions": 80911,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "fa984bd7dbb282f07e16e7ae87b26a2a7b9b90b7246a44771f0cf5ae58018f52",
+      "followers": 105075,
+      "following": 1045,
+      "posts": 4397,
+      "reactions": 149607,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "c4eabae1be3cf657bc1855ee05e69de9f059cb7a059227168b80b89761cbc4e0",
+      "followers": 104387,
+      "following": 144,
+      "posts": 438,
+      "reactions": 86183,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "1bc70a0148b3f316da33fe3c89f23e3e71ac4ff998027ec712b905cd24f6a411",
+      "followers": 89039,
+      "following": 500,
+      "posts": 12944,
+      "reactions": 242390,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "c48e29f04b482cc01ca1f9ef8c86ef8318c059e0e9353235162f080f26e14c11",
+      "followers": 86281,
+      "following": 736,
+      "posts": 5873,
+      "reactions": 229229,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "460c25e682fda7832b52d1f22d3d22b3176d972f60dcdc3212ed8c92ef85065c",
+      "followers": 84856,
+      "following": 235,
+      "posts": 3554,
+      "reactions": 191098,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "a341f45ff9758f570a21b000c17d4e53a3a497c8397f26c0e6d61e5acffc7a98",
+      "followers": 80077,
+      "following": 40,
+      "posts": 97,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "bf2376e17ba4ec269d10fcc996a4746b451152be9031fa48e74553dde5526bce",
+      "followers": 77930,
+      "following": 811,
+      "posts": 1272,
+      "reactions": 92890,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "97c70a44366a6535c145b333f973ea86dfdc2d7a99da618c40c64705ad98e322",
+      "followers": 76958,
+      "following": 482,
+      "posts": 1839,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a",
+      "followers": 57588,
+      "following": 711,
+      "posts": 2405,
+      "reactions": 22196,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "9989500413fb756d8437912cc32be0730dbe1bfc6b5d2eef759e1456c239f905",
+      "followers": 52874,
+      "following": 1316,
+      "posts": 1720,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "e3a59924933c9f9f2df83449055eb3858f1480fdd0c5edb95df08bedcd2e6624",
+      "followers": 10841,
+      "following": 888,
+      "posts": 23366,
+      "reactions": 81963,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "8230c6222dea501c168d871de40d3ced4946b5608683af486a22e55426642641",
+      "followers": 10494,
+      "following": 1095,
+      "posts": 4017,
+      "reactions": 15042,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "3d82e8f6cc6c096544bf33e4875a03f5600acff7ec467e150a1cc7712d214dc9",
+      "followers": 9015,
+      "following": 1510,
+      "posts": 855,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "05e90eff47c1e0ecaf5c5bdd4cb25b96993728a68d8baf5fdd5ceb4e4c522648",
+      "followers": 7538,
+      "following": 356,
+      "posts": 48,
+      "reactions": 1931,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "c4f5e7a75a8ce3683d529cff06368439c529e5243c6b125ba68789198856cac7",
+      "followers": 6683,
+      "following": 4492,
+      "posts": 1104,
+      "reactions": 18929,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "15e3a72e35cf5955f11b6c47e4d5632961c968250c15914f3c435844b06e88c2",
+      "followers": 6663,
+      "following": 400,
+      "posts": 715,
+      "reactions": 12420,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "46fcbe3065eaf1ae7811465924e48923363ff3f526bd6f73d7c184b16bd8ce4d",
+      "followers": 6553,
+      "following": 361,
+      "posts": 1309,
+      "reactions": 8365,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "a1c1984994512025327f52c7b6d3a1434a37fbb7a318380cab4832f8daacbb52",
+      "followers": 4706,
+      "following": 5268,
+      "posts": 1325,
+      "reactions": 40186,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "7c765d407d3a9d5ea117cb8b8699628560787fc084a0c76afaa449bfbd121d84",
+      "followers": 4522,
+      "following": 1320,
+      "posts": 7439,
+      "reactions": 53608,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "59cacbd83ad5c54ad91dacf51a49c06e0bef730ac0e7c235a6f6fa29b9230f02",
+      "followers": 3181,
+      "following": 745,
+      "posts": 1786,
+      "reactions": 6450,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "aa9047325603dacd4f8142093567973566de3b1e20a89557b728c3be4c6a844b",
+      "followers": 2362,
+      "following": 19,
+      "posts": 31,
+      "reactions": 2047,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "e6a9a4f853e4b1d426eb44d0c5db09fdc415ce513e664118f46f5ffbea304cbc",
+      "followers": 2033,
+      "following": 129,
+      "posts": 231,
+      "reactions": 1846,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "6aaed493c0de0cd56a123df8da36474fe254fcfc27549a43e2cb71c57007355e",
+      "followers": 1980,
+      "following": 29,
+      "posts": 26,
+      "reactions": 148,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "7644119b18ec56b5b2779e0d035e7712a9d669dbfbe5b2c5f458cb564afb6c95",
+      "followers": 1451,
+      "following": 856,
+      "posts": 1330,
+      "reactions": 10228,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "6dd9fdfbbcd92e4d3f7f647f9ddab3cba64af1d66e0bdbe216b57eceac8b0558",
+      "followers": 1345,
+      "following": 603,
+      "posts": 216,
+      "reactions": 4831,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "eb5e15f04bc9e3df86c10030b665dfe825410151c1e3b3a8ce3f428aaf42f927",
+      "followers": 1217,
+      "following": 134,
+      "posts": 198,
+      "reactions": 935,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "07ecf9838136fe430fac43fa0860dbc62a0aac0729c5a33df1192ce75e330c9f",
+      "followers": 951,
+      "following": 35,
+      "posts": 32,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "58937958036cede955b25b9295838140ba2deacb8d1939ed91a41be2545e6994",
+      "followers": 809,
+      "following": 156,
+      "posts": 1972,
+      "reactions": 6054,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "b999bf535f9c7bc2a41676d4b4c912869b14081ca3b8a56cb961b1e2cdaff5d8",
+      "followers": 808,
+      "following": 564,
+      "posts": 352,
+      "reactions": 4922,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "1dfe0fd88b77a3dcd13fccea505619ead0c8ca266da8ee0505d15fc9c7f4ffb3",
+      "followers": 755,
+      "following": 663,
+      "posts": 447,
+      "reactions": 1260,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "eebf4cb59d5ebc09af1983254df7cf570967705bafb162acaab61110d40936bc",
+      "followers": 723,
+      "following": 851,
+      "posts": 341,
+      "reactions": 1304,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "3a10e02580d9971de935cd940a5268bfe4589dfbcc7557375e708e4104973bb9",
+      "followers": 577,
+      "following": 1181,
+      "posts": 202,
+      "reactions": 2039,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "e57fec0c802eaeacd7f204277ddb1f86eaa92e62cadd0d2697084cb4e3153bf8",
+      "followers": 573,
+      "following": 459,
+      "posts": 369,
+      "reactions": 2001,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "0c45d7d45edb0fadda4215d36ca0d9aba0c771b85d3717764b8a128d5e443e4d",
+      "followers": 565,
+      "following": 315,
+      "posts": 3206,
+      "reactions": 7111,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "6fec949d986bb0b216f08e778ac49681c9e08deb9cfd2cb98bd44377fbd0754f",
+      "followers": 464,
+      "following": 151,
+      "posts": 24,
+      "reactions": 126,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "316e8bed3c98c87761083c0eea662d1eed36b8aa19c1c7e02afa8fc8aba004ca",
+      "followers": 400,
+      "following": 71,
+      "posts": 560,
+      "reactions": 2102,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "c615304f29f697041b242fb400d0a6903d9534e8442bb80dc781b842c401ffd5",
+      "followers": 341,
+      "following": 511,
+      "posts": 162,
+      "reactions": 472,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "43d7f07d10b9e662745e10b2fc201a74dc178a308c31409350d06b04477816e1",
+      "followers": 308,
+      "following": 55,
+      "posts": 341,
+      "reactions": 882,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "6aa5bfe72aabc71f30e7c04f368d04ad33ac3f5ba471d5edb76c9e23779311a2",
+      "followers": 302,
+      "following": 219,
+      "posts": 11,
+      "reactions": 65,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "9d30530d10d3a715717b7e5a64a5bf245d44c30ecaf26f5b5cefd80bd4667fe1",
+      "followers": 201,
+      "following": 106,
+      "posts": 79,
+      "reactions": 206,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "18bff4c2b651fa582e6b906129adf6ceb68eb4c1e13668af63cd454d59c4898b",
+      "followers": 194,
+      "following": 498,
+      "posts": 172,
+      "reactions": 518,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0",
+      "followers": 191,
+      "following": 96,
+      "posts": 46,
+      "reactions": 121,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "f9084a14f9e6aba039202d32c14a0c4f3d9833ccbdceb3fd8320406bdc4eb4db",
+      "followers": 160,
+      "following": 353,
+      "posts": 12,
+      "reactions": 151,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "14eaddfcb39b5fd38b4ca1cbef2c0788ad3aef3be095402c37d6acc17f5c72d4",
+      "followers": 138,
+      "following": 1045,
+      "posts": 381,
+      "reactions": 3094,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "b799ae27e0370b2856993e6d48f15d16539d4aa51fbf3ebdbd2bc40f60a4d25e",
+      "followers": 137,
+      "following": 299,
+      "posts": 77,
+      "reactions": 1096,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "e8633ed5cd547358fd028a083c252a3990983ee26b5014ae2a0cb99ddfb27a49",
+      "followers": 103,
+      "following": 42,
+      "posts": 16,
+      "reactions": 167,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "a113f338bc0a757a5631e8b51e1d090d5167d792dfa9826ae45a933737860678",
+      "followers": 100,
+      "following": 150,
+      "posts": 9,
+      "reactions": 83,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "6838a529bdf33d2569e3708df6373572f11b378114d225a4d467a9bd94abef2a",
+      "followers": 97,
+      "following": 8,
+      "posts": 0,
+      "reactions": 14,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "0959a0fce51659a27e55f129e17d2a4330c9093a7eaa368d3763a1f0b5370084",
+      "followers": 93,
+      "following": 225,
+      "posts": 12,
+      "reactions": 50,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "1f30d838a7a307da391031b7fade8090ff7208efd5787a1f78401ea562925eea",
+      "followers": 68,
+      "following": 274,
+      "posts": 23,
+      "reactions": 52,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "1fa4f2d73de1c4925019a39b098e7b1aadbc3843c5267dce8791573b5bfd943f",
+      "followers": 67,
+      "following": 390,
+      "posts": 9,
+      "reactions": 52,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "a1c2f68f3ed04e60268a560efe2fb5858cf78fa568d4ed6a2c79a51922cd89f2",
+      "followers": 63,
+      "following": 95,
+      "posts": 9,
+      "reactions": 296,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "0232eb19d1b1168e91c1a8f765d45f6839e9a7861951cd63ae18a544af8a3902",
+      "followers": 48,
+      "following": 33,
+      "posts": 9,
+      "reactions": 64,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "f33b70e185c8e5dc8513ce214b5bca946bf3cdb433b0e0eee67037792b272e01",
+      "followers": 47,
+      "following": 2679,
+      "posts": 17,
+      "reactions": 97,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "bf7f6c3a15f8aa54b7029e2d62f277826e723753d4fd89ff47efed9978015ecc",
+      "followers": 33,
+      "following": 1,
+      "posts": 541,
+      "reactions": 155,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "6fef3f60b36498c4da71345661f08566bec95a3ee195bd3fd853b49bf2f29200",
+      "followers": 31,
+      "following": 36,
+      "posts": 65,
+      "reactions": 49,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "dc36da4e80b4d34271d92484729e36295050f8b6aa17a2608fd406c5052b51b5",
+      "followers": 30,
+      "following": 153,
+      "posts": 4,
+      "reactions": 11,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "aa353f1909af5a77d4fd309a26770e867b4497c7f7d3b999c0b5e2a6e09daa50",
+      "followers": 22,
+      "following": 325,
+      "posts": 14,
+      "reactions": 21,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "2c9bc90b0d839cac6a87b33d7cbd958333894d25a003e32b6a1d197e033e8e00",
+      "followers": 11,
+      "following": 77,
+      "posts": 132,
+      "reactions": 197,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "6129844e66d5be41cf5e2270f3ec5f8819a3d72c2d021acd728d727dc0521743",
+      "followers": 10,
+      "following": 53,
+      "posts": 11,
+      "reactions": 67,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "eb6a6a6c8427a9607eeee92dd9a6aaf329b9f0f50613778af232b8bdf067b25b",
+      "followers": 9,
+      "following": 33,
+      "posts": 11,
+      "reactions": 37,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "c9943d8f8e9c2aa9facb6e579af6ec38b7205c0570de1b0fb8f99f65dc5f786e",
+      "followers": 7,
+      "following": 10,
+      "posts": 26,
+      "reactions": 30,
+      "source": "nostr_top"
+    },
+    {
+      "pubkey": "ff858e19f5c0a3196045f508499b05629a1167564d7d097f0fdcca8bca86b6a8",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "4c24a14657da2d3c5b8e2b66c2a27c36d786f1fb38f5e925e71f18b98c73f034",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "db5cd3f2c7717191f3a35a057e99236c5c17c43f1c69a002008bfde91e41cdc6",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "c07a2ea48b6753d11ad29d622925cb48bab48a8f38e954e85aec46953a0e78af",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "1577e4599d2c1563b7e924458ff62dffb2c1fa7fa7f50c6c1cf908e698621599",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "13129df33f47e06c20e197c30a110c91d1bc80bb54620fc8ebc65e0ec4e19e4c",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "97b92c4f0e6be25db05bb5355ac80fea8e04c9cb2a6284ef04e3dde0dcb6bce9",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "9a8e38f1f07a05e5bc18e390c67cb2e9bb35f0a9f1d88f8c8c45e6e23c0e3055",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "b85e9d2ce43f8dc0b2fd88ba0a4b2c3b2bb45f5c5d3db7e6f03f6e3e44a3f0c1",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    },
+    {
+      "pubkey": "420000000000000000000000000000000000000000000000000000000000001a",
+      "followers": 0,
+      "following": 0,
+      "posts": 0,
+      "source": "monero_community"
+    }
+  ]
+}
