@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>nosmero - Nostr + Monero</title>
     <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
-    <link rel="stylesheet" href="/styles.css?v=1.9.13">
+    <link rel="stylesheet" href="/styles.css?v=1.9.14-relatr">
 
 
 </head>
@@ -626,6 +626,93 @@
             </div>
 
             <div class="settings-section">
+                <h3>🔐 Web of Trust</h3>
+                <p style="color: #999; font-size: 12px; margin-bottom: 16px;">NIP-85 trust scoring powered by Relatr</p>
+
+                <!-- Master Switch -->
+                <div class="trust-badges-toggle" style="margin-bottom: 16px;">
+                    <div>
+                        <div class="trust-badges-label">Enable Web of Trust</div>
+                        <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                            Calculate trust scores using Relatr
+                        </div>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="enableWebOfTrust" checked onchange="toggleWebOfTrust(this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <!-- Sub-options (enabled when Web of Trust is on) -->
+                <div id="webOfTrustOptions" style="margin-left: 20px; padding-left: 16px; border-left: 2px solid #333;">
+
+                    <!-- Always show on Suggested Follows & New Voices -->
+                    <div style="margin-bottom: 12px; padding: 8px; background: rgba(255, 102, 0, 0.05); border-radius: 6px;">
+                        <div style="color: #FF6600; font-size: 12px; font-weight: 600; margin-bottom: 4px;">
+                            ✓ Badges shown on Suggested Follows & New Voices
+                        </div>
+                        <div style="color: #999; font-size: 11px;">
+                            Trust scores help discover quality accounts
+                        </div>
+                    </div>
+
+                    <!-- Show badges on all feeds -->
+                    <div class="trust-badges-toggle" style="margin-bottom: 16px;">
+                        <div>
+                            <div class="trust-badges-label">Show badges on all feeds</div>
+                            <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                                Display scores on home feed, profiles, threads, etc.
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="showTrustBadgesEverywhere" onchange="toggleTrustBadgesEverywhere(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- Personalize scores -->
+                    <div class="trust-badges-toggle" style="margin-bottom: 16px;">
+                        <div>
+                            <div class="trust-badges-label">Personalize scores to my network</div>
+                            <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                                Calculate from your perspective vs global network
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="personalizeScores" checked onchange="togglePersonalizeScores(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- Share data with network -->
+                    <div class="trust-badges-toggle">
+                        <div>
+                            <div class="trust-badges-label">Share my scores with the network</div>
+                            <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                                Help improve trust calculations for others
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="shareDataWithRelatr" onchange="toggleShareData(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div style="margin-top: 8px; padding: 8px; background: rgba(139, 92, 246, 0.05); border-left: 3px solid #8B5CF6; border-radius: 4px;">
+                        <p style="color: #ccc; font-size: 11px; margin: 0;">
+                            ℹ️ Your follow list is already public on Nostr. This allows the Nosmero trust server to use it for network-wide calculations.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Info box -->
+                <div style="margin-top: 16px; padding: 12px; background: rgba(255, 102, 0, 0.05); border-left: 3px solid #FF6600; border-radius: 4px;">
+                    <p style="color: #ccc; font-size: 12px; margin: 0;">
+                        Trust scores are calculated based on social graph distance, NIP-05 verification, Lightning addresses, and relay list publication. Scores range from 0-100, with higher scores indicating more trusted users.
+                    </p>
+                </div>
+            </div>
+
+            <div class="settings-section">
                 <h3>Notifications</h3>
                 <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Choose which types of notifications to receive</p>
                 <div style="display: grid; gap: 12px;">
@@ -917,7 +1004,7 @@
     <script src="/js/ui-redesign.js?v=3.2.1"></script>
 
     <!-- Load the modular v2 application -->
-    <script type="module" src="/js/app.js?v=2.9.40-verify-text-fix"></script>
+    <script type="module" src="/js/app.js?v=2.9.51-cache-test"></script>
 
     <!-- Eruda Mobile Debugging Console (DEV ONLY) -->
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>

@@ -8,11 +8,12 @@ import * as Utils from './utils.js';
 import * as Crypto from './crypto.js';
 import * as Relays from './relays.js';
 import * as Nip05 from './nip05.js';
-import * as Posts from './posts.js?v=2.9.39';
+import * as Posts from './posts.js?v=2.9.51';
 import * as Auth from './auth.js';
 import * as UI from './ui.js?v=2.9.38';
 import * as Messages from './messages.js';
 import * as Search from './search.js';
+import * as TrustBadges from './trust-badges.js?v=2.9.41';
 
 // Make modules available globally
 window.NostrState = State;
@@ -4365,6 +4366,64 @@ window.populateRelayLists = populateRelayLists;
 window.showEditProfileModal = showEditProfileModal;
 window.closeEditProfileModal = closeEditProfileModal;
 window.saveProfile = saveProfile;
+
+// ==================== WEB OF TRUST PRIVACY CONTROLS ====================
+
+// Toggle Web of Trust (master switch)
+window.toggleWebOfTrust = function(enabled) {
+    localStorage.setItem('webOfTrustEnabled', enabled.toString());
+    console.log('Web of Trust ' + (enabled ? 'enabled' : 'disabled'));
+
+    // Update UI - enable/disable sub-options
+    const optionsContainer = document.getElementById('webOfTrustOptions');
+    if (optionsContainer) {
+        optionsContainer.style.opacity = enabled ? '1' : '0.5';
+        optionsContainer.style.pointerEvents = enabled ? 'auto' : 'none';
+    }
+
+    // If disabled, clear cache and hide all badges
+    if (!enabled) {
+        import('./relatr.js?v=2.9.41').then(Relatr => {
+            Relatr.clearTrustScoreCache();
+        });
+        TrustBadges.setTrustBadgesEnabled(false);
+    } else {
+        // Re-enable badges based on settings
+        const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true';
+        TrustBadges.setTrustBadgesEnabled(true);
+    }
+};
+
+// Toggle trust badges on all feeds (vs only Suggested Follows & New Voices)
+window.toggleTrustBadgesEverywhere = function(enabled) {
+    localStorage.setItem('showTrustBadgesEverywhere', enabled.toString());
+    console.log('Trust badges everywhere ' + (enabled ? 'enabled' : 'disabled'));
+
+    // Refresh badges with new context
+    TrustBadges.refreshAllTrustBadges();
+};
+
+// Toggle personalized scores (send source pubkey to API)
+window.togglePersonalizeScores = function(enabled) {
+    localStorage.setItem('personalizeScores', enabled.toString());
+    console.log('Personalized scores ' + (enabled ? 'enabled' : 'disabled'));
+
+    // Clear cache to force refetch with new perspective
+    import('./relatr.js?v=2.9.41').then(Relatr => {
+        Relatr.clearTrustScoreCache();
+    });
+};
+
+// Toggle data sharing with Relatr
+window.toggleShareData = function(enabled) {
+    localStorage.setItem('shareDataWithRelatr', enabled.toString());
+    console.log('Share data with Relatr ' + (enabled ? 'enabled' : 'disabled'));
+};
+
+// Legacy function - kept for backward compatibility
+window.toggleTrustBadges = function(enabled) {
+    toggleWebOfTrust(enabled);
+};
 
 // ==================== APP STARTUP ====================
 

@@ -2458,3 +2458,103 @@
         }
     }
 }
+
+/* ==================== TRUST BADGE STYLES (NIP-85 WoT) ==================== */
+
+/* Trust badge container */
+.trust-badge {
+    display: inline-block;
+    margin-left: 6px;
+    vertical-align: middle;
+    font-size: 0.75em;
+    font-weight: 600;
+    line-height: 1.2;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: help;
+    user-select: none;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.trust-badge:hover {
+    transform: scale(1.05);
+    opacity: 0.9;
+}
+
+/* Trust level specific colors */
+.trust-level-verified {
+    background-color: rgba(16, 185, 129, 0.15); /* Green background */
+    color: #10B981; /* Green text */
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.trust-level-trusted {
+    background-color: rgba(59, 130, 246, 0.15); /* Blue background */
+    color: #3B82F6; /* Blue text */
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.trust-level-neutral {
+    color: #a0a0a0; /* Gray (unused, no badge shown) */
+}
+
+.trust-level-low {
+    background-color: rgba(245, 158, 11, 0.15); /* Orange background */
+    color: #F59E0B; /* Orange text */
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    font-size: 0.9em; /* Slightly larger for emoji warning */
+    padding: 1px 4px;
+}
+
+.trust-level-unknown {
+    color: #606060; /* Dark gray (unused, no badge shown) */
+}
+
+/* Trust badge in profile header */
+.profile-header .trust-badge {
+    font-size: 1.2em;
+    margin-left: 8px;
+}
+
+/* Trust badge in feed/notes */
+.post .username .trust-badge {
+    margin-left: 4px;
+}
+
+/* Trust badge tooltip (optional enhancement) */
+.trust-badge[title] {
+    cursor: help;
+}
+
+/* Trust score details (for hover or click) */
+.trust-score-details {
+    display: none;
+    position: absolute;
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 12px;
+    z-index: 1000;
+    font-size: 13px;
+    line-height: 1.5;
+    min-width: 200px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.trust-score-details.visible {
+    display: block;
+}
+
+.trust-score-details .score-value {
+    font-size: 24px;
+    font-weight: bold;
+    color: var(--monero-orange);
+    margin-bottom: 8px;
+}
+
+.trust-score-details .score-label {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}

@@ -1,7 +1,7 @@
 // Trust Badge UI Integration
 // Adds NIP-85 Web of Trust badges to profiles and notes
 
-import { getTrustScore, getTrustLevel, getTrustBadge, queueTrustScoreRequest, getCachedTrustScore } from './relatr.js';
+import { getTrustScore, getTrustLevel, getTrustBadge, queueTrustScoreRequest, getCachedTrustScore } from './relatr.js?v=2.9.41';
 
 // ==================== CONFIGURATION ====================
 
@@ -20,7 +20,7 @@ function shouldShowBadgesInContext() {
   }
 
   // Check if "show everywhere" is enabled
-  const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true'; // Default: false
+  const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') !== 'false'; // Default: true
   if (showEverywhere) {
     return true; // Show on all pages
   }
@@ -287,7 +287,7 @@ export async function addFeedTrustBadges(notes, containerSelector = null) {
 
   try {
     // Import getTrustScores to fetch all scores at once
-    const { getTrustScores } = await import('./relatr.js');
+    const { getTrustScores } = await import('./relatr.js?v=2.9.41');
 
     // Fetch all trust scores in batch
     console.log(`[TrustBadges] Fetching scores for ${pubkeys.length} users...`);
