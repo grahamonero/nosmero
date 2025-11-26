@@ -21,6 +21,46 @@ export let savedSearches = JSON.parse(localStorage.getItem('savedSearches') || '
 export let searchResultsCache = {};
 export const SEARCH_CACHE_DURATION = 3 * 60 * 1000; // 3 minutes
 
+// Trending searches (fetched from API)
+let trendingSearches = [];
+let trendingSearchesLastFetch = 0;
+const TRENDING_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+// Fetch trending searches from API
+async function fetchTrendingSearches() {
+    // Return cached if fresh
+    if (trendingSearches.length > 0 && Date.now() - trendingSearchesLastFetch < TRENDING_CACHE_DURATION) {
+        return trendingSearches;
+    }
+
+    try {
+        const response = await fetch('/api/trending');
+        const data = await response.json();
+        if (data.success && data.trending) {
+            trendingSearches = data.trending;
+            trendingSearchesLastFetch = Date.now();
+            console.log('[Search] Fetched trending searches:', trendingSearches);
+        }
+    } catch (error) {
+        console.error('[Search] Failed to fetch trending searches:', error);
+    }
+
+    return trendingSearches;
+}
+
+// Log a search term to the API
+async function logSearchTerm(term) {
+    try {
+        await fetch('/api/trending', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ term })
+        });
+    } catch (error) {
+        console.error('[Search] Failed to log search term:', error);
+    }
+}
+
 // ==================== SEARCH INTERFACE ====================
 
 // Load the search interface
@@ -230,6 +270,9 @@ export async function performSearch() {
         loadRecentSearches();
     }
 
+    // Log search term to trending API (don't await, fire and forget)
+    logSearchTerm(query);
+
     // Initialize streaming search results
     initializeSearchResults(query);
     updateSearchStatus('Searching cached posts...');
@@ -317,8 +360,8 @@ window.searchWithSuggestion = searchWithSuggestion;
 
 // ==================== SEARCH SUGGESTIONS DROPDOWN ====================
 
-// Popular search terms (common queries users might want)
-const POPULAR_SEARCHES = [
+// Fallback popular searches (used when API has no data yet)
+const FALLBACK_POPULAR_SEARCHES = [
     'bitcoin', 'monero', 'nostr', 'lightning', 'zap',
     'privacy', 'crypto', 'decentralized', 'freedom'
 ];
@@ -327,9 +370,12 @@ const POPULAR_SEARCHES = [
  * Show search suggestions dropdown based on input
  * @param {string} query - Current input value
  */
-export function showSearchSuggestions(query) {
+export async function showSearchSuggestions(query) {
     const dropdown = document.getElementById('searchSuggestions');
     if (!dropdown) return;
+
+    // Fetch trending searches in background (will use cache if fresh)
+    fetchTrendingSearches();
 
     const suggestions = getFilteredSuggestions(query);
 
@@ -378,10 +424,11 @@ function getFilteredSuggestions(query) {
             }
         });
 
-        // Add popular searches if we have space (max 3)
-        POPULAR_SEARCHES.slice(0, 3).forEach(search => {
+        // Add trending searches if we have space (max 3)
+        const trendingToShow = trendingSearches.length > 0 ? trendingSearches : FALLBACK_POPULAR_SEARCHES;
+        trendingToShow.slice(0, 3).forEach(search => {
             if (!suggestions.find(s => s.text === search)) {
-                suggestions.push({ text: search, type: 'Popular', icon: '🔥' });
+                suggestions.push({ text: search, type: 'Trending', icon: '🔥' });
             }
         });
 
@@ -402,10 +449,11 @@ function getFilteredSuggestions(query) {
         }
     });
 
-    // Filter popular searches that match
-    POPULAR_SEARCHES.forEach(search => {
+    // Filter trending searches that match
+    const trendingSource = trendingSearches.length > 0 ? trendingSearches : FALLBACK_POPULAR_SEARCHES;
+    trendingSource.forEach(search => {
         if (search.toLowerCase().includes(lowerQuery) && !suggestions.find(s => s.text === search)) {
-            suggestions.push({ text: search, type: 'Popular', icon: '🔥' });
+            suggestions.push({ text: search, type: 'Trending', icon: '🔥' });
         }
     });
 

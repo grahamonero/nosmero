@@ -5,6 +5,13 @@ import { config } from './config.js';
 import { verifyTransactionProof, generateProofHash } from './verify.js';
 import fetch from 'node-fetch';
 import { initializeNewVoicesScheduler, getCachedNewVoices } from './new-voices-scheduler.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Get __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -466,6 +473,170 @@ app.post('/api/verify-and-publish', async (req, res) => {
   }
 });
 
+// ==================== TRENDING SEARCHES ====================
+
+const TRENDING_DATA_FILE = path.join(__dirname, 'data', 'trending-searches.json');
+
+// Ensure data directory exists
+if (!fs.existsSync(path.join(__dirname, 'data'))) {
+  fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
+}
+
+// Initialize trending data file if it doesn't exist
+if (!fs.existsSync(TRENDING_DATA_FILE)) {
+  fs.writeFileSync(TRENDING_DATA_FILE, JSON.stringify({
+    searches: {},
+    lastCleanup: Date.now()
+  }));
+}
+
+// Helper: Normalize search term
+function normalizeSearchTerm(term) {
+  return term.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Helper: Validate search term
+function isValidSearchTerm(term) {
+  term = term.trim();
+  if (term.length < 2 || term.length > 100) return false;
+  if (/https?:\/\//.test(term)) return false;
+  if (term.includes('@') && term.includes('.')) return false; // Email-like
+  return true;
+}
+
+// Helper: Clean up old data (older than 24 hours)
+function cleanupOldData(data) {
+  const cutoff = Date.now() - (24 * 60 * 60 * 1000); // 24 hours ago
+
+  for (const term in data.searches) {
+    data.searches[term].entries = (data.searches[term].entries || []).filter(
+      timestamp => timestamp > cutoff
+    );
+
+    if (data.searches[term].entries.length === 0) {
+      delete data.searches[term];
+    } else {
+      data.searches[term].count = data.searches[term].entries.length;
+    }
+  }
+
+  data.lastCleanup = Date.now();
+  return data;
+}
+
+// Rate limiter for trending searches (more lenient)
+const trendingLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 requests per minute
+  message: { success: false, error: 'Rate limited' }
+});
+
+// POST /api/trending - Log a search term
+app.post('/api/trending', trendingLimiter, (req, res) => {
+  try {
+    const { term } = req.body;
+
+    if (!term || !isValidSearchTerm(term)) {
+      return res.status(400).json({ success: false, error: 'Invalid search term' });
+    }
+
+    const normalizedTerm = normalizeSearchTerm(term);
+
+    // Load data
+    let data = JSON.parse(fs.readFileSync(TRENDING_DATA_FILE, 'utf8'));
+
+    // Cleanup if needed (every hour)
+    if ((data.lastCleanup || 0) < Date.now() - 3600000) {
+      data = cleanupOldData(data);
+    }
+
+    // Add search entry
+    if (!data.searches[normalizedTerm]) {
+      data.searches[normalizedTerm] = {
+        term: term, // Keep original casing for display
+        entries: [],
+        count: 0
+      };
+    }
+
+    // Add timestamp
+    data.searches[normalizedTerm].entries.push(Date.now());
+    data.searches[normalizedTerm].count = data.searches[normalizedTerm].entries.length;
+
+    // Limit entries per term
+    if (data.searches[normalizedTerm].entries.length > 1000) {
+      data.searches[normalizedTerm].entries = data.searches[normalizedTerm].entries.slice(-1000);
+    }
+
+    // Save data
+    fs.writeFileSync(TRENDING_DATA_FILE, JSON.stringify(data));
+
+    console.log(`[Trending] Logged search: "${normalizedTerm}"`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Trending] Error logging search:', error);
+    res.status(500).json({ success: false, error: 'Failed to log search' });
+  }
+});
+
+// GET /api/trending - Get trending searches
+app.get('/api/trending', (req, res) => {
+  try {
+    let data = JSON.parse(fs.readFileSync(TRENDING_DATA_FILE, 'utf8'));
+
+    // Cleanup if needed
+    if ((data.lastCleanup || 0) < Date.now() - 3600000) {
+      data = cleanupOldData(data);
+      fs.writeFileSync(TRENDING_DATA_FILE, JSON.stringify(data));
+    }
+
+    // Calculate scores with time decay
+    const now = Date.now();
+    const oneHourAgo = now - 3600000;
+    const sixHoursAgo = now - (6 * 3600000);
+
+    const trending = [];
+    for (const normalizedTerm in data.searches) {
+      const info = data.searches[normalizedTerm];
+      let score = 0;
+
+      for (const timestamp of (info.entries || [])) {
+        if (timestamp > oneHourAgo) {
+          score += 3; // Last hour: 3x weight
+        } else if (timestamp > sixHoursAgo) {
+          score += 2; // Last 6 hours: 2x weight
+        } else {
+          score += 1; // Older: 1x weight
+        }
+      }
+
+      if (score > 0) {
+        trending.push({
+          term: info.term,
+          score: score,
+          count: info.count
+        });
+      }
+    }
+
+    // Sort by score descending
+    trending.sort((a, b) => b.score - a.score);
+
+    // Return top 10
+    const topTrending = trending.slice(0, 10);
+    const terms = topTrending.map(item => item.term);
+
+    res.json({
+      success: true,
+      trending: terms,
+      detailed: topTrending
+    });
+  } catch (error) {
+    console.error('[Trending] Error getting trending:', error);
+    res.status(500).json({ success: false, error: 'Failed to get trending', trending: [] });
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -502,6 +673,8 @@ Endpoints:
   GET  /api/relatr/stats                - Get Relatr statistics
   GET  /api/relatr/search?q=<query>     - Search profiles
   GET  /api/relatr/new-voices           - New Voices discovery feed
+  GET  /api/trending                    - Get trending searches
+  POST /api/trending                    - Log a search term
 
 Relatr Server: ${RELATR_BASE_URL}
 
