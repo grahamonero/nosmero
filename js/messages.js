@@ -1010,9 +1010,13 @@ export async function loadNotifications() {
                                 style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
                             Likes
                         </button>
-                        <button id="notifTypeReposts" class="notif-type-btn" onclick="setNotificationType('reposts')" 
+                        <button id="notifTypeReposts" class="notif-type-btn" onclick="setNotificationType('reposts')"
                                 style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
                             Reposts
+                        </button>
+                        <button id="notifTypeFollows" class="notif-type-btn" onclick="setNotificationType('follows')"
+                                style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
+                            Follows
                         </button>
                     </div>
                     
@@ -1127,10 +1131,14 @@ export async function fetchNotifications() {
         const sub = State.pool.subscribeMany(relaysToQuery, filters, {
             onevent(event) {
                 if (!processedIds.has(event.id) && event.pubkey !== State.publicKey) {
-                    // Extract original note ID from e tags
-                    const eTag = event.tags ? event.tags.find(tag => tag[0] === 'e' && tag[1]) : null;
-                    const originalNoteId = eTag ? eTag[1] : null;
-                    
+                    // For follows (kind 3), don't extract note ID - they're not related to a specific note
+                    // For other events, extract original note ID from e tags
+                    let originalNoteId = null;
+                    if (event.kind !== 3) {
+                        const eTag = event.tags ? event.tags.find(tag => tag[0] === 'e' && tag[1]) : null;
+                        originalNoteId = eTag ? eTag[1] : null;
+                    }
+
                     // Store both the notification event and the original note ID
                     notificationEvents.push({
                         ...event,
@@ -1156,130 +1164,158 @@ export async function fetchNotifications() {
     }
 }
 
-// Process notification events
+// Process notification events - each event becomes its own notification entry
 async function processNotifications(events) {
     console.log('Processing', events.length, 'notification events');
-    
+
     // Sort events by timestamp (newest first)
     const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
-    
-    // Group interactions by original note ID
-    const interactionsByNote = new Map();
+
+    // Create individual notification entries (not grouped)
+    const notifications = [];
     const originalNoteIds = new Set();
-    
-    // First pass: group events by original note ID
+    const originalNotesMap = new Map(); // noteId -> note content
+
+    // First pass: create individual notification objects
     for (const event of sortedEvents.slice(0, 100)) { // Limit to 100 most recent
         try {
-            const originalNoteId = event.originalNoteId;
-            
-            if (!originalNoteId) {
-                console.warn('No original note ID found for event:', event.id);
-                continue;
-            }
-            
-            originalNoteIds.add(originalNoteId);
-            
-            if (!interactionsByNote.has(originalNoteId)) {
-                interactionsByNote.set(originalNoteId, {
-                    originalNoteId: originalNoteId,
-                    originalNote: null, // Will be fetched
-                    interactions: [],
-                    latestTimestamp: 0
-                });
-            }
-            
-            const noteData = interactionsByNote.get(originalNoteId);
-            
-            // Create interaction object
-            let interaction = null;
+            let notification = null;
+
             switch (event.kind) {
                 case 1: // Reply
-                    interaction = {
+                    if (!event.originalNoteId) continue;
+                    originalNoteIds.add(event.originalNoteId);
+                    notification = {
                         id: event.id,
                         type: 'reply',
                         timestamp: event.created_at,
                         pubkey: event.pubkey,
                         content: event.content.substring(0, 150) + (event.content.length > 150 ? '...' : ''),
+                        originalNoteId: event.originalNoteId,
+                        originalNote: null,
                         profile: State.profileCache[event.pubkey] || null
                     };
                     break;
-                    
+
                 case 7: // Like
-                    interaction = {
+                    if (!event.originalNoteId) continue;
+                    originalNoteIds.add(event.originalNoteId);
+                    notification = {
                         id: event.id,
                         type: 'like',
                         timestamp: event.created_at,
                         pubkey: event.pubkey,
                         content: event.content || '❤️',
+                        originalNoteId: event.originalNoteId,
+                        originalNote: null,
                         profile: State.profileCache[event.pubkey] || null
                     };
                     break;
-                    
+
                 case 6: // Repost
-                    interaction = {
+                    if (!event.originalNoteId) continue;
+                    originalNoteIds.add(event.originalNoteId);
+                    notification = {
                         id: event.id,
                         type: 'repost',
                         timestamp: event.created_at,
                         pubkey: event.pubkey,
                         content: '',
+                        originalNoteId: event.originalNoteId,
+                        originalNote: null,
                         profile: State.profileCache[event.pubkey] || null
                     };
                     break;
-                    
+
                 case 9735: // Lightning Zap
-                    interaction = {
+                    if (!event.originalNoteId) continue;
+                    originalNoteIds.add(event.originalNoteId);
+                    notification = {
                         id: event.id,
                         type: 'zap',
                         timestamp: event.created_at,
                         pubkey: event.pubkey,
                         content: 'Lightning Zap',
+                        originalNoteId: event.originalNoteId,
+                        originalNote: null,
                         profile: State.profileCache[event.pubkey] || null
                     };
                     break;
 
                 case 9736: // Monero Tip
-                    // Extract amount and sender from tags
                     const amountTag = event.tags?.find(tag => tag[0] === 'amount');
                     const senderTag = event.tags?.find(tag => tag[0] === 'P');
                     const amount = amountTag ? amountTag[1] : '?';
                     const senderPubkey = senderTag ? senderTag[1] : event.pubkey;
 
-                    interaction = {
+                    if (event.originalNoteId) {
+                        originalNoteIds.add(event.originalNoteId);
+                    }
+                    notification = {
                         id: event.id,
                         type: 'tip',
                         timestamp: event.created_at,
                         pubkey: senderPubkey,
-                        content: `Monero Tip: ${amount} XMR`,
+                        content: `${amount} XMR`,
                         message: event.content || '',
+                        originalNoteId: event.originalNoteId || null,
+                        originalNote: null,
                         profile: State.profileCache[senderPubkey] || null
                     };
                     break;
 
-                case 3: // Follow
-                    interaction = {
+                case 3: // Follow - no note reference needed
+                    // Debug: log if a kind 3 event somehow has e tags (shouldn't happen)
+                    const eTags = event.tags?.filter(t => t[0] === 'e');
+                    if (eTags && eTags.length > 0) {
+                        console.warn('Kind 3 follow event has e tags (unexpected):', event.id, eTags);
+                    }
+
+                    // Track follow timestamps locally (accurate for new follows)
+                    // Kind 3 created_at is unreliable (shows last contact list update, not follow time)
+                    const followTimestamps = JSON.parse(localStorage.getItem('followTimestamps') || '{}');
+                    let followTimestamp = null;
+                    let isLegacy = false;
+
+                    if (followTimestamps[event.pubkey]) {
+                        // We've seen this follow before - use stored timestamp (accurate)
+                        followTimestamp = followTimestamps[event.pubkey];
+                        isLegacy = false; // Has accurate timestamp, sort chronologically
+                    } else {
+                        // First time seeing this follow - store current time
+                        followTimestamp = Math.floor(Date.now() / 1000);
+                        followTimestamps[event.pubkey] = followTimestamp;
+                        localStorage.setItem('followTimestamps', JSON.stringify(followTimestamps));
+                        isLegacy = true; // No accurate timestamp, show at bottom
+                        console.log('Legacy follow detected from', event.pubkey.substring(0, 8), '- timestamp stored for future');
+                    }
+
+                    notification = {
                         id: event.id,
                         type: 'follow',
-                        timestamp: event.created_at,
+                        timestamp: followTimestamp,
                         pubkey: event.pubkey,
                         content: 'followed you',
-                        profile: State.profileCache[event.pubkey] || null
+                        originalNoteId: null, // Follows don't reference notes - FORCED to null
+                        originalNote: null,
+                        profile: State.profileCache[event.pubkey] || null,
+                        isLegacy: isLegacy
                     };
                     break;
             }
-            
-            if (interaction) {
-                noteData.interactions.push(interaction);
-                noteData.latestTimestamp = Math.max(noteData.latestTimestamp, interaction.timestamp);
+
+            if (notification) {
+                notifications.push(notification);
             }
-            
+
         } catch (error) {
             console.error('Error processing notification event:', event.id, error);
         }
     }
-    
-    console.log('Grouped interactions for', interactionsByNote.size, 'notes');
-    
-    // Show loading message while fetching original notes
+
+    console.log('Created', notifications.length, 'individual notifications');
+
+    // Show loading message while fetching
     const notificationsList = document.getElementById('notificationsList');
     if (notificationsList) {
         notificationsList.innerHTML = `
@@ -1297,48 +1333,38 @@ async function processNotifications(events) {
             </style>
         `;
     }
-    
-    // Fetch profiles FIRST for all interaction authors (before fetching original notes)
-    const allAuthorPubkeys = [];
-    Array.from(interactionsByNote.values()).forEach(noteData => {
-        noteData.interactions.forEach(interaction => {
-            if (!interaction.profile) {
-                allAuthorPubkeys.push(interaction.pubkey);
-            }
-        });
-    });
-    
+
+    // Fetch profiles for all notification authors
+    const allAuthorPubkeys = notifications
+        .filter(n => !n.profile)
+        .map(n => n.pubkey);
+
     if (allAuthorPubkeys.length > 0) {
-        console.log('Pre-fetching profiles for', allAuthorPubkeys.length, 'authors:', allAuthorPubkeys.map(pk => pk.substring(0, 8)).join(', '));
-        await fetchNotificationProfiles([...new Set(allAuthorPubkeys)], Array.from(interactionsByNote.values()));
+        console.log('Pre-fetching profiles for', allAuthorPubkeys.length, 'authors');
+        await fetchNotificationProfilesIndividual([...new Set(allAuthorPubkeys)], notifications);
     }
-    
-    // Fetch the original notes (with progressive rendering)
+
+    // Fetch the original notes
     if (originalNoteIds.size > 0) {
-        await fetchOriginalNotes(Array.from(originalNoteIds), interactionsByNote);
+        await fetchOriginalNotesIndividual(Array.from(originalNoteIds), notifications, originalNotesMap);
     }
-    
-    // After fetching timeout, mark missing notes as "not found"
-    Array.from(interactionsByNote.values()).forEach(noteData => {
-        if (!noteData.originalNote) {
-            noteData.originalNote = {
-                id: noteData.originalNoteId,
-                content: "[Note no longer available - may have been deleted or is on relays we're not connected to]",
+
+    // Mark missing notes
+    notifications.forEach(notification => {
+        if (notification.originalNoteId && !notification.originalNote) {
+            notification.originalNote = {
+                id: notification.originalNoteId,
+                content: "[Note no longer available]",
                 notFound: true
             };
         }
     });
-    
-    // Final render: show all notifications regardless of whether original notes were fetched
-    // This ensures we show notifications even if some original notes failed to load
-    const groupedNotifications = Array.from(interactionsByNote.values())
-        .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
-    
-    console.log('Final processed notifications:', groupedNotifications.length);
-    
+
+    console.log('Final processed notifications:', notifications.length);
+
     // Store notifications globally for filtering
-    window.currentNotifications = groupedNotifications;
-    renderNotifications(groupedNotifications);
+    window.currentNotifications = notifications;
+    renderNotifications(notifications);
 }
 
 // Fetch original notes that were interacted with
@@ -1392,24 +1418,24 @@ async function fetchOriginalNotes(noteIds, interactionsByNote) {
     }
 }
 
-// Fetch profiles for notification authors
-async function fetchNotificationProfiles(pubkeys, groupedNotifications) {
+// Fetch profiles for notification authors (individual notifications version)
+async function fetchNotificationProfilesIndividual(pubkeys, notifications) {
     if (!pubkeys || pubkeys.length === 0) return;
-    
+
     console.log('Fetching profiles for notification authors:', pubkeys.length);
-    
+
     const unknownPubkeys = [...new Set(pubkeys)].filter(pubkey => !State.profileCache[pubkey]);
-    
+
     if (unknownPubkeys.length === 0) {
         console.log('All profiles already cached');
         return;
     }
-    
+
     if (!State.pool) {
         console.error('Pool not initialized when fetching notification profiles');
         return;
     }
-    
+
     try {
         const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
             { kinds: [0], authors: unknownPubkeys }
@@ -1423,7 +1449,116 @@ async function fetchNotificationProfiles(pubkeys, groupedNotifications) {
                         name: profile.name || profile.display_name || 'Unknown',
                         picture: profile.picture
                     };
-                    
+
+                    // Update profiles in individual notifications
+                    notifications.forEach(notification => {
+                        if (notification.pubkey === event.pubkey) {
+                            notification.profile = State.profileCache[event.pubkey];
+                        }
+                    });
+
+                    // Re-render with updated profiles
+                    renderNotifications(notifications);
+                } catch (error) {
+                    console.error('Error parsing profile for notifications:', error);
+                }
+            },
+            oneose() {
+                console.log('Profile fetch complete for notification authors');
+                sub.close();
+            }
+        });
+
+        setTimeout(() => {
+            sub.close();
+        }, 12000);
+
+    } catch (error) {
+        console.error('Error fetching notification profiles:', error);
+    }
+}
+
+// Fetch original notes for individual notifications
+async function fetchOriginalNotesIndividual(noteIds, notifications, originalNotesMap) {
+    if (!noteIds || noteIds.length === 0) return;
+
+    console.log('Fetching', noteIds.length, 'original notes for notifications');
+
+    try {
+        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
+            { ids: noteIds }
+        ], {
+            onevent(event) {
+                try {
+                    originalNotesMap.set(event.id, event);
+
+                    // Update all notifications that reference this note
+                    notifications.forEach(notification => {
+                        if (notification.originalNoteId === event.id) {
+                            notification.originalNote = event;
+                        }
+                    });
+
+                    // Progressive rendering
+                    window.currentNotifications = notifications;
+                    renderNotifications(notifications);
+                } catch (error) {
+                    console.error('Error processing fetched original note:', error);
+                }
+            },
+            oneose() {
+                console.log('Finished fetching original notes');
+                sub.close();
+            }
+        });
+
+        // Close subscription after 8 seconds
+        setTimeout(() => {
+            sub.close();
+        }, 8000);
+
+        // Wait for notes to be fetched
+        await new Promise(resolve => {
+            setTimeout(resolve, 10000);
+        });
+
+    } catch (error) {
+        console.error('Error fetching original notes:', error);
+    }
+}
+
+// Legacy function - kept for compatibility
+async function fetchNotificationProfiles(pubkeys, groupedNotifications) {
+    if (!pubkeys || pubkeys.length === 0) return;
+
+    console.log('Fetching profiles for notification authors:', pubkeys.length);
+
+    const unknownPubkeys = [...new Set(pubkeys)].filter(pubkey => !State.profileCache[pubkey]);
+
+    if (unknownPubkeys.length === 0) {
+        console.log('All profiles already cached');
+        return;
+    }
+
+    if (!State.pool) {
+        console.error('Pool not initialized when fetching notification profiles');
+        return;
+    }
+
+    try {
+        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
+            { kinds: [0], authors: unknownPubkeys }
+        ], {
+            onevent(event) {
+                try {
+                    const profile = JSON.parse(event.content);
+                    State.profileCache[event.pubkey] = {
+                        ...profile,
+                        pubkey: event.pubkey,
+                        name: profile.name || profile.display_name || 'Unknown',
+                        picture: profile.picture
+                    };
+
                     // Update interaction profiles in grouped notifications
                     groupedNotifications.forEach(noteData => {
                         noteData.interactions.forEach(interaction => {
@@ -1432,7 +1567,7 @@ async function fetchNotificationProfiles(pubkeys, groupedNotifications) {
                             }
                         });
                     });
-                    
+
                     // Re-render with updated profiles
                     renderNotifications(groupedNotifications);
                 } catch (error) {
@@ -1444,11 +1579,11 @@ async function fetchNotificationProfiles(pubkeys, groupedNotifications) {
                 sub.close();
             }
         });
-        
+
         setTimeout(() => {
             sub.close();
         }, 12000);
-        
+
     } catch (error) {
         console.error('Error fetching notification profiles:', error);
     }
@@ -1489,11 +1624,11 @@ export function updateMessagesBadge() {
     }
 }
 
-// Render notifications list
-export function renderNotifications(groupedNotifications = []) {
+// Render notifications list - each notification is a separate entry
+export function renderNotifications(notifications = []) {
     // Count unread notifications (newer than last viewed time)
-    const unreadCount = groupedNotifications.filter(noteData => {
-        return noteData.latestTimestamp > State.lastViewedNotificationTime;
+    const unreadCount = notifications.filter(notification => {
+        return notification.timestamp > State.lastViewedNotificationTime;
     }).length;
 
     State.setUnreadNotifications(unreadCount);
@@ -1503,33 +1638,44 @@ export function renderNotifications(groupedNotifications = []) {
     const notificationsList = document.getElementById('notificationsList');
     if (!notificationsList) return;
 
-    if (groupedNotifications.length === 0) {
+    if (notifications.length === 0) {
         notificationsList.innerHTML = `
             <div style="text-align: center; color: #666; padding: 40px;">
                 <p>No notifications yet</p>
-                <p style="font-size: 14px; margin-top: 10px;">Notifications will appear here when others interact with your posts.</p>
+                <p style="font-size: 14px; margin-top: 10px;">Notifications will appear here when others interact with your notes.</p>
             </div>
         `;
         return;
     }
-    
+
     // Filter notifications based on current type
-    let filteredNotifications = groupedNotifications;
+    let filteredNotifications = notifications;
     if (notificationType !== 'all') {
-        filteredNotifications = groupedNotifications.filter(noteData => {
-            return noteData.interactions.some(interaction => {
-                switch (notificationType) {
-                    case 'mentions': return interaction.type === 'reply' && interaction.content.includes('@');
-                    case 'replies': return interaction.type === 'reply';
-                    case 'likes': return interaction.type === 'like';
-                    case 'reposts': return interaction.type === 'repost';
-                    default: return true;
-                }
-            });
+        filteredNotifications = notifications.filter(notification => {
+            switch (notificationType) {
+                case 'mentions': return notification.type === 'reply' && notification.content.includes('@');
+                case 'replies': return notification.type === 'reply';
+                case 'likes': return notification.type === 'like';
+                case 'reposts': return notification.type === 'repost';
+                case 'follows': return notification.type === 'follow';
+                default: return true;
+            }
         });
     }
-    
-    if (filteredNotifications.length === 0) {
+
+    // Separate legacy follows (no accurate timestamp) from other notifications
+    // New follows (isLegacy: false) sort chronologically with other notifications
+    // Legacy follows (isLegacy: true) go to the bottom
+    const legacyFollows = filteredNotifications.filter(n => n.type === 'follow' && n.isLegacy);
+    const chronologicalNotifications = filteredNotifications.filter(n => !(n.type === 'follow' && n.isLegacy));
+
+    // Sort chronological notifications by timestamp (newest first)
+    chronologicalNotifications.sort((a, b) => b.timestamp - a.timestamp);
+
+    // Combine: chronological first, legacy follows at bottom
+    const sortedNotifications = [...chronologicalNotifications, ...legacyFollows];
+
+    if (sortedNotifications.length === 0) {
         notificationsList.innerHTML = `
             <div style="text-align: center; color: #666; padding: 40px;">
                 <p>No ${notificationType} notifications</p>
@@ -1537,126 +1683,132 @@ export function renderNotifications(groupedNotifications = []) {
         `;
         return;
     }
-    
-    notificationsList.innerHTML = filteredNotifications.map(noteData => {
-        const originalNote = noteData.originalNote;
-        
-        // Group interactions by type
-        const interactionGroups = {
-            likes: noteData.interactions.filter(i => i.type === 'like'),
-            reposts: noteData.interactions.filter(i => i.type === 'repost'),
-            replies: noteData.interactions.filter(i => i.type === 'reply'),
-            zaps: noteData.interactions.filter(i => i.type === 'zap'),
-            tips: noteData.interactions.filter(i => i.type === 'tip'),
-            follows: noteData.interactions.filter(i => i.type === 'follow')
-        };
-        
-        // Get most recent interaction for timestamp
-        const latestInteraction = noteData.interactions.sort((a, b) => b.timestamp - a.timestamp)[0];
-        const time = formatTime(latestInteraction.timestamp);
-        
-        // Generate interaction summary
-        const summaryParts = [];
-        if (interactionGroups.likes.length > 0) {
-            const likeAuthors = interactionGroups.likes.slice(0, 3).map(i => {
-                const profile = i.profile || {};
-                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
-                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
-            });
-            const moreCount = Math.max(0, interactionGroups.likes.length - 3);
-            summaryParts.push(`❤️ ${likeAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} liked this`);
+
+    notificationsList.innerHTML = sortedNotifications.map(notification => {
+        const profile = notification.profile || {};
+        const displayName = profile.name || profile.display_name || `User ${notification.pubkey.substring(0, 8)}...`;
+        // Default profile picture - fully URL-encoded SVG to prevent HTML parsing issues
+        const defaultPicture = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2250%22%20fill%3D%22%23333%22%2F%3E%3Ctext%20x%3D%2250%22%20y%3D%2255%22%20text-anchor%3D%22middle%22%20fill%3D%22%23888%22%20font-size%3D%2230%22%3E%3F%3C%2Ftext%3E%3C%2Fsvg%3E';
+        const profilePicture = profile.picture || defaultPicture;
+
+        // For follows, don't show original note section - FORCE this regardless of data
+        const isFollow = notification.type === 'follow';
+
+        // For follows, show timestamp if we have a locally-tracked one
+        // Locally-tracked timestamps are accurate (stored when we first saw the follow)
+        const time = formatTime(notification.timestamp);
+
+        // Determine action text and icon based on type
+        let actionIcon = '';
+        let actionText = '';
+        let actionColor = '#ccc';
+
+        switch (notification.type) {
+            case 'like':
+                actionIcon = '❤️';
+                actionText = 'liked your note';
+                actionColor = '#ff6b6b';
+                break;
+            case 'repost':
+                actionIcon = '🔄';
+                actionText = 'reposted your note';
+                actionColor = '#4ecdc4';
+                break;
+            case 'reply':
+                actionIcon = '💬';
+                actionText = 'replied to your note';
+                actionColor = '#45b7d1';
+                break;
+            case 'zap':
+                actionIcon = '⚡';
+                actionText = 'zapped your note';
+                actionColor = '#f7dc6f';
+                break;
+            case 'tip':
+                actionIcon = '💰';
+                actionText = `sent you ${notification.content}`;
+                actionColor = '#FF6600';
+                break;
+            case 'follow':
+                actionIcon = '👤';
+                actionText = 'followed you';
+                actionColor = '#8B5CF6';
+                break;
         }
 
-        if (interactionGroups.reposts.length > 0) {
-            const repostAuthors = interactionGroups.reposts.slice(0, 3).map(i => {
-                const profile = i.profile || {};
-                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
-                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
-            });
-            const moreCount = Math.max(0, interactionGroups.reposts.length - 3);
-            summaryParts.push(`🔄 ${repostAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} reposted this`);
-        }
-        
-        if (interactionGroups.zaps.length > 0) {
-            summaryParts.push(`⚡ ${interactionGroups.zaps.length} zap${interactionGroups.zaps.length > 1 ? 's' : ''}`);
+        // For follows, NEVER show original note (follows don't relate to notes)
+        // For other types, check if we have a valid original note
+        const originalNote = isFollow ? null : notification.originalNote;
+        const hasOriginalNote = !isFollow && originalNote && !originalNote.notFound;
+
+        // Original note content (truncated)
+        const originalContent = hasOriginalNote
+            ? originalNote.content.substring(0, 150) + (originalNote.content.length > 150 ? '...' : '')
+            : '';
+
+        // Click handler - follows go to profile, others go to thread
+        let onclickHandler = '';
+        if (isFollow) {
+            onclickHandler = `viewUserProfilePage('${notification.pubkey}')`;
+        } else if (hasOriginalNote) {
+            onclickHandler = `openThreadView('${originalNote.id}')`;
         }
 
-        if (interactionGroups.tips.length > 0) {
-            const tipAuthors = interactionGroups.tips.slice(0, 3).map(i => {
-                const profile = i.profile || {};
-                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
-                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
-            });
-            const moreCount = Math.max(0, interactionGroups.tips.length - 3);
-            summaryParts.push(`💰 ${tipAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} sent Monero tips`);
-        }
-
-        if (interactionGroups.follows.length > 0) {
-            const followAuthors = interactionGroups.follows.slice(0, 3).map(i => {
-                const profile = i.profile || {};
-                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
-                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
-            });
-            const moreCount = Math.max(0, interactionGroups.follows.length - 3);
-            summaryParts.push(`👥 ${followAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} followed you`);
-        }
-
-        if (interactionGroups.replies.length > 0) {
-            summaryParts.push(`💬 ${interactionGroups.replies.length} repl${interactionGroups.replies.length > 1 ? 'ies' : 'y'}`);
-        }
-        
-        // Handle original note content
-        const originalContent = originalNote?.content
-            ? originalNote.content.substring(0, 200) + (originalNote.content.length > 200 ? '...' : '')
-            : '[Note not found]';
-        const isNoteFound = originalNote && !originalNote.notFound;
-        const clickHandler = isNoteFound ? `openThreadView('${originalNote.id}')` : '';
-        
         return `
-            <div class="notification-item" style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px; ${isNoteFound ? 'cursor: pointer;' : 'opacity: 0.7;'}"
-                 ${isNoteFound ? `onclick="${clickHandler}"` : ''}
+            <div class="notification-item" data-type="${notification.type}" data-has-note="${hasOriginalNote}" style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 16px; margin-bottom: 12px; ${onclickHandler ? 'cursor: pointer;' : ''}"
+                 ${onclickHandler ? `onclick="${onclickHandler}"` : ''}
                  onmouseover="this.style.background='rgba(255, 255, 255, 0.05)'"
                  onmouseout="this.style.background='rgba(255, 255, 255, 0.02)'">
 
-                <!-- Original Note -->
-                <div class="notification-content" style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #333;">
-                    <div style="color: #888; font-size: 14px; margin-bottom: 8px;">Your note:</div>
-                    <div class="post-content" style="color: ${isNoteFound ? '#fff' : '#888'}; line-height: 1.4; font-size: 15px; ${!isNoteFound ? 'font-style: italic;' : ''}; word-wrap: break-word; overflow-wrap: break-word;">
-                        ${parseContent(originalContent)}
+                <!-- User info row -->
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: ${isFollow ? '0' : '12px'};">
+                    <!-- Profile picture -->
+                    <img src="${profilePicture}" alt="${displayName}"
+                         style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; cursor: pointer; border: 2px solid ${actionColor};"
+                         onclick="event.stopPropagation(); viewUserProfilePage('${notification.pubkey}')"
+                         onerror="this.src='${defaultPicture}'">
+
+                    <!-- Name and action -->
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <span style="font-size: 18px;">${actionIcon}</span>
+                            <span style="color: #FF6600; font-weight: bold; cursor: pointer;"
+                                  onclick="event.stopPropagation(); viewUserProfilePage('${notification.pubkey}')">${displayName}</span>
+                            <span style="color: #ccc; font-size: 14px;">${actionText}</span>
+                        </div>
                     </div>
+
+                    <!-- Timestamp (hidden for follows until historical lookup implemented) -->
+                    ${time ? `<div style="color: #666; font-size: 12px; white-space: nowrap;">${time}</div>` : ''}
                 </div>
-                
-                <!-- Interactions Summary -->
-                <div style="margin-bottom: 12px;">
-                    ${summaryParts.map(summary => `
-                        <div style="color: #ccc; font-size: 14px; margin-bottom: 6px;">${summary}</div>
-                    `).join('')}
-                </div>
-                
-                <!-- Recent Replies Preview -->
-                ${interactionGroups.replies.length > 0 ? `
-                    <div style="margin-top: 12px;">
-                        ${interactionGroups.replies.slice(0, 2).map(reply => {
-                            const profile = reply.profile || {};
-                            const displayName = profile.name || profile.display_name || `User ${reply.pubkey.substring(0, 8)}...`;
-                            return `
-                                <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid #FF6600;">
-                                    <div style="color: #FF6600; font-size: 13px; font-weight: bold; margin-bottom: 4px; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${reply.pubkey}')">${displayName}:</div>
-                                    <div class="post-content" style="color: #ccc; font-size: 14px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word;">${parseContent(reply.content)}</div>
-                                </div>
-                            `;
-                        }).join('')}
-                        ${interactionGroups.replies.length > 2 ? `
-                            <div style="color: #888; font-size: 12px; text-align: center;">...and ${interactionGroups.replies.length - 2} more replies</div>
-                        ` : ''}
+
+                ${hasOriginalNote ? `
+                    <!-- Original note preview -->
+                    <div style="background: rgba(0, 0, 0, 0.2); padding: 12px; border-radius: 8px; border-left: 3px solid #333; margin-top: 8px;">
+                        <div class="post-content" style="color: #999; font-size: 14px; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">
+                            ${parseContent(originalContent)}
+                        </div>
                     </div>
                 ` : ''}
-                
-                <!-- Timestamp -->
-                <div style="color: #666; font-size: 12px; text-align: right; margin-top: 12px;">${time}</div>
+
+                ${notification.type === 'reply' && notification.content ? `
+                    <!-- Reply content -->
+                    <div style="background: rgba(69, 183, 209, 0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #45b7d1; margin-top: 8px;">
+                        <div class="post-content" style="color: #ccc; font-size: 14px; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">
+                            ${parseContent(notification.content)}
+                        </div>
+                    </div>
+                ` : ''}
+
+                ${notification.type === 'tip' && notification.message ? `
+                    <!-- Tip message -->
+                    <div style="background: rgba(255, 102, 0, 0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #FF6600; margin-top: 8px;">
+                        <div style="color: #ccc; font-size: 14px; line-height: 1.4;">${parseContent(notification.message)}</div>
+                    </div>
+                ` : ''}
             </div>
         `;
-    }).filter(html => html !== '').join('');
+    }).join('');
 }
 
 // Refresh notifications
