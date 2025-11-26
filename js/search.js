@@ -230,6 +230,9 @@ export async function performSearch() {
         loadRecentSearches();
     }
 
+    // Log to trending API (fire and forget)
+    logSearchTerm(query);
+
     // Initialize streaming search results
     initializeSearchResults(query);
     updateSearchStatus('Searching cached posts...');
@@ -317,19 +320,72 @@ window.searchWithSuggestion = searchWithSuggestion;
 
 // ==================== SEARCH SUGGESTIONS DROPDOWN ====================
 
-// Popular search terms (common queries users might want)
-const POPULAR_SEARCHES = [
+// Fallback popular search terms (used when trending API is unavailable)
+const FALLBACK_POPULAR_SEARCHES = [
     'bitcoin', 'monero', 'nostr', 'lightning', 'zap',
     'privacy', 'crypto', 'decentralized', 'freedom'
 ];
+
+// Trending searches (fetched from API)
+let trendingSearches = [];
+let trendingSearchesLastFetch = 0;
+const TRENDING_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Fetch trending searches from the API
+ * @returns {Promise<string[]>} - Array of trending search terms
+ */
+async function fetchTrendingSearches() {
+    // Check cache
+    if (trendingSearches.length > 0 && Date.now() - trendingSearchesLastFetch < TRENDING_CACHE_DURATION) {
+        return trendingSearches;
+    }
+
+    try {
+        const response = await fetch('/api/trending');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.trending && data.trending.length > 0) {
+                trendingSearches = data.trending;
+                trendingSearchesLastFetch = Date.now();
+                return trendingSearches;
+            }
+        }
+    } catch (error) {
+        console.log('[Search] Trending fetch error:', error.message);
+    }
+
+    return [];
+}
+
+/**
+ * Log a search term to the trending API
+ * @param {string} term - The search term to log
+ */
+async function logSearchTerm(term) {
+    if (!term || term.length < 2) return;
+
+    try {
+        await fetch('/api/trending', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ term })
+        });
+    } catch (error) {
+        // Silently fail - trending is not critical
+    }
+}
 
 /**
  * Show search suggestions dropdown based on input
  * @param {string} query - Current input value
  */
-export function showSearchSuggestions(query) {
+export async function showSearchSuggestions(query) {
     const dropdown = document.getElementById('searchSuggestions');
     if (!dropdown) return;
+
+    // Fetch trending searches in background
+    await fetchTrendingSearches();
 
     const suggestions = getFilteredSuggestions(query);
 
@@ -379,10 +435,11 @@ function getFilteredSuggestions(query) {
             }
         });
 
-        // Add popular searches if we have space (max 3)
-        POPULAR_SEARCHES.slice(0, 3).forEach(search => {
+        // Add trending searches if we have space (max 3)
+        const trendingToShow = trendingSearches.length > 0 ? trendingSearches : FALLBACK_POPULAR_SEARCHES;
+        trendingToShow.slice(0, 3).forEach(search => {
             if (!suggestions.find(s => s.text === search)) {
-                suggestions.push({ text: search, type: 'Popular', icon: '🔥' });
+                suggestions.push({ text: search, type: 'Trending', icon: '🔥' });
             }
         });
 
@@ -403,10 +460,11 @@ function getFilteredSuggestions(query) {
         }
     });
 
-    // Filter popular searches that match
-    POPULAR_SEARCHES.forEach(search => {
+    // Filter trending searches that match
+    const trendingSource = trendingSearches.length > 0 ? trendingSearches : FALLBACK_POPULAR_SEARCHES;
+    trendingSource.forEach(search => {
         if (search.toLowerCase().includes(lowerQuery) && !suggestions.find(s => s.text === search)) {
-            suggestions.push({ text: search, type: 'Popular', icon: '🔥' });
+            suggestions.push({ text: search, type: 'Trending', icon: '🔥' });
         }
     });
 
