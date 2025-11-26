@@ -534,6 +534,21 @@ export async function loadTrendingFeed(forceRefresh = false) {
             homeFeedList.innerHTML = infoHeader + renderedPosts.join('') + loadMoreButton;
         }
 
+        // Add trust badges to trending feed notes
+        try {
+            const TrustBadges = await import('./trust-badges.js?v=2.9.41');
+            console.log('[Trending] Trust badges module imported');
+
+            // Add trust badges for all rendered notes
+            await TrustBadges.addFeedTrustBadges(
+                firstPageNotes.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })),
+                '#homeFeedList'
+            );
+            console.log(`[Trending] Trust badges added for ${firstPageNotes.length} notes`);
+        } catch (error) {
+            console.error('[Trending] Error adding trust badges:', error);
+        }
+
         // Expose trending data to window for Puppeteer extraction
         window.__nosmeroTrendingCache__ = {
             timestamp: Date.now(),
@@ -781,11 +796,11 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
 
         // Add trust badges to trending feed notes
         try {
-            const TrustBadges = await import('./trust-badges.js');
+            const TrustBadges = await import('./trust-badges.js?v=2.9.41');
             console.log('[Trending] Trust badges module imported');
 
             // Add trust badges for all rendered notes
-            await TrustBadges.addFeedTrustBadges(firstPageNotes.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })), '#homeFeedList');
+            await TrustBadges.addFeedTrustBadges(firstPageNotes.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })), '#feed');
             console.log(`[Trending] Trust badges added for ${firstPageNotes.length} notes`);
         } catch (error) {
             console.error('[Trending] Error adding trust badges:', error);
@@ -949,11 +964,11 @@ async function renderCachedTrendingFeed(cache) {
 
     // Add trust badges to cached trending feed notes
     try {
-        const TrustBadges = await import('./trust-badges.js');
+        const TrustBadges = await import('./trust-badges.js?v=2.9.41');
         console.log('[Trending Cache] Trust badges module imported');
 
         // Add trust badges for all rendered notes
-        await TrustBadges.addFeedTrustBadges(firstPageNotes.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })), '#homeFeedList');
+        await TrustBadges.addFeedTrustBadges(firstPageNotes.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })), '#feed');
         console.log(`[Trending Cache] Trust badges added for ${firstPageNotes.length} notes`);
     } catch (error) {
         console.error('[Trending Cache] Error adding trust badges:', error);
@@ -974,10 +989,11 @@ async function renderCachedTrendingFeed(cache) {
 
 // Render trending feed from cached data (for logged-in users)
 async function renderCachedTrendingFeedForLoggedIn(cache) {
+    console.log('🚨🚨🚨 NEW CODE VERSION 2.9.50 LOADED 🚨🚨🚨');
     console.log(`📦 Rendering cached trending feed for logged-in user: ${cache.notes_cached} notes`);
 
-    const homeFeedList = document.getElementById('homeFeedList');
-    if (!homeFeedList) return;
+    const feed = document.getElementById('feed');
+    if (!feed) return;
 
     // Store in pagination cache
     cachedTrendingPosts = cache.notes.map(noteData => ({
@@ -995,11 +1011,14 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
     });
 
     // Fetch profiles for all note authors
+    console.log('DEBUG_A: About to fetch profiles...');
     const authorPubkeys = [...new Set(cache.notes.map(n => n.pubkey))];
     await fetchProfiles(authorPubkeys);
+    console.log('DEBUG_B: Profile fetching complete');
 
     // Fetch Monero addresses for authors
     if (window.getUserMoneroAddress) {
+        console.log('DEBUG_C: Fetching Monero addresses...');
         await Promise.all(
             authorPubkeys.map(async (pubkey) => {
                 try {
@@ -1014,15 +1033,19 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
                 }
             })
         );
+        console.log('DEBUG_D: Monero addresses complete');
     }
 
+    console.log('DEBUG_E: About to render first page...');
     // Render first page
     const firstPageNotes = cachedTrendingPosts.slice(0, TRENDING_POSTS_PER_PAGE);
     displayedTrendingPostCount = firstPageNotes.length;
+    console.log('DEBUG_F: First page has', firstPageNotes.length, 'notes');
 
     // Fetch disclosed tips for first page notes
     console.log('💰 Fetching disclosed tips for cached trending notes');
     const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+    console.log('DEBUG_G: Disclosed tips fetched, rendering posts...');
     Object.assign(disclosedTipsCache, disclosedTipsData);
 
     const renderedPosts = await Promise.all(
@@ -1035,6 +1058,7 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
             }
         })
     );
+    console.log('DEBUG_H: Posts rendered, updating DOM...');
 
     // Check if there are more posts
     const hasMorePosts = displayedTrendingPostCount < cachedTrendingPosts.length;
@@ -1079,7 +1103,20 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
         </div>
     ` : '';
 
-    homeFeedList.innerHTML = infoHeader + renderedPosts.join('') + loadMoreButton;
+    feed.innerHTML = infoHeader + renderedPosts.join('') + loadMoreButton;
+
+    // Add trust badges for all rendered notes
+    try {
+        const TrustBadges = await import('./trust-badges.js?v=2.9.41');
+        console.log('[Trending Cache Logged-In] Trust badges module imported');
+        await TrustBadges.addFeedTrustBadges(
+            firstPageNotes.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })),
+            '#feed'
+        );
+        console.log(`[Trending Cache Logged-In] Trust badges added for ${firstPageNotes.length} notes`);
+    } catch (error) {
+        console.error('[Trending Cache Logged-In] Error adding trust badges:', error);
+    }
 
     // Expose trending data to window for Puppeteer extraction (even when loaded from cache)
     window.__nosmeroTrendingCache__ = cache;
@@ -1165,11 +1202,11 @@ async function loadMoreTrendingPosts() {
 
         // Add trust badges to newly loaded notes
         try {
-            const TrustBadges = await import('./trust-badges.js');
+            const TrustBadges = await import('./trust-badges.js?v=2.9.41');
             console.log('[Trending Load More] Trust badges module imported');
 
             // Add trust badges for newly rendered notes
-            await TrustBadges.addFeedTrustBadges(postsToRender.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })), '#homeFeedList');
+            await TrustBadges.addFeedTrustBadges(postsToRender.map(({ note }) => ({ id: note.id, pubkey: note.pubkey })), '#feed');
             console.log(`[Trending Load More] Trust badges added for ${postsToRender.length} notes`);
         } catch (badgeError) {
             console.error('[Trending Load More] Error adding trust badges:', badgeError);
@@ -2410,7 +2447,7 @@ async function updateParentPosts(parentPostsMap) {
                         `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
                     }
                     <div class="post-info">
-                        <span class="username" style="font-size: 14px;">${parentAuthor.name}</span>
+                        <span class="username" data-pubkey="${parentPost.pubkey}" style="font-size: 14px;">${parentAuthor.name}</span>
                         <span class="timestamp" style="font-size: 12px;">${Utils.formatTime(parentPost.created_at)}</span>
                     </div>
                 </div>
@@ -2525,7 +2562,7 @@ export async function renderFeed(loadMore = false) {
                             `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
                         }
                         <div class="post-info">
-                            <span class="username" style="font-size: 14px;">${parentAuthor.name}</span>
+                            <span class="username" data-pubkey="${parentPost.pubkey}" style="font-size: 14px;">${parentAuthor.name}</span>
                             <span class="timestamp" style="font-size: 12px;">${Utils.formatTime(parentPost.created_at)}</span>
                         </div>
                     </div>
@@ -2545,7 +2582,7 @@ export async function renderFeed(loadMore = false) {
                     }
                     <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
                     <div class="post-info">
-                        <span class="username" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
+                        <span class="username" data-pubkey="${post.pubkey}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
                         <span class="handle" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">@${author.handle}</span>
                         <span class="timestamp">${Utils.formatTime(post.created_at)}</span>
                     </div>
@@ -2637,6 +2674,19 @@ export async function renderFeed(loadMore = false) {
     // Update like button states
     updateAllLikeButtons();
     updateAllRepostButtons();
+
+    // Add trust badges for all rendered posts
+    try {
+        const TrustBadges = await import('./trust-badges.js?v=2.9.41');
+        console.log('[Following Feed] Trust badges module imported');
+        await TrustBadges.addFeedTrustBadges(
+            postsToRender.map(post => ({ id: post.id, pubkey: post.pubkey })),
+            '#feed'
+        );
+        console.log(`[Following Feed] Trust badges added for ${postsToRender.length} posts`);
+    } catch (error) {
+        console.error('[Following Feed] Error adding trust badges:', error);
+    }
 
     // Process any embedded notes after rendering
     try {
@@ -3850,7 +3900,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                                 `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
                             }
                             <div class="post-info">
-                                <span class="username" style="font-size: 14px;">${parentAuthor.name}</span>
+                                <span class="username" data-pubkey="${parentPost.pubkey}" style="font-size: 14px;">${parentAuthor.name}</span>
                                 <span class="timestamp" style="font-size: 12px;">${Utils.formatTime(parentPost.created_at)}</span>
                             </div>
                         </div>
@@ -3873,7 +3923,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                     }
                     <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
                     <div class="post-info">
-                        <span class="username" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
+                        <span class="username" data-pubkey="${post.pubkey}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
                         <span class="handle" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">@${author.handle}</span>
                         <span class="timestamp">${Utils.formatTime(post.created_at)}</span>
                     </div>

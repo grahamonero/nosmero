@@ -17,7 +17,7 @@ async function ensureStateLoaded() {
 let Posts = null;
 async function ensurePostsLoaded() {
     if (!Posts) {
-        Posts = await import('./posts.js?v=2.9.22');
+        Posts = await import('./posts.js?v=2.9.47');
     }
     return Posts;
 }
