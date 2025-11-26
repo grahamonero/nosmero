@@ -39,12 +39,18 @@ export async function loadSearch() {
                 <div style="margin-bottom: 30px;">
                     <h2 style="margin-bottom: 20px; color: #FF6600;">🔍 Search</h2>
                     
-                    <!-- Search Input -->
+                    <!-- Search Input with Suggestions Dropdown -->
                     <div style="display: flex; gap: 12px; margin-bottom: 20px;">
-                        <input type="text" id="searchInput" placeholder="Search posts, #hashtags, or @users..." 
-                               style="flex: 1; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px;"
-                               onkeypress="if(event.key === 'Enter') performSearch()">
-                        <button onclick="performSearch()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        <div id="searchInputContainer" style="flex: 1; position: relative;">
+                            <input type="text" id="searchInput" placeholder="Search posts, #hashtags, or @users..."
+                                   style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; box-sizing: border-box;"
+                                   onkeypress="if(event.key === 'Enter') { hideSearchSuggestions(); performSearch(); }"
+                                   oninput="showSearchSuggestions(this.value)"
+                                   onfocus="showSearchSuggestions(this.value)"
+                                   autocomplete="off">
+                            <div id="searchSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #1a1a1a; border: 1px solid #333; border-top: none; border-radius: 0 0 8px 8px; max-height: 300px; overflow-y: auto; z-index: 1000;"></div>
+                        </div>
+                        <button onclick="hideSearchSuggestions(); performSearch()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                             Search
                         </button>
                     </div>
@@ -83,12 +89,15 @@ export async function loadSearch() {
                     
                     <!-- Advanced Search Options -->
                     <div style="margin-bottom: 20px; padding: 12px; background: #1a1a1a; border-radius: 8px; border: 1px solid #333;">
-                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap;">
                             <label style="color: #ccc; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                                 <input type="checkbox" id="includeMedia" style="margin: 0;"> Include Media
                             </label>
                             <label style="color: #ccc; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                                 <input type="checkbox" id="threadsOnly" style="margin: 0;"> Threads Only
+                            </label>
+                            <label style="color: #ccc; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                                <input type="checkbox" id="hideNsfw" style="margin: 0;" checked> Hide NSFW
                             </label>
                             <select id="timeRange" style="padding: 4px 8px; background: #000; color: #fff; border: 1px solid #333; border-radius: 4px;">
                                 <option value="all">All Time</option>
@@ -96,9 +105,23 @@ export async function loadSearch() {
                                 <option value="7d">Last 7 Days</option>
                                 <option value="30d">Last 30 Days</option>
                             </select>
+                            <select id="languageFilter" style="padding: 4px 8px; background: #000; color: #fff; border: 1px solid #333; border-radius: 4px;">
+                                <option value="">Any Language</option>
+                                <option value="en">English</option>
+                                <option value="es">Spanish</option>
+                                <option value="pt">Portuguese</option>
+                                <option value="de">German</option>
+                                <option value="fr">French</option>
+                                <option value="ja">Japanese</option>
+                                <option value="zh">Chinese</option>
+                                <option value="ru">Russian</option>
+                            </select>
                         </div>
                         <div style="font-size: 12px; color: #666;">
                             💡 Use quotes for "exact phrases", minus for -excluded words, # for hashtags, @ for users
+                        </div>
+                        <div style="font-size: 11px; color: #555; margin-top: 6px;">
+                            ⚠️ Language/NSFW filters depend on relay support (NIP-50 extensions)
                         </div>
                     </div>
                 </div>
@@ -280,6 +303,158 @@ export async function performSearch() {
     }
 }
 
+// Search with a spelling suggestion
+export async function searchWithSuggestion(suggestedQuery) {
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.value = suggestedQuery;
+    }
+    await performSearch();
+}
+
+// Make searchWithSuggestion available globally for onclick handler
+window.searchWithSuggestion = searchWithSuggestion;
+
+// ==================== SEARCH SUGGESTIONS DROPDOWN ====================
+
+// Popular search terms (common queries users might want)
+const POPULAR_SEARCHES = [
+    'bitcoin', 'monero', 'nostr', 'lightning', 'zap',
+    'privacy', 'crypto', 'decentralized', 'freedom'
+];
+
+/**
+ * Show search suggestions dropdown based on input
+ * @param {string} query - Current input value
+ */
+export function showSearchSuggestions(query) {
+    const dropdown = document.getElementById('searchSuggestions');
+    if (!dropdown) return;
+
+    const suggestions = getFilteredSuggestions(query);
+
+    if (suggestions.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+    }
+
+    // Build suggestion items HTML
+    const html = suggestions.map((item, index) => `
+        <div class="search-suggestion-item"
+             style="padding: 12px 14px; cursor: pointer; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 10px;"
+             onmousedown="selectSearchSuggestion('${escapeHtml(item.text)}')"
+             ontouchstart="selectSearchSuggestion('${escapeHtml(item.text)}')"
+             onmouseover="this.style.background='#2a2a2a'"
+             onmouseout="this.style.background='transparent'">
+            <span style="color: #666; font-size: 16px;">${item.icon}</span>
+            <span style="color: #fff; flex: 1; font-size: 15px;">${escapeHtml(item.text)}</span>
+            <span style="color: #666; font-size: 12px;">${item.type}</span>
+        </div>
+    `).join('');
+
+    dropdown.innerHTML = html;
+    dropdown.style.display = 'block';
+}
+
+/**
+ * Get filtered suggestions based on query
+ * @param {string} query - Search query
+ * @returns {Array} - Array of {text, type, icon} objects
+ */
+function getFilteredSuggestions(query) {
+    const suggestions = [];
+    const lowerQuery = query.toLowerCase().trim();
+
+    // If empty, show recent searches
+    if (!lowerQuery) {
+        // Add recent searches (max 5)
+        recentSearches.slice(0, 5).forEach(search => {
+            suggestions.push({ text: search, type: 'Recent', icon: '🕐' });
+        });
+
+        // Add saved searches (max 3)
+        savedSearches.slice(0, 3).forEach(search => {
+            if (!suggestions.find(s => s.text === search)) {
+                suggestions.push({ text: search, type: 'Saved', icon: '⭐' });
+            }
+        });
+
+        // Add popular searches if we have space (max 3)
+        POPULAR_SEARCHES.slice(0, 3).forEach(search => {
+            if (!suggestions.find(s => s.text === search)) {
+                suggestions.push({ text: search, type: 'Popular', icon: '🔥' });
+            }
+        });
+
+        return suggestions.slice(0, 8);
+    }
+
+    // Filter recent searches that match
+    recentSearches.forEach(search => {
+        if (search.toLowerCase().includes(lowerQuery) && search.toLowerCase() !== lowerQuery) {
+            suggestions.push({ text: search, type: 'Recent', icon: '🕐' });
+        }
+    });
+
+    // Filter saved searches that match
+    savedSearches.forEach(search => {
+        if (search.toLowerCase().includes(lowerQuery) && !suggestions.find(s => s.text === search)) {
+            suggestions.push({ text: search, type: 'Saved', icon: '⭐' });
+        }
+    });
+
+    // Filter popular searches that match
+    POPULAR_SEARCHES.forEach(search => {
+        if (search.toLowerCase().includes(lowerQuery) && !suggestions.find(s => s.text === search)) {
+            suggestions.push({ text: search, type: 'Popular', icon: '🔥' });
+        }
+    });
+
+    // Also suggest from dictionary if typing looks like a typo
+    const suggestion = getSpellingSuggestion(query);
+    if (suggestion && !suggestions.find(s => s.text === suggestion.suggested)) {
+        suggestions.unshift({ text: suggestion.suggested, type: 'Did you mean?', icon: '💡' });
+    }
+
+    return suggestions.slice(0, 8);
+}
+
+/**
+ * Hide search suggestions dropdown
+ */
+export function hideSearchSuggestions() {
+    const dropdown = document.getElementById('searchSuggestions');
+    if (dropdown) {
+        dropdown.style.display = 'none';
+    }
+}
+
+/**
+ * Select a search suggestion
+ * @param {string} text - Selected suggestion text
+ */
+export function selectSearchSuggestion(text) {
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.value = text;
+    }
+    hideSearchSuggestions();
+    performSearch();
+}
+
+// Make functions available globally for onclick handlers
+window.showSearchSuggestions = showSearchSuggestions;
+window.hideSearchSuggestions = hideSearchSuggestions;
+window.selectSearchSuggestion = selectSearchSuggestion;
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    const container = document.getElementById('searchInputContainer');
+    if (container && !container.contains(e.target)) {
+        hideSearchSuggestions();
+    }
+});
+
 // ==================== SEARCH FUNCTIONS ====================
 
 // Advanced query parser
@@ -389,7 +564,7 @@ export async function searchContent(query) {
         searchFilters.push({
             kinds: [1],
             limit: 100,
-            since: Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60) // Last 7 days
+            since: Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60) // Last 30 days
         });
 
         const searchPromises = searchFilters.map(filter => {
@@ -503,7 +678,7 @@ export async function searchThreads(query) {
             {
                 kinds: [1],
                 limit: 50,
-                since: Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60)
+                since: Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60)
             }
         ], {
             onevent(event) {
@@ -819,8 +994,56 @@ function getSearchOptions() {
     return {
         includeMedia: document.getElementById('includeMedia')?.checked || false,
         threadsOnly: document.getElementById('threadsOnly')?.checked || false,
-        timeRange: document.getElementById('timeRange')?.value || 'all'
+        timeRange: document.getElementById('timeRange')?.value || 'all',
+        hideNsfw: document.getElementById('hideNsfw')?.checked ?? true,
+        language: document.getElementById('languageFilter')?.value || ''
     };
+}
+
+/**
+ * Build NIP-50 search string with extensions
+ * @param {string} query - Base search query
+ * @param {Object} options - Search options from getSearchOptions()
+ * @returns {string} - Search string with NIP-50 extensions
+ */
+function buildNip50SearchString(query, options) {
+    let searchString = query;
+
+    // Add language filter (NIP-50 extension)
+    if (options.language) {
+        searchString += ` language:${options.language}`;
+    }
+
+    // Add NSFW filter (NIP-50 extension)
+    if (options.hideNsfw) {
+        searchString += ` -nsfw`;
+    }
+
+    return searchString;
+}
+
+/**
+ * Check if content appears to be NSFW (client-side fallback)
+ * @param {Object} event - Nostr event
+ * @returns {boolean} - True if content appears NSFW
+ */
+function isNsfwContent(event) {
+    // Check for content-warning tag (NIP-36)
+    const hasContentWarning = event.tags?.some(tag =>
+        tag[0] === 'content-warning' || tag[0] === 'cw'
+    );
+    if (hasContentWarning) return true;
+
+    // Check for nsfw tag
+    const hasNsfwTag = event.tags?.some(tag =>
+        tag[0] === 't' && tag[1]?.toLowerCase() === 'nsfw'
+    );
+    if (hasNsfwTag) return true;
+
+    // Basic keyword check in content (conservative list)
+    const content = event.content?.toLowerCase() || '';
+    const nsfwKeywords = ['#nsfw', '[nsfw]', '(nsfw)', 'content warning:', 'cw:'];
+    return nsfwKeywords.some(keyword => content.includes(keyword));
 }
 
 // Convert time range to Unix timestamp
@@ -839,11 +1062,23 @@ function getTimeLimit(timeRange) {
 // Streaming content search
 export async function performStreamingContentSearch(query) {
     const parsedQuery = parseAdvancedQuery(query);
+    const searchOptions = getSearchOptions();
+
+    // Get time limit for filtering
+    const timeLimit = getTimeLimit(searchOptions.timeRange);
 
     // First, search cached posts and stream them
     updateSearchStatus('Searching cached posts...');
     posts.forEach(post => {
-        if (matchesQuery(post, parsedQuery)) {
+        // Skip NSFW content if filter enabled
+        if (searchOptions.hideNsfw && isNsfwContent(post)) {
+            return;
+        }
+        // Skip posts outside time range
+        if (timeLimit > 0 && post.created_at < timeLimit) {
+            return;
+        }
+        if (matchesQuery(post, parsedQuery, true)) { // Use fuzzy matching
             addSearchResult(post);
         }
     });
@@ -853,12 +1088,17 @@ export async function performStreamingContentSearch(query) {
 
     const searchFilters = [];
 
+    // Calculate since timestamp (default to 30 days if "all" selected for relay efficiency)
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+
     // NIP-50 search if query is simple enough
     if (parsedQuery.terms.length === 1 && parsedQuery.exactPhrases.length === 0) {
+        const nip50Query = buildNip50SearchString(parsedQuery.terms[0], searchOptions);
         searchFilters.push({
             kinds: [1],
-            search: parsedQuery.terms[0],
-            limit: 50
+            search: nip50Query,
+            limit: 50,
+            since: sinceTimestamp
         });
     }
 
@@ -866,14 +1106,24 @@ export async function performStreamingContentSearch(query) {
     searchFilters.push({
         kinds: [1],
         limit: 100,
-        since: Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60) // Last 7 days
+        since: sinceTimestamp
     });
 
     // Use SEARCH_RELAYS for network-wide search
     for (const filter of searchFilters) {
         const searchSub = pool.subscribeMany(SEARCH_RELAYS, [filter], {
             onevent(event) {
-                if (matchesQuery(event, parsedQuery)) {
+                // Client-side NSFW filter (fallback for relays that don't support NIP-50 extensions)
+                if (searchOptions.hideNsfw && isNsfwContent(event)) {
+                    return;
+                }
+
+                // Client-side time filter (fallback for relays that ignore since parameter)
+                if (timeLimit > 0 && event.created_at < timeLimit) {
+                    return;
+                }
+
+                if (matchesQuery(event, parsedQuery, true)) { // Use fuzzy matching
                     addSearchResult(event);
                 }
             },
@@ -891,14 +1141,21 @@ export async function performStreamingContentSearch(query) {
 // Streaming hashtag search
 export async function performStreamingHashtagSearch(hashtag) {
     const cleanTag = hashtag.replace('#', '').toLowerCase();
+    const searchOptions = getSearchOptions();
+    const timeLimit = getTimeLimit(searchOptions.timeRange);
 
     updateSearchStatus('Searching cached posts for hashtag...');
 
     // Search cached posts first
     posts.forEach(post => {
+        // Skip posts outside time range
+        if (timeLimit > 0 && post.created_at < timeLimit) {
+            return;
+        }
         const tags = post.tags.filter(tag => tag[0] === 't');
         if (tags.some(tag => tag[1] && tag[1].toLowerCase() === cleanTag)) {
             addSearchResult(post);
+            return; // Avoid adding same post twice
         }
         // Also check content for hashtags
         const hashtagRegex = new RegExp(`#${cleanTag}\\b`, 'i');
@@ -909,15 +1166,23 @@ export async function performStreamingHashtagSearch(hashtag) {
 
     updateSearchStatus('Searching relays for hashtag...');
 
+    // Calculate since timestamp for relay filter
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+
     // Search network-wide relays and stream results
     const hashtagSub = pool.subscribeMany(SEARCH_RELAYS, [
         {
             kinds: [1],
             '#t': [cleanTag],
-            limit: 50
+            limit: 50,
+            since: sinceTimestamp
         }
     ], {
         onevent(event) {
+            // Client-side time filter (fallback for relays that ignore since parameter)
+            if (timeLimit > 0 && event.created_at < timeLimit) {
+                return;
+            }
             addSearchResult(event);
         },
         oneose() {
@@ -933,6 +1198,9 @@ export async function performStreamingHashtagSearch(hashtag) {
 export async function performStreamingUserSearch(query) {
     let searchPubkey = null;
     const cleanQuery = query.replace('@', '').trim();
+    const searchOptions = getSearchOptions();
+    const timeLimit = getTimeLimit(searchOptions.timeRange);
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
 
     // Check if it's an npub or hex pubkey
     if (cleanQuery.startsWith('npub')) {
@@ -954,6 +1222,10 @@ export async function performStreamingUserSearch(query) {
 
         // Search cached posts first
         posts.forEach(post => {
+            // Skip posts outside time range
+            if (timeLimit > 0 && post.created_at < timeLimit) {
+                return;
+            }
             if (post.pubkey === searchPubkey) {
                 addSearchResult(post);
             }
@@ -964,10 +1236,15 @@ export async function performStreamingUserSearch(query) {
             {
                 kinds: [1],
                 authors: [searchPubkey],
-                limit: 20
+                limit: 20,
+                since: sinceTimestamp
             }
         ], {
             onevent(event) {
+                // Client-side time filter (fallback for relays that ignore since parameter)
+                if (timeLimit > 0 && event.created_at < timeLimit) {
+                    return;
+                }
                 addSearchResult(event);
             },
             oneose() {
@@ -981,28 +1258,114 @@ export async function performStreamingUserSearch(query) {
         // Search profiles by name/handle
         updateSearchStatus('Searching users by name...');
         const lowerQuery = cleanQuery.toLowerCase();
+        const matchedPubkeys = new Set();
 
+        // First, search cached profiles
         Object.entries(profileCache).forEach(([pubkey, profile]) => {
-            if (profile.name && profile.name.toLowerCase().includes(lowerQuery)) {
+            const name = (profile.name || '').toLowerCase();
+            const displayName = (profile.display_name || '').toLowerCase();
+            const nip05 = (profile.nip05 || '').toLowerCase();
+
+            if (name.includes(lowerQuery) || displayName.includes(lowerQuery) || nip05.includes(lowerQuery)) {
+                matchedPubkeys.add(pubkey);
                 posts.forEach(post => {
+                    // Skip posts outside time range
+                    if (timeLimit > 0 && post.created_at < timeLimit) {
+                        return;
+                    }
                     if (post.pubkey === pubkey) {
                         addSearchResult(post);
                     }
                 });
             }
         });
+
+        updateSearchStatus('Searching relays for users...');
+
+        // Query relays for kind 0 (profile metadata) events using NIP-50 search
+        const profileResults = [];
+        const profileSub = pool.subscribeMany(SEARCH_RELAYS, [
+            {
+                kinds: [0], // Profile metadata
+                search: cleanQuery, // NIP-50 search
+                limit: 50
+            }
+        ], {
+            onevent(event) {
+                try {
+                    const profile = JSON.parse(event.content);
+                    const name = (profile.name || '').toLowerCase();
+                    const displayName = (profile.display_name || '').toLowerCase();
+                    const nip05 = (profile.nip05 || '').toLowerCase();
+
+                    if (name.includes(lowerQuery) || displayName.includes(lowerQuery) || nip05.includes(lowerQuery)) {
+                        if (!matchedPubkeys.has(event.pubkey)) {
+                            matchedPubkeys.add(event.pubkey);
+                            profileResults.push({ pubkey: event.pubkey, profile });
+                            // Cache the profile
+                            profileCache[event.pubkey] = profile;
+                        }
+                    }
+                } catch (e) {
+                    // Invalid JSON in profile
+                }
+            },
+            oneose() {
+                profileSub.close();
+            }
+        });
+
+        // Wait for profile search
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        profileSub.close();
+
+        // Now fetch posts from matched users found on relays
+        if (profileResults.length > 0) {
+            updateSearchStatus(`Found ${profileResults.length} new users, fetching posts...`);
+
+            const newPubkeys = profileResults.map(r => r.pubkey);
+            const postsSub = pool.subscribeMany(SEARCH_RELAYS, [
+                {
+                    kinds: [1],
+                    authors: newPubkeys,
+                    limit: 50,
+                    since: sinceTimestamp
+                }
+            ], {
+                onevent(event) {
+                    // Client-side time filter (fallback for relays that ignore since parameter)
+                    if (timeLimit > 0 && event.created_at < timeLimit) {
+                        return;
+                    }
+                    addSearchResult(event);
+                },
+                oneose() {
+                    postsSub.close();
+                }
+            });
+
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            postsSub.close();
+        }
     }
 }
 
 // Streaming threads search
 export async function performStreamingThreadsSearch(query) {
     const parsedQuery = parseAdvancedQuery(query);
+    const searchOptions = getSearchOptions();
+    const timeLimit = getTimeLimit(searchOptions.timeRange);
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
 
     updateSearchStatus('Searching threads...');
 
     // Search cached posts for threads
     posts.forEach(post => {
-        if (isThread(post) && matchesQuery(post, parsedQuery)) {
+        // Skip posts outside time range
+        if (timeLimit > 0 && post.created_at < timeLimit) {
+            return;
+        }
+        if (isThread(post) && matchesQuery(post, parsedQuery, true)) { // Use fuzzy matching
             addSearchResult(post);
         }
     });
@@ -1012,11 +1375,15 @@ export async function performStreamingThreadsSearch(query) {
         {
             kinds: [1],
             limit: 50,
-            since: Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60)
+            since: sinceTimestamp
         }
     ], {
         onevent(event) {
-            if (isThread(event) && matchesQuery(event, parsedQuery)) {
+            // Client-side time filter (fallback for relays that ignore since parameter)
+            if (timeLimit > 0 && event.created_at < timeLimit) {
+                return;
+            }
+            if (isThread(event) && matchesQuery(event, parsedQuery, true)) { // Use fuzzy matching
                 addSearchResult(event);
             }
         },
@@ -1032,15 +1399,21 @@ export async function performStreamingThreadsSearch(query) {
 // Streaming media search
 export async function performStreamingMediaSearch(query) {
     const parsedQuery = parseAdvancedQuery(query);
+    const searchOptions = getSearchOptions();
+    const timeLimit = getTimeLimit(searchOptions.timeRange);
 
     updateSearchStatus('Searching media posts...');
 
     posts.forEach(post => {
+        // Skip posts outside time range
+        if (timeLimit > 0 && post.created_at < timeLimit) {
+            return;
+        }
         const content = post.content;
         const hasImage = /\.(jpg|jpeg|png|gif|webp|svg)(\?[^\s]*)?/i.test(content);
         const hasVideo = /\.(mp4|webm|ogg)(\?[^\s]*)?/i.test(content);
 
-        if ((hasImage || hasVideo) && matchesQuery(post, parsedQuery)) {
+        if ((hasImage || hasVideo) && matchesQuery(post, parsedQuery, true)) { // Use fuzzy matching
             addSearchResult(post);
         }
     });
@@ -1049,6 +1422,9 @@ export async function performStreamingMediaSearch(query) {
 // Streaming articles search
 export async function performStreamingArticlesSearch(query) {
     const parsedQuery = parseAdvancedQuery(query);
+    const searchOptions = getSearchOptions();
+    const timeLimit = getTimeLimit(searchOptions.timeRange);
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
 
     updateSearchStatus('Searching articles...');
 
@@ -1056,11 +1432,15 @@ export async function performStreamingArticlesSearch(query) {
         {
             kinds: [30023], // NIP-23 long-form articles
             limit: 20,
-            since: Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60) // Last 30 days
+            since: sinceTimestamp
         }
     ], {
         onevent(event) {
-            if (matchesQuery(event, parsedQuery)) {
+            // Client-side time filter (fallback for relays that ignore since parameter)
+            if (timeLimit > 0 && event.created_at < timeLimit) {
+                return;
+            }
+            if (matchesQuery(event, parsedQuery, true)) { // Use fuzzy matching
                 addSearchResult(event);
             }
         },
@@ -1091,8 +1471,164 @@ export async function performStreamingAllSearch(query) {
     await Promise.all(searchPromises);
 }
 
+// ==================== FUZZY MATCHING ====================
+
+/**
+ * Calculate Levenshtein distance between two strings
+ * @param {string} str1 - First string
+ * @param {string} str2 - Second string
+ * @returns {number} - Edit distance
+ */
+function levenshteinDistance(str1, str2) {
+    const m = str1.length;
+    const n = str2.length;
+
+    // Create a 2D array to store distances
+    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+    // Initialize first row and column
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+    // Fill in the rest of the matrix
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (str1[i - 1] === str2[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1];
+            } else {
+                dp[i][j] = 1 + Math.min(
+                    dp[i - 1][j],     // deletion
+                    dp[i][j - 1],     // insertion
+                    dp[i - 1][j - 1]  // substitution
+                );
+            }
+        }
+    }
+
+    return dp[m][n];
+}
+
+/**
+ * Check if a search term fuzzy-matches content
+ * @param {string} term - Search term
+ * @param {string} content - Content to search in (lowercase)
+ * @returns {boolean} - True if fuzzy match found
+ */
+function fuzzyMatchesContent(term, content) {
+    // For short terms, require exact match (too many false positives otherwise)
+    if (term.length < 4) {
+        return content.includes(term);
+    }
+
+    // Split content into words
+    const words = content.split(/\s+/);
+
+    // Max allowed distance based on term length
+    const maxDistance = term.length <= 5 ? 1 : 2;
+
+    return words.some(word => {
+        // Skip very short words
+        if (word.length < 3) return false;
+
+        // Exact substring match
+        if (word.includes(term) || term.includes(word)) return true;
+
+        // Skip if length difference is too big
+        if (Math.abs(word.length - term.length) > maxDistance) return false;
+
+        // Calculate edit distance
+        return levenshteinDistance(term, word) <= maxDistance;
+    });
+}
+
+// ==================== SPELLING SUGGESTIONS ====================
+
+// Dictionary of common terms for "Did you mean?" suggestions
+const SEARCH_DICTIONARY = [
+    // Crypto terms
+    'bitcoin', 'btc', 'monero', 'xmr', 'ethereum', 'eth', 'lightning', 'satoshi', 'sats',
+    'crypto', 'cryptocurrency', 'blockchain', 'wallet', 'address', 'transaction', 'mining',
+    'hodl', 'defi', 'nft', 'token', 'altcoin', 'stablecoin', 'exchange', 'trading',
+    'bullish', 'bearish', 'pump', 'dump', 'moon', 'rekt', 'whale', 'fiat', 'fomo',
+    // Nostr terms
+    'nostr', 'relay', 'relays', 'pubkey', 'npub', 'nsec', 'nip', 'zap', 'zaps', 'zapped',
+    'note', 'event', 'kind', 'follow', 'follower', 'following', 'mute', 'block',
+    'primal', 'damus', 'amethyst', 'snort', 'coracle', 'nostrich', 'client',
+    // Tech terms
+    'software', 'hardware', 'computer', 'internet', 'network', 'protocol', 'server',
+    'privacy', 'security', 'encryption', 'decentralized', 'censorship', 'freedom',
+    'open', 'source', 'code', 'developer', 'programming', 'javascript', 'python',
+    // Common words
+    'about', 'after', 'again', 'against', 'because', 'before', 'being', 'between',
+    'could', 'does', 'doing', 'during', 'each', 'first', 'from', 'have', 'having',
+    'here', 'into', 'just', 'like', 'make', 'more', 'most', 'much', 'must', 'never',
+    'only', 'other', 'over', 'people', 'same', 'should', 'some', 'such', 'than',
+    'that', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those',
+    'through', 'time', 'very', 'want', 'well', 'were', 'what', 'when', 'where',
+    'which', 'while', 'will', 'with', 'would', 'your', 'think', 'know', 'good',
+    'great', 'right', 'still', 'even', 'back', 'come', 'work', 'look', 'also',
+    'world', 'life', 'year', 'day', 'way', 'thing', 'man', 'woman', 'child',
+    'government', 'country', 'money', 'market', 'price', 'value', 'news', 'media',
+    'social', 'community', 'post', 'message', 'content', 'share', 'comment', 'reply'
+];
+
+/**
+ * Get spelling suggestions for a search query
+ * @param {string} query - The search query
+ * @returns {Object|null} - { original: string, suggested: string, fullSuggestion: string } or null
+ */
+function getSpellingSuggestion(query) {
+    const words = query.toLowerCase().split(/\s+/).filter(w => w.length >= 4);
+
+    if (words.length === 0) return null;
+
+    const corrections = [];
+
+    for (const word of words) {
+        // Skip if word is in dictionary (correctly spelled)
+        if (SEARCH_DICTIONARY.includes(word)) continue;
+
+        // Find closest match in dictionary
+        let bestMatch = null;
+        let bestDistance = Infinity;
+        const maxDistance = word.length <= 5 ? 1 : 2;
+
+        for (const dictWord of SEARCH_DICTIONARY) {
+            // Skip if length difference is too big
+            if (Math.abs(dictWord.length - word.length) > maxDistance) continue;
+
+            const dist = levenshteinDistance(word, dictWord);
+            if (dist > 0 && dist <= maxDistance && dist < bestDistance) {
+                bestDistance = dist;
+                bestMatch = dictWord;
+            }
+        }
+
+        if (bestMatch) {
+            corrections.push({ original: word, suggested: bestMatch });
+        }
+    }
+
+    if (corrections.length === 0) return null;
+
+    // Build the full suggested query
+    let suggestedQuery = query.toLowerCase();
+    for (const { original, suggested } of corrections) {
+        suggestedQuery = suggestedQuery.replace(new RegExp(`\\b${original}\\b`, 'gi'), suggested);
+    }
+
+    // Don't suggest if it's the same as original
+    if (suggestedQuery.toLowerCase() === query.toLowerCase()) return null;
+
+    return {
+        original: query,
+        suggested: suggestedQuery,
+        corrections: corrections
+    };
+}
+
 // Helper function to check if a post matches the parsed query
-function matchesQuery(post, parsedQuery) {
+function matchesQuery(post, parsedQuery, useFuzzy = false) {
     const content = post.content.toLowerCase();
 
     // Check exclude terms first
@@ -1109,7 +1645,13 @@ function matchesQuery(post, parsedQuery) {
 
     // Check regular terms (all must match)
     if (parsedQuery.terms.length > 0) {
-        return parsedQuery.terms.every(term => content.includes(term.toLowerCase()));
+        if (useFuzzy) {
+            // Fuzzy matching - allow typos
+            return parsedQuery.terms.every(term => fuzzyMatchesContent(term.toLowerCase(), content));
+        } else {
+            // Exact matching
+            return parsedQuery.terms.every(term => content.includes(term.toLowerCase()));
+        }
     }
 
     return parsedQuery.terms.length === 0; // If no terms, match everything (for hashtag/user searches)
@@ -1120,29 +1662,43 @@ function matchesQuery(post, parsedQuery) {
 // Global variables for streaming search
 let currentSearchResults = [];
 let currentSearchQuery = '';
-let currentSortMode = 'stream'; // 'stream', 'date', 'engagement'
+let currentSortMode = 'engagement'; // 'stream', 'date', 'engagement'
 let searchEngagementData = {}; // Stores engagement counts for search results
 
 // Initialize search results container with header and controls
 export function initializeSearchResults(query) {
     currentSearchResults = [];
     currentSearchQuery = query;
-    currentSortMode = 'stream';
+    currentSortMode = 'engagement';
     searchEngagementData = {}; // Reset engagement data for new search
 
     const searchResults = document.getElementById('searchResults');
     if (!searchResults) return;
+
+    // Check for spelling suggestion
+    const suggestion = getSpellingSuggestion(query);
+    const suggestionHtml = suggestion
+        ? `<div id="spellingSuggestion" style="margin-bottom: 12px; padding: 10px; background: #1a1a2e; border: 1px solid #333; border-radius: 6px;">
+               <span style="color: #888;">Did you mean: </span>
+               <a href="#" onclick="searchWithSuggestion('${escapeHtml(suggestion.suggested)}'); return false;"
+                  style="color: #FF6600; font-weight: bold; text-decoration: underline; cursor: pointer;">
+                   ${escapeHtml(suggestion.suggested)}
+               </a>
+               <span style="color: #888;">?</span>
+           </div>`
+        : '';
 
     searchResults.innerHTML = `
         <div id="searchHeader" style="margin-bottom: 20px; padding: 12px; background: #1a1a1a; border-radius: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <div style="color: #FF6600; font-weight: bold;" id="searchResultsCount">Searching for "${escapeHtml(query)}"...</div>
                 <div style="display: none;" id="sortControls">
-                    <button id="sortStream" onclick="setSortMode('stream')" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">As Found</button>
+                    <button id="sortEngagement" onclick="setSortMode('engagement')" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">By Engagement</button>
                     <button id="sortDate" onclick="setSortMode('date')" style="background: transparent; border: 1px solid #333; color: #fff; padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">By Date</button>
-                    <button id="sortEngagement" onclick="setSortMode('engagement')" style="background: transparent; border: 1px solid #333; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">By Engagement</button>
+                    <button id="sortStream" onclick="setSortMode('stream')" style="background: transparent; border: 1px solid #333; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">As Found</button>
                 </div>
             </div>
+            ${suggestionHtml}
             <div style="color: #666; font-size: 14px;" id="searchStatus">Searching cached posts and relays...</div>
         </div>
         <div id="searchResultsList"></div>
