@@ -7,6 +7,8 @@ import { wrapGiftMessage } from './crypto.js';
 import { loadNostrLogin } from './nostr-login-loader.js';
 import * as State from './state.js';
 import { zapQueue, privateKey } from './state.js';
+import { isMobile } from './platform-detect.js';
+import { openGenericMoneroUri } from './wallet-deep-links.js';
 
 // Nosmerotips Bot npub (for receiving disclosure notifications)
 const NOSMEROTIPS_BOT_NPUB = 'npub1fxyuwwup7hh3x4up5tgg9hmflhfzskvkryh236cau4ujkj7wramqzmy9f2';
@@ -365,6 +367,8 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
     };
 
     if (mode === 'choose') {
+        const showWalletButton = isMobile();
+
         // Show options to either zap immediately or add to queue
         details.innerHTML = `
             <div style="margin-bottom: 16px; text-align: center;">
@@ -384,11 +388,26 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
             <div style="margin-bottom: 20px; font-size: 12px; color: #666; word-break: break-all; text-align: center;">
                 ${escapeHtml(moneroAddress)}
             </div>
+            ${showWalletButton ? `
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
+                    <button id="openWalletBtn"
+                            style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 14px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 15px;">
+                        💰 Open in Wallet
+                    </button>
+                    <button id="zapNowBtn"
+                            style="background: #444; border: none; color: #fff; padding: 12px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                        📱 Show QR Code
+                    </button>
+                </div>
+            ` : `
+                <div style="display: flex; gap: 12px; justify-content: center; margin-bottom: 12px;">
+                    <button id="zapNowBtn"
+                            style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        Tip Now
+                    </button>
+                </div>
+            `}
             <div style="display: flex; gap: 12px; justify-content: center;">
-                <button id="zapNowBtn"
-                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
-                    Tip Now
-                </button>
                 <button id="addToQueueBtn"
                         style="background: #6B73FF; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                     Add to Queue (${zapQueue.length}/20)
@@ -405,6 +424,7 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
         setTimeout(() => {
             const zapNowBtn = document.getElementById('zapNowBtn');
             const addToQueueBtn = document.getElementById('addToQueueBtn');
+            const openWalletBtn = document.getElementById('openWalletBtn');
 
             if (zapNowBtn) {
                 zapNowBtn.onclick = () => zapWithCustomAmount(postId, authorName, moneroAddress);
@@ -413,8 +433,24 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
             if (addToQueueBtn) {
                 addToQueueBtn.onclick = () => addToQueueAndClose(postId, authorName, moneroAddress);
             }
+
+            // Open in Wallet button (standard monero: URI)
+            if (openWalletBtn) {
+                openWalletBtn.onclick = () => {
+                    const amountInput = document.getElementById('moneroZapAmount');
+                    const amt = parseFloat(amountInput?.value);
+                    if (!amt || amt <= 0 || isNaN(amt)) {
+                        showNotification('Please enter a valid amount', 'error');
+                        return;
+                    }
+                    userInitiatedTip = true;
+                    const txNote = `nosmero.com/n/${postId}`;
+                    openGenericMoneroUri(moneroAddress, amt, txNote);
+                    showNotification('Opening wallet...', 'info');
+                };
+            }
         }, 0);
-        
+
     } else if (mode === 'immediate') {
         // Show immediate zap QR code
         details.innerHTML = `
