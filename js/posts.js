@@ -3141,6 +3141,7 @@ export function replyToPost(postId) {
     // Use the modal class system properly
     const modal = document.getElementById('replyModal');
     if (modal) {
+        modal.style.display = ''; // Clear any inline display style
         modal.classList.add('show');
     }
 
