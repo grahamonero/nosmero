@@ -6,10 +6,12 @@ export const config = {
   port: process.env.PORT || 3001,
   nodeEnv: process.env.NODE_ENV || 'development',
 
-  // CORS configuration - add your allowed origins
+  // CORS configuration
   corsOrigins: [
     'https://nosmero.com',
-    // Add additional origins as needed for your environment
+    'https://nosmero.com:8443',
+    'http://localhost:8443',
+    'http://localhost:3000'
   ],
 
   // Rate limiting

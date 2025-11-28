@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>nosmero - Nostr + Monero</title>
     <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
-    <link rel="stylesheet" href="/styles.css?v=1.8.2">
+    <link rel="stylesheet" href="/styles.css?v=1.8.5-settings-scroll">
 
 </head>
 <body>
@@ -516,8 +516,12 @@
                     </p>
                 </div>
 
-                <div style="position: sticky; bottom: 0; background: #000; padding: 16px 0; border-top: 1px solid #333; margin-top: 24px;">
-                    <button class="send-btn" onclick="saveSettings()" style="width: 100%; padding: 12px; font-size: 16px;">Save Settings</button>
+            </div>
+            <!-- Settings Footer - Outside scrollable content for visibility -->
+            <div class="settings-footer" style="background: #000; padding: 16px 20px; border-top: 1px solid #333; flex-shrink: 0;">
+                <div style="max-width: 800px; margin: 0 auto; display: flex; gap: 12px;">
+                    <button class="close-btn" onclick="goBackFromSettings()" style="flex: 1; padding: 12px; font-size: 16px;">Cancel</button>
+                    <button class="send-btn" onclick="saveSettings()" style="flex: 2; padding: 12px; font-size: 16px;">Save Settings</button>
                 </div>
             </div>
         </div>
@@ -953,10 +957,7 @@
     <!-- Load nostr-tools from local copy -->
     <script src="/lib/nostr-tools.bundle.js"></script>
 
-    <!-- UI Redesign JS - New minimal header, hamburger menu, feed tabs -->
-    <script src="/js/ui-redesign.js?v=3.0.4"></script>
-
-    <!-- Load the modular v2 application -->
-    <script type="module" src="/js/app.js?v=2.9.38-following-feed-fix"></script>
+    <!-- Load the modular v2 application (UI modules consolidated into /js/ui/) -->
+    <script type="module" src="/js/app.js?v=3.0.1-settings-scroll"></script>
 </body>
 </html>

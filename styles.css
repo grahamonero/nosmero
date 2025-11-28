@@ -1652,7 +1652,17 @@
         .settings-page {
             background: #000;
             color: #fff;
-            min-height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            z-index: 100;
+            overflow: hidden;
         }
 
         .settings-header {
@@ -1660,11 +1670,10 @@
             border-bottom: 1px solid #333;
             display: flex;
             align-items: center;
-            position: sticky;
-            top: 0;
             background: rgba(0, 0, 0, 0.9);
             backdrop-filter: blur(10px);
             z-index: 10;
+            flex-shrink: 0;
         }
 
         .settings-header h2 {
@@ -1674,8 +1683,15 @@
 
         .settings-content {
             padding: 20px;
+            padding-bottom: 100px;
             max-width: 800px;
             margin: 0 auto;
+            flex: 1 1 0;
+            min-height: 0;
+            overflow-y: scroll;
+            -webkit-overflow-scrolling: touch;
+            width: 100%;
+            box-sizing: border-box;
         }
 
         .settings-section {
