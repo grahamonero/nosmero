@@ -15,29 +15,22 @@ function areTrustBadgesEnabled() {
 function shouldShowBadgesInContext() {
   // Check master switch - Web of Trust enabled
   const webOfTrustEnabled = localStorage.getItem('webOfTrustEnabled') !== 'false'; // Default: true
-  console.log('[DEBUG shouldShowBadgesInContext] webOfTrustEnabled:', webOfTrustEnabled);
   if (!webOfTrustEnabled) {
-    console.log('[DEBUG shouldShowBadgesInContext] Returning false - Web of Trust disabled');
     return false;
   }
 
   // Check if "show everywhere" is enabled
-  const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true'; // Default: false
-  console.log('[DEBUG shouldShowBadgesInContext] showEverywhere:', showEverywhere);
+  const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') !== 'false'; // Default: true
   if (showEverywhere) {
-    console.log('[DEBUG shouldShowBadgesInContext] Returning true - Show everywhere enabled');
     return true; // Show on all pages
   }
 
   // If not showing everywhere, only show on Suggested Follows & Trending pages
-  // Check if current page is one of these
   const currentPath = window.location.pathname;
   const isSpecialFeed = currentPath.includes('/suggestedfollows') ||
                         currentPath.includes('/feed/suggestedfollows') ||
                         currentPath.includes('/trending') ||
                         currentPath.includes('/feed/trending');
-  console.log('[DEBUG shouldShowBadgesInContext] currentPath:', currentPath, 'isSpecialFeed:', isSpecialFeed);
-  console.log('[DEBUG shouldShowBadgesInContext] Returning isSpecialFeed:', isSpecialFeed);
 
   return isSpecialFeed;
 }
@@ -80,18 +73,15 @@ export async function addTrustBadgeToElement(usernameElement, pubkey, async = tr
     if (async) {
       // Fetch score asynchronously
       trustData = await getTrustScore(pubkey);
-      console.log(`[TrustBadges] Async fetch for ${pubkey.substring(0, 8)}:`, trustData ? `score ${trustData.score}` : 'no data');
     } else {
       // Only use cached score (don't trigger API call)
       trustData = getCachedTrustScore(pubkey);
       if (!trustData) {
-        console.log(`[TrustBadges] No cached score for ${pubkey.substring(0, 8)}, queueing for fetch`);
         // Queue for later fetch
         queueTrustScoreRequest(pubkey);
         badgeSpan.remove(); // Remove loading indicator
         return;
       }
-      console.log(`[TrustBadges] Using cached score for ${pubkey.substring(0, 8)}: ${trustData.score}`);
     }
 
     // Update badge with actual score
@@ -161,12 +151,10 @@ export function addTrustBadgesToContainer(container) {
   // Find all username elements with pubkey data
   const usernameElements = container.querySelectorAll('.username[data-pubkey], .author-name[data-pubkey]');
 
-  console.log(`[TrustBadges] addTrustBadgesToContainer: Processing ${usernameElements.length} elements`);
 
   usernameElements.forEach(element => {
     const pubkey = element.getAttribute('data-pubkey');
     if (pubkey) {
-      console.log(`[TrustBadges] Processing element for pubkey: ${pubkey.substring(0, 8)}`);
       // Use non-async mode to avoid hammering API
       // Badges will be added when scores are cached
       addTrustBadgeToElement(element, pubkey, false);
@@ -201,7 +189,6 @@ export function refreshAllTrustBadges() {
  */
 export async function addProfileTrustBadge(pubkey, retries = 5) {
   if (!areTrustBadgesEnabled()) {
-    console.log('[TrustBadges] Trust badges disabled');
     return;
   }
 
@@ -215,7 +202,6 @@ export async function addProfileTrustBadge(pubkey, retries = 5) {
 
   // If not found and we have retries left, wait and try again
   if (!profileNameElement && retries > 0) {
-    console.log(`[TrustBadges] Profile name not found, retrying... (${retries} attempts left)`);
     await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
     return addProfileTrustBadge(pubkey, retries - 1);
   }
@@ -232,7 +218,6 @@ export async function addProfileTrustBadge(pubkey, retries = 5) {
     return;
   }
 
-  console.log('[TrustBadges] Adding badge to profile:', pubkey.substring(0, 8));
 
   // Add badge
   await addTrustBadgeToElement(profileNameElement, pubkey, true);
@@ -296,7 +281,6 @@ export async function addFeedTrustBadges(notes, containerSelector = null) {
     const { getTrustScores } = await import('./relatr.js');
 
     // Fetch all trust scores in batch
-    console.log(`[TrustBadges] Fetching scores for ${pubkeys.length} users...`);
     await getTrustScores(pubkeys);
 
     // Find the container - use provided selector or auto-detect
@@ -313,18 +297,11 @@ export async function addFeedTrustBadges(notes, containerSelector = null) {
     }
 
     if (feedContainer) {
-      console.log(`[TrustBadges] Found container:`, feedContainer.id || feedContainer.className);
-      console.log(`[TrustBadges] Container innerHTML length:`, feedContainer.innerHTML.length);
-      console.log(`[TrustBadges] Container has children:`, feedContainer.children.length);
       const usernames = feedContainer.querySelectorAll('.username[data-pubkey], .author-name[data-pubkey]');
-      console.log(`[TrustBadges] Found ${usernames.length} username elements in container`);
       const allUsernames = feedContainer.querySelectorAll('.username');
-      console.log(`[TrustBadges] Found ${allUsernames.length} total .username elements (with or without data-pubkey)`);
       if (allUsernames.length > 0) {
-        console.log(`[TrustBadges] First username element:`, allUsernames[0], 'has data-pubkey:', allUsernames[0].hasAttribute('data-pubkey'));
       }
       addTrustBadgesToContainer(feedContainer);
-      console.log(`[TrustBadges] Added badges to container:`, feedContainer.id || feedContainer.className);
     } else {
       console.warn('[TrustBadges] No feed container found');
     }
@@ -343,7 +320,6 @@ export function setTrustBadgesEnabled(enabled) {
   localStorage.setItem('showTrustBadges', enabled.toString());
   refreshAllTrustBadges();
 
-  console.log(`[TrustBadges] ${enabled ? 'Enabled' : 'Disabled'}`);
 }
 
 /**

@@ -2182,7 +2182,7 @@ export async function viewUserProfilePage(pubkey) {
                             <p style="margin: 0 0 8px 0; color: #888; font-family: monospace; font-size: 14px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
                             ${userProfile.nip05 ? `<div style="color: #10B981; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;">✅ ${userProfile.nip05}</div>` : ''}
                             ${userProfile.about ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 8px; word-wrap: break-word;">${userProfile.about}</div>` : ''}
-                            ${userProfile.website ? `<div style="margin-bottom: 8px; word-wrap: break-word;"><a href="${userProfile.website}" target="_blank" style="color: #FF6600; text-decoration: none; font-size: 14px; word-break: break-all;">🔗 ${userProfile.website}</a></div>` : ''}
+                            ${userProfile.website ? `<div style="margin-bottom: 8px; word-wrap: break-word;"><a href="${userProfile.website.startsWith('http://') || userProfile.website.startsWith('https://') ? userProfile.website : 'https://' + userProfile.website}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 14px; word-break: break-all;">🔗 ${userProfile.website}</a></div>` : ''}
                             ${userProfile.lud16 ? `<div style="color: #FFDF00; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;"><span style="margin-right: 6px;">⚡</span>Lightning: <span style="word-break: break-all;">${userProfile.lud16}</span></div>` : ''}
                             <div id="uiProfileMoneroAddress" style="margin-bottom: 8px;"></div>
                         </div>
