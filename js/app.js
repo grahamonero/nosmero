@@ -9,7 +9,7 @@ import * as Relays from './relays.js';
 import * as Nip05 from './nip05.js';
 import * as Posts from './posts.js';
 import * as Auth from './auth.js';
-import * as UI from './ui.js';
+import * as UI from './ui/index.js';
 import * as Messages from './messages.js';
 import * as Search from './search.js';
 import * as TrustBadges from './trust-badges.js';
@@ -3685,7 +3685,7 @@ async function loadSettings() {
 
     const settingsPage = document.getElementById('settingsPage');
     if (!settingsPage) return;
-    settingsPage.style.display = 'block';
+    settingsPage.style.display = 'flex';
 
     const lightningField = document.getElementById('defaultLightningAddress');
     const moneroField = document.getElementById('defaultMoneroAddress');

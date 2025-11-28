@@ -4,7 +4,7 @@
 import * as State from './state.js';
 import * as Utils from './utils.js';
 import * as Relays from './relays.js';
-import * as UI from './ui.js';
+import * as UI from './ui/index.js';
 
 // Constants for feed management
 export const POSTS_PER_PAGE = 10;

@@ -4,7 +4,7 @@
 
 import { showNotification, escapeHtml } from './utils.js';
 import { SEARCH_RELAYS } from './relays.js';
-import { showSkeletonLoader, hideSkeletonLoader } from './ui.js';
+import { showSkeletonLoader, hideSkeletonLoader } from './ui/index.js';
 import {
     pool,
     relays,
