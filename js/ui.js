@@ -390,12 +390,16 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
             </div>
             ${showWalletButton ? `
                 <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
-                    <button id="openWalletBtn"
+                    <button id="openNosmeroWalletBtn"
                             style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 14px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 15px;">
-                        💰 Open in Wallet
+                        ⛏️ Send with Nosmero Wallet
+                    </button>
+                    <button id="openWalletBtn"
+                            style="background: #333; border: 1px solid #555; color: #ccc; padding: 12px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                        💰 Open External Wallet
                     </button>
                     <button id="zapNowBtn"
-                            style="background: #444; border: none; color: #fff; padding: 12px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                            style="background: #222; border: 1px solid #444; color: #999; padding: 12px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;">
                         📱 Show QR Code
                     </button>
                 </div>
@@ -425,6 +429,7 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
             const zapNowBtn = document.getElementById('zapNowBtn');
             const addToQueueBtn = document.getElementById('addToQueueBtn');
             const openWalletBtn = document.getElementById('openWalletBtn');
+            const openNosmeroWalletBtn = document.getElementById('openNosmeroWalletBtn');
 
             if (zapNowBtn) {
                 zapNowBtn.onclick = () => zapWithCustomAmount(postId, authorName, moneroAddress);
@@ -434,7 +439,36 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                 addToQueueBtn.onclick = () => addToQueueAndClose(postId, authorName, moneroAddress);
             }
 
-            // Open in Wallet button (standard monero: URI)
+            // Send with Nosmero Wallet button
+            if (openNosmeroWalletBtn) {
+                openNosmeroWalletBtn.onclick = () => {
+                    const amountInput = document.getElementById('moneroZapAmount');
+                    const amt = parseFloat(amountInput?.value);
+                    if (!amt || amt <= 0 || isNaN(amt)) {
+                        showNotification('Please enter a valid amount', 'error');
+                        return;
+                    }
+
+                    // Close the zap modal
+                    closeZapModal();
+
+                    // Open wallet modal with tip metadata
+                    if (window.openWalletModal) {
+                        window.openWalletModal({
+                            tipMeta: {
+                                noteId: postId,
+                                address: moneroAddress,
+                                amount: amt.toString(),
+                                recipientPubkey: modal.dataset.recipientPubkey || null
+                            }
+                        });
+                    } else {
+                        showNotification('Wallet not available', 'error');
+                    }
+                };
+            }
+
+            // Open in External Wallet button (standard monero: URI)
             if (openWalletBtn) {
                 openWalletBtn.onclick = () => {
                     const amountInput = document.getElementById('moneroZapAmount');
@@ -615,11 +649,16 @@ export function addToQueueAndClose(postId, authorName, moneroAddress) {
     const amountInput = document.getElementById('moneroZapAmount');
     const customAmount = amountInput ? parseFloat(amountInput.value) : null;
 
-    // Mark that user initiated a tip
-    userInitiatedTip = true;
+    // Get recipient pubkey from modal dataset
+    const modal = document.getElementById('zapModal');
+    const recipientPubkey = modal?.dataset?.recipientPubkey || '';
 
-    if (addToZapQueue(postId, authorName, moneroAddress, customAmount)) {
+    // DON'T set userInitiatedTip - adding to queue shouldn't trigger disclosure
+    // Disclosure happens when the queue is processed and payment is sent
+
+    if (addToZapQueue(postId, authorName, moneroAddress, customAmount, recipientPubkey)) {
         closeZapModal();
+        showSuccessToast('Added to queue!');
     }
 }
 
@@ -1683,6 +1722,15 @@ export async function openThreadView(eventId, skipHistory = false) {
             console.error('Error processing embedded notes in thread:', error);
         }
 
+        // Process paywalled notes - check unlock status and reveal content if unlocked
+        try {
+            if (window.NostrPaywall?.processPaywalledNotes) {
+                await window.NostrPaywall.processPaywalledNotes(threadContent);
+            }
+        } catch (error) {
+            console.error('Error processing paywalled notes in thread:', error);
+        }
+
     } catch (error) {
         console.error('Error opening thread view:', error);
         const threadContent = document.getElementById('threadContent');
@@ -1811,6 +1859,15 @@ export async function openSingleNoteView(eventId) {
             await Utils.processEmbeddedNotes('threadPageContent');
         } catch (error) {
             console.error('Error processing embedded notes:', error);
+        }
+
+        // Process paywalled notes - check unlock status and reveal content if unlocked
+        try {
+            if (window.NostrPaywall?.processPaywalledNotes) {
+                await window.NostrPaywall.processPaywalledNotes(threadContent);
+            }
+        } catch (error) {
+            console.error('Error processing paywalled notes in single note view:', error);
         }
 
     } catch (error) {
@@ -2039,6 +2096,15 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
             console.error('Error processing embedded notes in profile posts:', error);
         }
 
+        // Process paywalled notes - check unlock status and reveal content if unlocked
+        try {
+            if (window.NostrPaywall?.processPaywalledNotes) {
+                await window.NostrPaywall.processPaywalledNotes(userPostsContainer);
+            }
+        } catch (error) {
+            console.error('Error processing paywalled notes in profile posts:', error);
+        }
+
     } catch (error) {
         console.error('Error rendering user posts:', error);
         userPostsContainer.innerHTML = `
@@ -2129,6 +2195,15 @@ async function loadMoreProfilePosts() {
 
         // Process embedded notes
         await Utils.processEmbeddedNotes('userPostsContainer');
+
+        // Process paywalled notes - check unlock status and reveal content if unlocked
+        try {
+            if (window.NostrPaywall?.processPaywalledNotes && userPostsContainer) {
+                await window.NostrPaywall.processPaywalledNotes(userPostsContainer);
+            }
+        } catch (error) {
+            console.error('Error processing paywalled notes in load more profile posts:', error);
+        }
 
     } catch (error) {
         console.error('Error loading more profile posts:', error);
@@ -3146,20 +3221,20 @@ export function copyToClipboard(text) {
 // ==================== XMR ZAP QUEUE ====================
 
 // Add a zap to the queue (max 20 items)
-function addToZapQueue(postId, authorName, moneroAddress, customAmount = null) {
+function addToZapQueue(postId, authorName, moneroAddress, customAmount = null, recipientPubkey = '') {
     // Import state
     const StateModule = window.NostrState || {};
     let queue = StateModule.zapQueue || [];
 
     // Check if already in queue
     if (queue.find(item => item.postId === postId)) {
-        alert('This note is already in your zap queue');
+        showWarningToast('This note is already in your queue');
         return false;
     }
 
     // Check queue limit
     if (queue.length >= 20) {
-        alert('Zap queue is full (max 20 notes). Please process the queue first.');
+        showWarningToast('Queue is full (max 20). Process queue first.');
         return false;
     }
 
@@ -3172,6 +3247,7 @@ function addToZapQueue(postId, authorName, moneroAddress, customAmount = null) {
         authorName,
         moneroAddress,
         amount,
+        recipientPubkey,
         timestamp: Date.now()
     });
 
@@ -3200,21 +3276,49 @@ export function showZapQueue() {
     const content = document.getElementById('zapQueueContent');
     if (!content) return;
 
+    // Calculate total amount
+    const totalAmount = queue.reduce((sum, item) => {
+        return sum + parseFloat(item.amount || '0.00018');
+    }, 0);
+
     if (queue.length === 0) {
         content.innerHTML = `
             <div style="text-align: center; padding: 40px; color: #666;">
                 <p style="font-size: 24px; margin-bottom: 12px;">💰</p>
-                <p>Your zap queue is empty</p>
-                <p style="font-size: 14px; margin-top: 8px;">Click "Add to Queue" when zapping notes to batch them into one transaction</p>
+                <p>Your tip queue is empty</p>
+                <p style="font-size: 14px; margin-top: 8px;">Tap "Add to Queue" when tipping notes to batch them</p>
             </div>
         `;
     } else {
         content.innerHTML = `
             <div style="margin-bottom: 16px; padding: 12px; background: #1a1a1a; border-radius: 8px;">
                 <strong>${queue.length} note${queue.length === 1 ? '' : 's'} in queue</strong>
-                <p style="font-size: 14px; color: #666; margin-top: 4px;">Process queue to display QR codes sequentially for one transaction</p>
+                <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">Total: ${totalAmount.toFixed(5)} XMR</div>
             </div>
-            <div style="max-height: 400px; overflow-y: auto;">
+
+            <!-- Nosmero Wallet Option -->
+            <div style="margin-bottom: 16px; padding: 16px; background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px;">
+                <div style="text-align: center; margin-bottom: 12px;">
+                    <span style="color: #FF6600; font-weight: 600;">⛏️ Send with Nosmero Wallet</span>
+                    <div style="font-size: 12px; color: #888; margin-top: 4px;">Verified tips with proof!</div>
+                </div>
+                <button id="queueWalletSendBtn"
+                        onclick="processQueueWithWallet()"
+                        style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                    Send All (${queue.length} tips)
+                </button>
+            </div>
+
+            <div style="text-align: center; color: #666; font-size: 12px; margin-bottom: 12px;">─── OR ───</div>
+
+            <div style="margin-bottom: 16px;">
+                <button onclick="showBatchQrCodes()" style="width: 100%; background: #333; border: 1px solid #888; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                    Show QR Codes Sequentially
+                </button>
+                <div style="font-size: 11px; color: #666; text-align: center; margin-top: 4px;">For external wallet users</div>
+            </div>
+
+            <div style="max-height: 250px; overflow-y: auto;">
                 ${queue.map((item, index) => `
                     <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1;">
@@ -3275,6 +3379,7 @@ function updateZapQueueIndicator() {
     const StateModule = window.NostrState || {};
     const queue = StateModule.zapQueue || JSON.parse(localStorage.getItem('zapQueue') || '[]');
 
+    // Update old indicator (if exists)
     const indicator = document.querySelector('.zap-queue-indicator');
     if (indicator) {
         if (queue.length > 0) {
@@ -3283,6 +3388,40 @@ function updateZapQueueIndicator() {
         } else {
             indicator.style.display = 'none';
         }
+    }
+
+    // Update hamburger menu badge
+    const menuBadge = document.getElementById('menuQueueBadge');
+    if (menuBadge) {
+        if (queue.length > 0) {
+            menuBadge.textContent = queue.length;
+            menuBadge.style.display = 'flex';
+        } else {
+            menuBadge.style.display = 'none';
+        }
+    }
+}
+
+// Process queue with Nosmero wallet modal
+export function processQueueWithWallet() {
+    const StateModule = window.NostrState || {};
+    const queue = StateModule.zapQueue || JSON.parse(localStorage.getItem('zapQueue') || '[]');
+
+    if (queue.length === 0) {
+        showWarningToast('Queue is empty');
+        return;
+    }
+
+    // Close queue modal
+    closeZapQueueModal();
+
+    // Open wallet modal with queue data
+    if (window.openWalletModal) {
+        window.openWalletModal({
+            queueItems: queue
+        });
+    } else {
+        showErrorToast('Wallet not available');
     }
 }
 
@@ -3728,6 +3867,7 @@ window.closeLightningZapModal = closeLightningZapModal;
 window.showZapQueue = showZapQueue;
 window.removeFromZapQueue = removeFromZapQueue;
 window.showBatchQrCodes = showBatchQrCodes;
+window.processQueueWithWallet = processQueueWithWallet;
 window.closeZapQueueModal = closeZapQueueModal;
 window.closeBatchQrModal = closeBatchQrModal;
 window.closeUserProfileModal = closeUserProfileModal;

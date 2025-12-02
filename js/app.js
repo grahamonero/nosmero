@@ -14,6 +14,13 @@ import * as UI from './ui.js?v=2.9.38';
 import * as Messages from './messages.js';
 import * as Search from './search.js';
 import * as TrustBadges from './trust-badges.js?v=2.9.41';
+import * as Paywall from './paywall.js';
+import * as PaywallUI from './paywall-ui.js';
+
+// WalletModal is loaded separately via index.html script tag
+
+// Make paywall functions globally available
+window.NostrPaywall = { ...Paywall, ...PaywallUI };
 
 // Make modules available globally
 window.NostrState = State;
@@ -88,6 +95,11 @@ async function initializeApp() {
 
         // Start the application
         await startApplication();
+
+        // Check for any pending paywall payments (external wallet flow)
+        if (State.publicKey && window.NostrPaywall?.checkAllPendingPayments) {
+            window.NostrPaywall.checkAllPendingPayments();
+        }
 
         Utils.showNotification('Nosmero loaded successfully!', 'success');
         console.log('🎉 Nosmero v0.95 ready!');
@@ -294,6 +306,8 @@ async function checkExistingSession() {
                 const { getPublicKey } = window.NostrTools;
                 const derivedPublicKey = getPublicKey(storedPrivateKey);
                 State.setPublicKey(derivedPublicKey);
+                // Save pubkey to localStorage for wallet and other modules
+                localStorage.setItem('nostr-public-key', derivedPublicKey);
             } catch (error) {
                 console.error('Failed to derive public key:', error);
                 // Clear invalid session
@@ -357,6 +371,22 @@ async function startApplication() {
         } catch (error) {
             console.error('❌ Error loading zap settings from relay:', error);
             // Continue with localStorage defaults
+        }
+
+        // Load Monero address from NIP-78 relay (for cross-device sync)
+        try {
+            const moneroAddress = await loadMoneroAddressFromRelays();
+            if (moneroAddress) {
+                console.log('✅ Loaded Monero address from relay:', moneroAddress.substring(0, 10) + '...');
+                localStorage.setItem('user-monero-address', moneroAddress);
+                State.setUserMoneroAddress(moneroAddress);
+                // Update profile cache
+                if (State.profileCache[State.publicKey]) {
+                    State.profileCache[State.publicKey].monero_address = moneroAddress;
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error loading Monero address from relay:', error);
         }
 
         // Load mute list from relays (NIP-51 kind 10000)
@@ -1761,6 +1791,13 @@ function updateUIForLogin() {
     if (typeof window.updateHeaderUIForAuthState === 'function') {
         window.updateHeaderUIForAuthState();
     }
+
+    // Initialize wallet session for background sync (enables delta sync for faster tips)
+    import('./wallet/session.js').then(WalletSession => {
+        WalletSession.initWalletSession();
+    }).catch(err => {
+        console.log('[App] Wallet session init skipped:', err.message);
+    });
 }
 
 // Update UI for logged out state
@@ -1783,6 +1820,11 @@ function updateUIForLogout() {
     if (typeof window.updateHeaderUIForAuthState === 'function') {
         window.updateHeaderUIForAuthState();
     }
+
+    // Reset wallet session
+    import('./wallet/session.js').then(WalletSession => {
+        WalletSession.resetSession();
+    }).catch(() => {});
 }
 
 // Make auth UI functions available globally

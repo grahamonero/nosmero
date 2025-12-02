@@ -1837,7 +1837,7 @@ export async function setSortMode(mode) {
 }
 
 // Render all results based on current sort mode
-function renderSearchResults() {
+async function renderSearchResults() {
     const resultsEl = document.getElementById('searchResultsList');
     if (!resultsEl) return;
 
@@ -1875,6 +1875,15 @@ function renderSearchResults() {
     sortedResults.forEach(post => {
         updateLikeButtonState(post.id);
     });
+
+    // Process paywalled notes - check unlock status and reveal content if unlocked
+    try {
+        if (window.NostrPaywall?.processPaywalledNotes) {
+            await window.NostrPaywall.processPaywalledNotes(resultsEl);
+        }
+    } catch (error) {
+        console.error('Error processing paywalled notes in search results:', error);
+    }
 }
 
 // Render a single search result
@@ -1882,6 +1891,10 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
     const author = getAuthorInfo(post);
     const moneroAddress = getMoneroAddress(post);
     const lightningAddress = getLightningAddress(post);
+
+    // Check if this is a paywalled post
+    const isPaywalled = window.NostrPaywall?.isPaywalled?.(post);
+    const paywallMeta = isPaywalled ? window.NostrPaywall.getPaywallMetadata(post) : null;
 
     // JavaScript string escaping for onclick attributes
     const jsEscapePubkey = post.pubkey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -1898,7 +1911,7 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
     }
 
     return `
-        <div class="post" style="background: #1a1a1a; border-bottom: 1px solid #333; padding: 16px; margin-bottom: 1px;">
+        <div class="post" style="background: #1a1a1a; border-bottom: 1px solid #333; padding: 16px; margin-bottom: 1px;" data-note-id="${escapeHtml(post.id)}">
             <div class="post-header" style="display: flex; align-items: center; margin-bottom: 12px;">
                 ${author.picture ?
                     `<img class="avatar" src="${escapeHtml(author.picture)}" alt="${escapeHtml(author.name)}" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` :
@@ -1910,7 +1923,22 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
                     <span class="timestamp" style="color: #666;">${formatTime(post.created_at)}</span>
                 </div>
             </div>
+            ${isPaywalled ? `
+            <div class="paywall-locked" data-note-id="${escapeHtml(post.id)}" onclick="openThreadView('${jsEscapeId}')" style="cursor: pointer;">
+                <div class="paywall-preview">
+                    <p>${escapeHtml(paywallMeta?.preview || 'Premium content')}</p>
+                </div>
+                <div class="paywall-overlay">
+                    <div class="paywall-lock-icon">🔒</div>
+                    <div class="paywall-price">${paywallMeta?.priceXmr || '?'} XMR</div>
+                    <button class="paywall-unlock-btn" onclick="NostrPaywall.showUnlockModal('${jsEscapeId}'); event.stopPropagation();">
+                        Unlock Content
+                    </button>
+                </div>
+            </div>
+            ` : `
             <div class="post-content" onclick="openThreadView('${jsEscapeId}')" style="cursor: pointer; color: #fff; line-height: 1.4; margin-bottom: 12px;">${highlightedContent}</div>
+            `}
             <div class="post-actions" onclick="event.stopPropagation();" style="display: flex; gap: 16px; align-items: center;">
                 <button class="action-btn" onclick="NostrPosts.replyToPost('${jsEscapeId}')" style="background: none; border: none; color: #999; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px;">
                     💬${engagement.replies > 0 ? ` <span style="font-size: 12px; color: #999;">${engagement.replies}</span>` : ''}
