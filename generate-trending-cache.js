@@ -27,7 +27,7 @@ async function generateCache() {
     try {
         // Launch headless browser (using system Chromium)
         browser = await puppeteer.launch({
-            executablePath: '/snap/bin/chromium',
+            executablePath: '/usr/bin/chromium-browser',
             headless: 'new',
             args: [
                 '--no-sandbox',

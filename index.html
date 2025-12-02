@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>nosmero - Nostr + Monero</title>
-    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
+    <script src="/lib/qrcode.min.js"></script>
     <link rel="stylesheet" href="/styles.css?v=1.8.5-settings-scroll">
 
 </head>
@@ -42,6 +42,15 @@
             <div class="menu-item" data-tab="settings" onclick="handleMenuItemClick('settings')">
                 <span class="menu-icon">⚙️</span>
                 <span>Settings</span>
+            </div>
+            <div class="menu-item" onclick="openWalletModal(); closeHamburgerMenu();" style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px; margin: 8px 0; cursor: pointer;">
+                <span class="menu-icon">⛏️</span>
+                <span style="background: linear-gradient(135deg, #FF6600, #8B5CF6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 600;">XMR Tip Jar</span>
+            </div>
+            <div class="menu-item" onclick="showZapQueue(); closeHamburgerMenu();" id="menuQueueBtn">
+                <span class="menu-icon">📋</span>
+                <span>Tip Queue</span>
+                <span id="menuQueueCount" style="background: #FF6600; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-left: auto; display: none;">0</span>
             </div>
             <div class="menu-item" onclick="toggleTheme()">
                 <span class="menu-icon" id="themeIconMenu">🌙</span>
@@ -229,6 +238,30 @@
             </div>
             <div class="compose-actions">
                 <input type="text" class="xmr-address-input" placeholder="Your Monero address (optional)" id="composeMoneroAddress">
+                <!-- Paywall Toggle -->
+                <div class="paywall-toggle-container">
+                    <div class="paywall-toggle-row">
+                        <div class="paywall-toggle">
+                            <input type="checkbox" id="paywallEnabled" onchange="NostrPaywall.togglePaywall(this.checked)">
+                            <label for="paywallEnabled">🔒 Paywall this post</label>
+                        </div>
+                        <div id="paywallPriceInput" class="paywall-price-input">
+                            <input type="number" id="paywallPrice" placeholder="0.00015" step="0.00001" min="0.00001" value="0.00015">
+                            <span>XMR</span>
+                        </div>
+                    </div>
+                    <div id="paywallPreviewSection" class="paywall-preview-section">
+                        <div class="paywall-preview-header" onclick="NostrPaywall.togglePreviewEdit()">
+                            <span>Preview text (shown to non-payers)</span>
+                            <span id="paywallPreviewToggle" class="paywall-preview-toggle">▼ Edit</span>
+                        </div>
+                        <div id="paywallPreviewSuggested" class="paywall-preview-suggested"></div>
+                        <div id="paywallPreviewEdit" class="paywall-preview-edit">
+                            <textarea id="paywallPreviewText" placeholder="Auto-generated from first paragraph..." rows="3"></textarea>
+                            <div class="paywall-preview-hint">Leave empty to auto-generate from your post's first paragraph</div>
+                        </div>
+                    </div>
+                </div>
                 <div class="media-upload-section">
                     <input type="file" id="composeMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'compose')">
                     <div id="composeMediaPreview" class="media-preview" style="display: none;"></div>
@@ -393,6 +426,20 @@
                     <div id="mutedUsersList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
                         <!-- Muted users will be populated by JavaScript -->
                     </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>🔑 Private Key</h3>
+                    <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Export your private key (nsec) to back it up or use in another client.</p>
+                    <div style="padding: 12px; background: #1a1a1a; border-radius: 8px; margin-bottom: 12px;">
+                        <p id="keyStorageStatus" style="color: #fff; margin: 0; font-size: 14px;">
+                            <!-- Will be populated by JavaScript -->
+                        </p>
+                    </div>
+                    <button onclick="exportPrivateKey()" style="padding: 10px 20px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                        Export Private Key
+                    </button>
+                    <p style="color: #ff6600; font-size: 11px; margin-top: 8px;">Warning: Never share your private key with anyone!</p>
                 </div>
 
                 <div class="settings-section">
@@ -948,6 +995,29 @@
         <!-- Content will be generated by JavaScript -->
     </div>
 
+    <!-- XMR Wallet Modal (Full-screen overlay) -->
+    <div class="modal" id="walletModal" style="display: none; z-index: 2000;">
+        <div class="modal-content" style="max-width: 600px; width: 100%; max-height: 90vh; margin: 20px auto; border-radius: 16px; display: flex; flex-direction: column; overflow: hidden;">
+            <!-- Wallet Modal Header -->
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-color); background: #0a0a0a; flex-shrink: 0;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <button onclick="closeWalletModal()" style="background: none; border: none; color: var(--text-secondary); font-size: 20px; cursor: pointer; padding: 4px;">✕</button>
+                    <h2 id="walletModalTitle" style="margin: 0; font-size: 18px; background: linear-gradient(135deg, #FF6600, #8B5CF6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">⛏️ XMR Tip Jar</h2>
+                </div>
+                <button id="walletLockBtn" onclick="lockWallet()" style="background: none; border: 1px solid var(--border-color); color: var(--text-secondary); padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; display: none;">🔒 Lock</button>
+            </div>
+
+            <!-- Wallet Modal Content (scrollable) -->
+            <div id="walletModalContent" style="flex: 1; overflow-y: auto; padding: 20px;">
+                <!-- Content will be dynamically rendered by wallet-modal.js -->
+                <div style="text-align: center; padding: 40px;">
+                    <div style="width: 40px; height: 40px; margin: 0 auto 20px; border: 3px solid #333; border-top-color: #FF6600; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                    <p style="color: #999;">Loading wallet...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification Container -->
     <div id="toastContainer"></div>
 
@@ -957,7 +1027,13 @@
     <!-- Load nostr-tools from local copy -->
     <script src="/lib/nostr-tools.bundle.js"></script>
 
+    <!-- Monero wallet library (client-side WebAssembly) -->
+    <script src="/lib/monero-wallet.iife.js"></script>
+
     <!-- Load the modular v2 application (UI modules consolidated into /js/ui/) -->
-    <script type="module" src="/js/app.js?v=3.0.1-settings-scroll"></script>
+    <script type="module" src="/js/app.js?v=3.0.8-wallet-modal"></script>
+
+    <!-- XMR Wallet Modal (replaces wallet.html) -->
+    <script type="module" src="/js/wallet-modal.js?v=1.0.1"></script>
 </body>
 </html>

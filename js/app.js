@@ -13,6 +13,8 @@ import * as UI from './ui/index.js';
 import * as Messages from './messages.js';
 import * as Search from './search.js';
 import * as TrustBadges from './trust-badges.js';
+import * as Paywall from './paywall.js';
+import * as PaywallUI from './paywall-ui.js';
 
 // Make modules available globally
 window.NostrState = State;
@@ -25,6 +27,7 @@ window.NostrAuth = Auth;
 window.NostrUI = UI;
 window.NostrMessages = Messages;
 window.NostrSearch = Search;
+window.NostrPaywall = { ...Paywall, ...PaywallUI };
 
 // Debug: Check TrustBadges module before assignment
 console.log('[DEBUG] TrustBadges module:', TrustBadges);
@@ -95,6 +98,11 @@ async function initializeApp() {
 
         // Start the application
         await startApplication();
+
+        // Check for any pending paywall payments (external wallet flow)
+        if (State.publicKey && window.NostrPaywall?.checkAllPendingPayments) {
+            window.NostrPaywall.checkAllPendingPayments();
+        }
 
         Utils.showNotification('Nosmero loaded successfully!', 'success');
         console.log('🎉 Nosmero v0.95 ready!');
@@ -168,20 +176,61 @@ let displayedOwnPostCount = 0;
 const OWN_PROFILE_POSTS_PER_PAGE = 30;
 
 // Handle path-based routing for Monero QR code links (nosmero.com/n/{noteId})
+// Supports: /n/{64-char-hex}, /n/note1..., /n/nevent1...
 function checkDirectNoteLink() {
     const pathname = window.location.pathname;
     console.log('🔍 Checking for direct note link, pathname:', pathname);
 
-    // Match pattern: /n/{64-char-hex-noteId}
-    const notePathMatch = pathname.match(/^\/n\/([a-f0-9]{64})$/i);
-    console.log('🔍 Regex match result:', notePathMatch);
+    // Match pattern: /n/{something}
+    const notePathMatch = pathname.match(/^\/n\/(.+)$/i);
 
-    if (notePathMatch) {
-        directNoteId = notePathMatch[1];
-        console.log('📍 Direct note link detected, will skip feed and go straight to note:', directNoteId);
+    if (!notePathMatch) {
+        console.log('❌ No direct note link detected');
+        return false;
+    }
+
+    const noteParam = notePathMatch[1];
+    console.log('🔍 Note param:', noteParam);
+
+    // Case 1: Already a 64-char hex ID
+    if (/^[a-f0-9]{64}$/i.test(noteParam)) {
+        directNoteId = noteParam;
+        console.log('📍 Direct hex note link:', directNoteId);
         return true;
     }
-    console.log('❌ No direct note link detected');
+
+    // Case 2: note1... (bech32 note ID)
+    if (noteParam.startsWith('note1')) {
+        try {
+            const { nip19 } = window.NostrTools;
+            const decoded = nip19.decode(noteParam);
+            if (decoded.type === 'note') {
+                directNoteId = decoded.data;
+                console.log('📍 Decoded note1 to hex:', directNoteId);
+                return true;
+            }
+        } catch (e) {
+            console.error('❌ Failed to decode note1:', e);
+        }
+    }
+
+    // Case 3: nevent1... (bech32 event with optional relay hints)
+    if (noteParam.startsWith('nevent1')) {
+        try {
+            const { nip19 } = window.NostrTools;
+            const decoded = nip19.decode(noteParam);
+            if (decoded.type === 'nevent') {
+                directNoteId = decoded.data.id;
+                // Could also use decoded.data.relays for relay hints in future
+                console.log('📍 Decoded nevent1 to hex:', directNoteId);
+                return true;
+            }
+        } catch (e) {
+            console.error('❌ Failed to decode nevent1:', e);
+        }
+    }
+
+    console.log('❌ Unrecognized note format:', noteParam);
     return false;
 }
 
@@ -219,28 +268,35 @@ async function checkExistingSession() {
             localStorage.removeItem('encryption-enabled');
             // Fall through to check for unencrypted key
         } else {
-            console.log('🔐 Found encrypted session, prompting for PIN...');
-
             try {
                 const Auth = await import('./auth.js');
 
-                // Prompt for PIN to decrypt
-                const pin = await Auth.showPinModal('unlock');
+                // First check for session key (already decrypted in this browser session)
+                const sessionKey = Auth.getSessionKey();
+                if (sessionKey) {
+                    console.log('🔓 Found session key, restoring without PIN prompt');
+                    storedPrivateKey = sessionKey;
+                } else {
+                    console.log('🔐 Found encrypted session, prompting for PIN...');
 
-            if (!pin) {
-                console.log('PIN entry cancelled, session not restored');
-                return;
-            }
+                    // Prompt for PIN to decrypt
+                    const pin = await Auth.showPinModal('unlock');
 
-            // Try to decrypt the key
-            storedPrivateKey = await Auth.getSecurePrivateKey(pin);
+                    if (!pin) {
+                        console.log('PIN entry cancelled, session not restored');
+                        return;
+                    }
 
-            if (!storedPrivateKey) {
-                alert('Incorrect PIN. Please try again or logout and re-login.');
-                return;
-            }
+                    // Try to decrypt the key
+                    storedPrivateKey = await Auth.getSecurePrivateKey(pin);
 
-            console.log('✅ Successfully decrypted private key');
+                    if (!storedPrivateKey) {
+                        alert('Incorrect PIN. Please try again or logout and re-login.');
+                        return;
+                    }
+
+                    console.log('✅ Successfully decrypted private key');
+                }
             } catch (error) {
                 console.error('Error decrypting key:', error);
                 alert('Failed to decrypt your private key. You may need to re-login.');
@@ -364,6 +420,22 @@ async function startApplication() {
         } catch (error) {
             console.error('❌ Error loading zap settings from relay:', error);
             // Continue with localStorage defaults
+        }
+
+        // Load Monero address from NIP-78 relay (for cross-device sync)
+        try {
+            const moneroAddress = await loadMoneroAddressFromRelays();
+            if (moneroAddress) {
+                console.log('✅ Loaded Monero address from relay:', moneroAddress.substring(0, 10) + '...');
+                localStorage.setItem('user-monero-address', moneroAddress);
+                State.setUserMoneroAddress(moneroAddress);
+                // Update profile cache
+                if (State.profileCache[State.publicKey]) {
+                    State.profileCache[State.publicKey].monero_address = moneroAddress;
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error loading Monero address from relay:', error);
         }
 
         // Load mute list from relays (NIP-51 kind 10000)
@@ -1259,13 +1331,17 @@ function displayUserPosts(posts) {
 
             profileContent.innerHTML = renderedPosts.join('') + loadMoreButton;
 
-            // Process any embedded notes after rendering
+            // Process any embedded notes and paywalled notes after rendering
             (async () => {
                 try {
                     const Utils = await import('./utils.js');
                     await Utils.processEmbeddedNotes('profileContent');
+
+                    // Process paywalled notes for author access
+                    const PaywallUI = await import('./paywall-ui.js');
+                    await PaywallUI.processPaywalledNotes(profileContent);
                 } catch (error) {
-                    console.error('Error processing embedded notes in profile:', error);
+                    console.error('Error processing embedded/paywalled notes in profile:', error);
                 }
             })();
         } catch (error) {
@@ -1358,6 +1434,10 @@ async function loadMoreOwnPosts() {
 
         // Process embedded notes
         await Utils.processEmbeddedNotes('profileContent');
+
+        // Process paywalled notes for author access
+        const PaywallUI = await import('./paywall-ui.js');
+        await PaywallUI.processPaywalledNotes(profileContent);
 
     } catch (error) {
         console.error('Error loading more own posts:', error);
@@ -3798,6 +3878,20 @@ async function populateSettingsForm() {
         // Populate muted users list
         await populateMutedUsersList();
 
+        // Populate key storage status
+        const keyStorageStatus = document.getElementById('keyStorageStatus');
+        if (keyStorageStatus) {
+            if (State.privateKey === 'extension') {
+                keyStorageStatus.textContent = '🔌 Using browser extension (keys managed by extension)';
+            } else if (State.privateKey === 'nsec-app') {
+                keyStorageStatus.textContent = '🌐 Using nsec.app (keys managed by nsec.app)';
+            } else if (State.privateKey === 'amber') {
+                keyStorageStatus.textContent = '📱 Using Amber signer (keys on your Android device)';
+            } else {
+                keyStorageStatus.textContent = '💾 Stored locally (PIN-encrypted)';
+            }
+        }
+
         console.log('✅ Settings form populated successfully');
 
     } catch (error) {
@@ -4416,6 +4510,29 @@ if (document.readyState === 'loading') {
 } else {
     initializeApp();
 }
+
+// Initialize paywall preview auto-update on compose textarea input
+document.addEventListener('DOMContentLoaded', function() {
+    const composeTextarea = document.querySelector('.compose-textarea');
+    if (composeTextarea) {
+        composeTextarea.addEventListener('input', () => {
+            const checkbox = document.getElementById('paywallEnabled');
+            if (checkbox?.checked && window.NostrPaywall?.updateAutoPreview) {
+                window.NostrPaywall.updateAutoPreview();
+            }
+        });
+    }
+
+    // Also listen for custom preview textarea changes
+    const previewTextarea = document.getElementById('paywallPreviewText');
+    if (previewTextarea) {
+        previewTextarea.addEventListener('input', () => {
+            if (window.NostrPaywall?.updateAutoPreview) {
+                window.NostrPaywall.updateAutoPreview();
+            }
+        });
+    }
+});
 
 // Add modal click-outside-to-close behavior
 document.addEventListener('DOMContentLoaded', function() {

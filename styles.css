@@ -151,6 +151,37 @@
             white-space: nowrap;
         }
 
+        .wallet-status {
+            font-size: 0.85rem;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .wallet-status:hover {
+            background: rgba(255, 102, 0, 0.1);
+        }
+
+        .wallet-status.locked {
+            color: #888;
+        }
+
+        .wallet-status.syncing {
+            color: #f59e0b;
+        }
+
+        .wallet-status.ready {
+            color: #10b981;
+        }
+
+        .wallet-status.no-wallet {
+            color: var(--text-secondary);
+        }
+
         /* Hamburger Menu Button */
         .mobile-menu-btn {
             background: none;
@@ -2573,4 +2604,738 @@
         font-size: 1.1em;
         margin-left: 6px;
     }
+}
+
+/* ==================== PAYWALL STYLES ==================== */
+
+/* Locked content container */
+.paywall-locked {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 12px 0;
+    background: var(--card-bg);
+}
+
+.paywall-preview {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.paywall-preview p {
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.paywall-overlay {
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.paywall-lock-icon {
+    font-size: 32px;
+    opacity: 0.8;
+}
+
+.paywall-price {
+    font-size: 18px;
+    font-weight: 700;
+    font-family: monospace;
+    color: #FF6600;
+}
+
+.paywall-unlock-btn {
+    background: linear-gradient(135deg, #FF6600, #cc5200);
+    border: none;
+    color: #000;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.paywall-unlock-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
+}
+
+.paywall-unlock-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Unlocked content */
+.paywall-unlocked {
+    position: relative;
+    padding: 16px;
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    border-radius: 12px;
+    background: rgba(74, 222, 128, 0.05);
+    margin: 12px 0;
+}
+
+.paywall-unlocked-badge {
+    position: absolute;
+    top: -10px;
+    right: 16px;
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    color: #000;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+
+.paywall-content {
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+/* Paywall toggle in compose */
+.paywall-toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: var(--card-bg);
+    border-radius: 8px;
+    margin-top: 12px;
+}
+
+.paywall-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.paywall-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #FF6600;
+}
+
+.paywall-toggle label {
+    color: var(--text-secondary);
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.paywall-price-input {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.paywall-price-input.visible {
+    display: flex;
+}
+
+.paywall-price-input input {
+    width: 100px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: monospace;
+    font-size: 14px;
+}
+
+.paywall-price-input span {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+/* Unlock modal */
+.paywall-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+}
+
+.paywall-modal-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.paywall-modal {
+    background: var(--card-bg);
+    border-radius: 16px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    border: 1px solid var(--border-color);
+    transform: scale(0.95);
+    transition: transform 0.2s;
+}
+
+.paywall-modal-overlay.visible .paywall-modal {
+    transform: scale(1);
+}
+
+.paywall-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.paywall-modal-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.paywall-modal-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.paywall-modal-body {
+    margin-bottom: 20px;
+}
+
+.paywall-modal-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.paywall-modal-row:last-child {
+    border-bottom: none;
+}
+
+.paywall-modal-label {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.paywall-modal-value {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-family: monospace;
+}
+
+.paywall-modal-value.highlight {
+    color: #FF6600;
+    font-weight: 600;
+}
+
+.paywall-modal-total {
+    background: rgba(255, 102, 0, 0.1);
+    padding: 16px;
+    border-radius: 8px;
+    margin-top: 12px;
+}
+
+.paywall-modal-total .paywall-modal-value {
+    font-size: 18px;
+    color: #FF6600;
+}
+
+.paywall-modal-footer {
+    display: flex;
+    gap: 12px;
+}
+
+.paywall-modal-btn {
+    flex: 1;
+    padding: 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.paywall-modal-btn:hover:not(:disabled) {
+    transform: scale(1.02);
+}
+
+.paywall-modal-btn.cancel {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.paywall-modal-btn.confirm {
+    background: linear-gradient(135deg, #FF6600, #cc5200);
+    border: none;
+    color: #000;
+}
+
+.paywall-modal-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Unlock progress */
+.paywall-progress {
+    text-align: center;
+    padding: 20px;
+}
+
+.paywall-progress-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--border-color);
+    border-top-color: #FF6600;
+    border-radius: 50%;
+    animation: paywall-spin 1s linear infinite;
+    margin: 0 auto 16px;
+}
+
+@keyframes paywall-spin {
+    to { transform: rotate(360deg); }
+}
+
+.paywall-progress-message {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+/* Success state */
+.paywall-success {
+    text-align: center;
+    padding: 20px;
+}
+
+.paywall-success-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.paywall-success-message {
+    color: #4ade80;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+/* Error state */
+.paywall-error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 16px;
+}
+
+.paywall-error-message {
+    color: #ef4444;
+    font-size: 13px;
+}
+
+/* Wallet required notice */
+.paywall-wallet-notice {
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+}
+
+.paywall-wallet-notice p {
+    color: #ffc107;
+    font-size: 14px;
+    margin: 0 0 12px 0;
+}
+
+.paywall-wallet-notice a {
+    color: #FF6600;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+/* Creator stats */
+.paywall-creator-stats {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.paywall-stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+}
+
+.paywall-stat-label {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.paywall-stat-value {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: monospace;
+}
+
+/* Paywall Compose Toggle - Row Layout */
+.paywall-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* Paywall Preview Section */
+.paywall-preview-section {
+    display: none;
+    margin-top: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.paywall-preview-section.visible {
+    display: block;
+}
+
+.paywall-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    cursor: pointer;
+    user-select: none;
+}
+
+.paywall-preview-header:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.paywall-preview-header span:first-child {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.paywall-preview-toggle {
+    font-size: 12px;
+    color: var(--monero-orange);
+    transition: transform 0.2s;
+}
+
+.paywall-preview-toggle.expanded {
+    transform: rotate(180deg);
+}
+
+.paywall-preview-suggested {
+    display: none;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: rgba(255, 102, 0, 0.05);
+    border-top: 1px solid var(--border-color);
+    font-style: italic;
+    line-height: 1.4;
+    max-height: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.paywall-preview-edit {
+    display: none;
+    padding: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.paywall-preview-edit.visible {
+    display: block;
+}
+
+.paywall-preview-edit textarea {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 60px;
+}
+
+.paywall-preview-edit textarea:focus {
+    outline: none;
+    border-color: var(--monero-orange);
+}
+
+.paywall-preview-edit textarea::placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.paywall-preview-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    padding-left: 2px;
+}
+
+/* ==================== PAYWALL PAYMENT METHOD SELECTION ==================== */
+
+.paywall-price-display {
+    text-align: center;
+    padding: 16px;
+    background: rgba(255, 102, 0, 0.1);
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.paywall-price-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+}
+
+.paywall-price-amount {
+    font-size: 28px;
+    font-weight: 700;
+    color: #FF6600;
+    font-family: monospace;
+}
+
+.paywall-method-options {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.paywall-method-btn {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    color: inherit;
+}
+
+.paywall-method-btn:hover {
+    border-color: var(--monero-orange);
+    background: rgba(255, 102, 0, 0.05);
+}
+
+.paywall-method-btn.recommended {
+    border-color: rgba(255, 102, 0, 0.5);
+    background: rgba(255, 102, 0, 0.08);
+}
+
+.paywall-method-btn.setup {
+    border-style: dashed;
+    opacity: 0.8;
+}
+
+.paywall-method-btn .method-icon {
+    font-size: 24px;
+    width: 40px;
+    text-align: center;
+}
+
+.paywall-method-btn .method-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+}
+
+.paywall-method-btn .method-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.paywall-method-btn .method-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.paywall-method-btn .method-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    color: #000;
+}
+
+.paywall-method-btn .method-badge.delay {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+}
+
+/* External wallet payment UI */
+.paywall-external-warning {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    background: rgba(251, 191, 36, 0.15);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #fbbf24;
+}
+
+.paywall-external-warning .warning-icon {
+    font-size: 18px;
+}
+
+.paywall-payment-details {
+    margin-bottom: 20px;
+}
+
+.paywall-qr-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 16px;
+}
+
+.paywall-qr {
+    padding: 12px;
+    background: #fff;
+    border-radius: 8px;
+}
+
+.paywall-address-box,
+.paywall-amount-box {
+    margin-bottom: 12px;
+}
+
+.paywall-address-box label,
+.paywall-amount-box label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.address-copy,
+.amount-copy {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.address-copy:hover,
+.amount-copy:hover {
+    border-color: var(--monero-orange);
+}
+
+.address-copy code,
+.amount-copy code {
+    font-family: monospace;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.copy-icon {
+    font-size: 14px;
+    opacity: 0.7;
+}
+
+.paywall-tx-entry {
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Pending confirmation UI */
+.paywall-pending-status {
+    text-align: center;
+    padding: 20px 0;
+}
+
+.paywall-pending-status .pending-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+
+.paywall-pending-status h4 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 8px 0;
+}
+
+.paywall-pending-status p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.paywall-pending-status .pending-txid {
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 8px;
+}
+
+.paywall-pending-progress {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 16px;
+    background: var(--bg-primary);
+    border-radius: 8px;
+}
+
+.paywall-pending-progress .pending-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-color);
+    border-top-color: #FF6600;
+    border-radius: 50%;
+    animation: paywall-spin 1s linear infinite;
+}
+
+.paywall-pending-progress span {
+    font-size: 13px;
+    color: var(--text-secondary);
 }

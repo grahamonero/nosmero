@@ -3,6 +3,7 @@
 
 import { showWarningToast, showSuccessToast, showErrorToast } from './toasts.js';
 import { showSkeletonLoader } from './skeleton.js';
+import * as PaywallUI from '../paywall-ui.js';
 
 // Track where user came from for back navigation
 let previousPage = 'home';
@@ -225,6 +226,13 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
             await TrustBadges.addFeedTrustBadges(posts.map(p => ({ id: p.id, pubkey: p.pubkey })), userPostsContainer);
         } catch (error) {
             console.error('Error adding trust badges to profile posts:', error);
+        }
+
+        // Process paywalled notes (check unlock status, show locked/unlocked UI)
+        try {
+            await PaywallUI.processPaywalledNotes(userPostsContainer);
+        } catch (error) {
+            console.error('Error processing paywalled notes in profile:', error);
         }
 
     } catch (error) {

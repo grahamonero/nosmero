@@ -26,6 +26,23 @@ async function ensurePostsLoaded() {
 export function openHamburgerMenu() {
     document.getElementById('slideMenu').classList.add('active');
     document.getElementById('menuOverlay').classList.add('active');
+    updateMenuQueueCount();
+}
+
+// Update the queue count badge in hamburger menu
+export function updateMenuQueueCount() {
+    const countEl = document.getElementById('menuQueueCount');
+    if (!countEl) return;
+
+    const StateModule = window.NostrState || {};
+    const queue = StateModule.zapQueue || JSON.parse(localStorage.getItem('zapQueue') || '[]');
+
+    if (queue.length > 0) {
+        countEl.textContent = queue.length;
+        countEl.style.display = 'inline';
+    } else {
+        countEl.style.display = 'none';
+    }
 }
 
 export function closeHamburgerMenu() {
@@ -338,6 +355,7 @@ export async function updateHeaderUIForAuthState() {
         if (menuLoginOptions) menuLoginOptions.style.display = 'block';
         if (menuUserInfo) menuUserInfo.style.display = 'none';
         if (notificationsBtn) notificationsBtn.style.display = 'none';
+
     }
 }
 

@@ -128,21 +128,30 @@ export function escapeHtml(text) {
 
 // Parse and format post content: links, images, mentions, and embedded notes
 export function parseContent(content, skipEmbeddedNotes = false) {
+    // Extract image URLs from any existing HTML img tags before escaping
+    // This handles notes where clients embedded <img> tags directly
+    let cleanContent = content.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, '$1');
+
     // First escape HTML to prevent XSS
-    let parsed = escapeHtml(content);
-    
+    let parsed = escapeHtml(cleanContent);
+
+    // Clean up any remaining escaped img tag fragments
+    // e.g., '&lt;img src="' or '" alt="Image" /&gt;'
+    parsed = parsed.replace(/&lt;img[^&]*?src=["']?/gi, '');
+    parsed = parsed.replace(/["']?\s*alt=["'][^"']*["']\s*\/?&gt;/gi, '');
+
     // Handle line breaks and paragraphs
     // Convert double line breaks (or more) into paragraph breaks
     parsed = parsed.replace(/(\r\n|\r|\n){2,}/g, '<br><br>');
     // Convert single line breaks
     parsed = parsed.replace(/(\r\n|\r|\n)/g, '<br>');
-    
-    // Parse image URLs
-    const imageRegex = /(https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp|svg)(\?[^\s]*)?)/gi;
+
+    // Parse image URLs (stop at whitespace or < to avoid grabbing <br> tags)
+    const imageRegex = /(https?:\/\/[^\s<]+\.(jpg|jpeg|png|gif|webp|svg)(\?[^\s<]*)?)/gi;
     parsed = parsed.replace(imageRegex, '<img src="$1" alt="Image" />');
-    
-    // Parse video URLs
-    const videoRegex = /(https?:\/\/[^\s]+\.(mp4|webm|ogg)(\?[^\s]*)?)/gi;
+
+    // Parse video URLs (stop at whitespace or < to avoid grabbing <br> tags)
+    const videoRegex = /(https?:\/\/[^\s<]+\.(mp4|webm|ogg)(\?[^\s<]*)?)/gi;
     parsed = parsed.replace(videoRegex, '<video controls><source src="$1" /></video>');
     
     // Parse nostr npub mentions - show as user names
@@ -208,7 +217,8 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     });
     
     // Parse regular URLs (but not those already converted to images/videos)
-    const urlRegex = /(?<!src=")(https?:\/\/[^\s]+)(?!\.(jpg|jpeg|png|gif|webp|svg|mp4|webm|ogg))/gi;
+    // Stop at whitespace or < to avoid grabbing <br> tags
+    const urlRegex = /(?<!src=")(https?:\/\/[^\s<]+)(?!\.(jpg|jpeg|png|gif|webp|svg|mp4|webm|ogg))/gi;
     parsed = parsed.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener">$1</a>');
     
     // Sanitize with DOMPurify to prevent XSS

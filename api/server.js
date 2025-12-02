@@ -8,6 +8,7 @@ import { initializeNewVoicesScheduler, getCachedNewVoices } from './new-voices-s
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import * as Paywall from './paywall.js';
 
 // Get __dirname equivalent for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -23,6 +24,13 @@ app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
+
+    // Allow blob: URLs from Web Workers (monero-ts wallet runs in blob: worker)
+    // This is needed because the wallet worker is loaded via Blob URL to bypass
+    // SES sandbox conflicts with browser extensions (MetaMask, Coinbase, etc.)
+    if (origin.startsWith('blob:')) {
+      return callback(null, true);
+    }
 
     if (config.corsOrigins.indexOf(origin) !== -1) {
       callback(null, true);
@@ -637,6 +645,603 @@ app.get('/api/trending', (req, res) => {
   }
 });
 
+// ==================== MONERO RPC PROXY ====================
+
+// Monero daemon configuration
+const MONEROD_RPC_URL = 'http://127.0.0.1:18081/json_rpc';
+const MONEROD_OTHER_URL = 'http://127.0.0.1:18081';
+
+// Allowlist of safe RPC methods for wallet sync
+const ALLOWED_RPC_METHODS = [
+  // Daemon info
+  'get_info',
+  'get_height',
+  'get_block_count',
+  'get_last_block_header',
+  'get_block_header_by_height',
+  'get_block_header_by_hash',
+  'get_block_headers_range',
+
+  // Block data for wallet sync
+  'get_block',
+  'get_blocks_by_height.bin',
+
+  // Output data for wallet sync
+  'get_outs',
+  'get_output_histogram',
+  'get_output_distribution',
+  'get_output_distribution.bin',
+
+  // Transaction submission
+  'send_raw_transaction',
+
+  // Transaction pool
+  'get_transaction_pool',
+  'get_transaction_pool_hashes',
+
+  // Fee estimation
+  'get_fee_estimate',
+
+  // Version
+  'get_version'
+];
+
+// Non-JSON-RPC endpoints (binary/other)
+const ALLOWED_OTHER_ENDPOINTS = [
+  '/get_blocks.bin',
+  '/get_blocks_by_height.bin',
+  '/get_hashes.bin',
+  '/get_o_indexes.bin',
+  '/get_outs.bin',
+  '/get_transactions',
+  '/get_alt_blocks_hashes',
+  '/is_key_image_spent',
+  '/sendrawtransaction',
+  '/get_output_distribution.bin'
+];
+
+// Rate limiter for RPC proxy (stricter)
+const moneroRpcLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute per IP
+  message: { success: false, error: 'Rate limited - too many RPC requests' }
+});
+
+// DEBUG: Log ALL requests to /api/monero/* to see what monero-ts is requesting
+app.use('/api/monero', (req, res, next) => {
+  console.log(`[MoneroRPC DEBUG] ${req.method} ${req.originalUrl}`);
+  console.log(`[MoneroRPC DEBUG] Headers:`, JSON.stringify(req.headers, null, 2));
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log(`[MoneroRPC DEBUG] Body:`, JSON.stringify(req.body));
+  }
+  next();
+});
+
+// JSON-RPC proxy endpoint (simplified format for manual testing)
+app.post('/api/monero/rpc', moneroRpcLimiter, async (req, res) => {
+  try {
+    const { method, params } = req.body;
+
+    // Validate method is in allowlist
+    if (!method || !ALLOWED_RPC_METHODS.includes(method)) {
+      console.log(`[MoneroRPC] Blocked method: ${method}`);
+      return res.status(403).json({
+        success: false,
+        error: `Method '${method}' not allowed`
+      });
+    }
+
+    // Forward to monerod
+    const response = await fetch(MONEROD_RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: '0',
+        method: method,
+        params: params || {}
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Monerod returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    res.json(data);
+
+  } catch (error) {
+    console.error('[MoneroRPC] Error:', error.message);
+    res.status(502).json({
+      success: false,
+      error: 'Monero node unavailable'
+    });
+  }
+});
+
+// Transparent JSON-RPC proxy for monero-ts library
+// Passes through standard JSON-RPC format as-is
+app.post('/api/monero/json_rpc', moneroRpcLimiter, async (req, res) => {
+  try {
+    const body = req.body;
+
+    // Extract method from standard JSON-RPC format
+    const method = body.method;
+
+    // Validate method is in allowlist
+    if (!method || !ALLOWED_RPC_METHODS.includes(method)) {
+      console.log(`[MoneroRPC] Blocked method: ${method}`);
+      return res.status(403).json({
+        jsonrpc: '2.0',
+        id: body.id || '0',
+        error: {
+          code: -32601,
+          message: `Method '${method}' not allowed`
+        }
+      });
+    }
+
+    // Forward request as-is to monerod
+    const response = await fetch(MONEROD_RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Monerod returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    res.json(data);
+
+  } catch (error) {
+    console.error('[MoneroRPC] Error:', error.message);
+    res.status(502).json({
+      jsonrpc: '2.0',
+      id: req.body?.id || '0',
+      error: {
+        code: -32603,
+        message: 'Monero node unavailable'
+      }
+    });
+  }
+});
+
+// Binary/other endpoints proxy (handles non-JSON-RPC endpoints like /get_transactions)
+// monero-ts makes requests to base_uri + endpoint, so we need to handle /api/monero/* directly
+// Use wildcard to capture endpoints with dots like get_blocks.bin
+app.all('/api/monero/*', moneroRpcLimiter, async (req, res, next) => {
+  const endpointPath = req.params[0];
+
+  // Skip if this is the json_rpc endpoint (handled above) or rpc endpoint
+  if (endpointPath === 'json_rpc' || endpointPath === 'rpc') {
+    return next();
+  }
+
+  try {
+    const endpoint = '/' + endpointPath;
+
+    // Validate endpoint is in allowlist
+    if (!ALLOWED_OTHER_ENDPOINTS.includes(endpoint)) {
+      console.log(`[MoneroRPC] Blocked endpoint: ${endpoint}`);
+      return res.status(403).json({
+        success: false,
+        error: `Endpoint '${endpoint}' not allowed`
+      });
+    }
+
+    console.log(`[MoneroRPC] Proxying binary endpoint: ${endpoint}`);
+
+    // Forward to monerod (use the other URL for non-JSON-RPC)
+    const response = await fetch(MONEROD_OTHER_URL + endpoint, {
+      method: req.method,
+      headers: {
+        'Content-Type': req.headers['content-type'] || 'application/octet-stream'
+      },
+      body: req.method !== 'GET' ? JSON.stringify(req.body) : undefined
+    });
+
+    // Forward response
+    res.status(response.status);
+    for (const [key, value] of response.headers.entries()) {
+      if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+        res.setHeader(key, value);
+      }
+    }
+
+    const buffer = await response.arrayBuffer();
+    res.send(Buffer.from(buffer));
+
+  } catch (error) {
+    console.error('[MoneroRPC] Binary endpoint error:', error.message);
+    res.status(502).json({
+      success: false,
+      error: 'Monero node unavailable'
+    });
+  }
+});
+
+// ==================== PAYWALL ENDPOINTS ====================
+
+// Rate limiter for paywall write operations (create, verify, purchase)
+const paywallLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 requests per minute
+  message: { success: false, error: 'Rate limited' }
+});
+
+// Rate limiter for paywall read operations (info, check-unlock, my-unlocks)
+// More permissive but still prevents enumeration attacks
+const paywallReadLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute
+  message: { success: false, error: 'Rate limited' }
+});
+
+// Create a paywall for content (creator)
+app.post('/api/paywall/create', paywallLimiter, (req, res) => {
+  try {
+    const {
+      note_id: noteId,
+      creator_pubkey: creatorPubkey,
+      payment_address: paymentAddress,
+      price_xmr: priceXmr,
+      decryption_key: decryptionKey,
+      preview,
+      encrypted_content: encryptedContent
+    } = req.body;
+
+    // Validate required fields
+    if (!noteId || !creatorPubkey || !paymentAddress || !priceXmr || !decryptionKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: note_id, creator_pubkey, payment_address, price_xmr, decryption_key'
+      });
+    }
+
+    const result = Paywall.createPaywall({
+      noteId,
+      creatorPubkey,
+      paymentAddress,
+      priceXmr: parseFloat(priceXmr),
+      decryptionKey,
+      preview: preview || '',
+      encryptedContent: encryptedContent || ''
+    });
+
+    res.json({
+      success: true,
+      paywall: result
+    });
+
+  } catch (error) {
+    console.error('[Paywall] Create error:', error.message);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get paywall info (public)
+app.get('/api/paywall/info/:noteId', paywallReadLimiter, (req, res) => {
+  try {
+    const { noteId } = req.params;
+    const info = Paywall.getPaywallInfo(noteId);
+
+    if (!info) {
+      return res.status(404).json({
+        success: false,
+        error: 'Paywall not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      paywall: info
+    });
+
+  } catch (error) {
+    console.error('[Paywall] Info error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get paywall info'
+    });
+  }
+});
+
+// Get multiple paywall infos (batch)
+app.post('/api/paywall/info-batch', paywallReadLimiter, (req, res) => {
+  try {
+    const { note_ids: noteIds } = req.body;
+
+    if (!Array.isArray(noteIds) || noteIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'note_ids array required'
+      });
+    }
+
+    if (noteIds.length > 50) {
+      return res.status(400).json({
+        success: false,
+        error: 'Maximum 50 note_ids per request'
+      });
+    }
+
+    const results = Paywall.getPaywallInfoBatch(noteIds);
+
+    res.json({
+      success: true,
+      paywalls: results
+    });
+
+  } catch (error) {
+    console.error('[Paywall] Batch info error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get paywall info'
+    });
+  }
+});
+
+// Check if user has unlocked content
+app.get('/api/paywall/check-unlock/:noteId/:buyerPubkey', paywallReadLimiter, (req, res) => {
+  try {
+    const { noteId, buyerPubkey } = req.params;
+
+    // First check if user is the creator (author can always view their own content)
+    const creatorKey = Paywall.getCreatorKey(noteId, buyerPubkey);
+    if (creatorKey) {
+      return res.json({
+        success: true,
+        unlocked: true,
+        isCreator: true,
+        decryption_key: creatorKey
+      });
+    }
+
+    // Check if user has purchased/unlocked
+    const unlocked = Paywall.hasUnlocked(noteId, buyerPubkey);
+
+    if (unlocked) {
+      // Return the decryption key if already unlocked
+      const decryptionKey = Paywall.getUnlockedKey(noteId, buyerPubkey);
+      return res.json({
+        success: true,
+        unlocked: true,
+        decryption_key: decryptionKey
+      });
+    }
+
+    res.json({
+      success: true,
+      unlocked: false
+    });
+
+  } catch (error) {
+    console.error('[Paywall] Check unlock error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check unlock status'
+    });
+  }
+});
+
+// Initiate a purchase (returns payment details)
+app.post('/api/paywall/purchase', paywallLimiter, (req, res) => {
+  try {
+    const { note_id: noteId, buyer_pubkey: buyerPubkey } = req.body;
+
+    if (!noteId || !buyerPubkey) {
+      return res.status(400).json({
+        success: false,
+        error: 'note_id and buyer_pubkey required'
+      });
+    }
+
+    const result = Paywall.initiatePurchase(noteId, buyerPubkey);
+
+    res.json({
+      success: true,
+      purchase: result
+    });
+
+  } catch (error) {
+    console.error('[Paywall] Purchase error:', error.message);
+
+    if (error.message === 'Already unlocked') {
+      // Return the key if already unlocked
+      const decryptionKey = Paywall.getUnlockedKey(req.body.note_id, req.body.buyer_pubkey);
+      return res.json({
+        success: true,
+        already_unlocked: true,
+        decryption_key: decryptionKey
+      });
+    }
+
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Verify payment and unlock content
+// This is the key endpoint - called after buyer sends payment
+app.post('/api/paywall/verify', paywallLimiter, async (req, res) => {
+  try {
+    const {
+      purchase_id: purchaseId,
+      note_id: noteId,
+      buyer_pubkey: buyerPubkey,
+      txid,
+      tx_key: txKey
+    } = req.body;
+
+    // Validate required fields
+    if (!txid || !txKey || !buyerPubkey) {
+      return res.status(400).json({
+        success: false,
+        error: 'txid, tx_key, and buyer_pubkey required'
+      });
+    }
+
+    if (!purchaseId && !noteId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Either purchase_id or note_id required'
+      });
+    }
+
+    const result = await Paywall.verifyAndUnlock({
+      purchaseId,
+      noteId,
+      buyerPubkey,
+      txid,
+      txKey
+    });
+
+    res.json({
+      success: true,
+      unlocked: true,
+      decryption_key: result.decryptionKey,
+      verified_amount: result.verifiedAmount,
+      confirmations: result.confirmations,
+      already_unlocked: result.alreadyUnlocked || false
+    });
+
+  } catch (error) {
+    console.error('[Paywall] Verify error:', error.message);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get user's unlocked content
+app.get('/api/paywall/my-unlocks/:buyerPubkey', paywallReadLimiter, (req, res) => {
+  try {
+    const { buyerPubkey } = req.params;
+
+    if (!/^[0-9a-f]{64}$/i.test(buyerPubkey)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid pubkey format'
+      });
+    }
+
+    const unlocks = Paywall.getUserUnlocks(buyerPubkey);
+
+    res.json({
+      success: true,
+      unlocks,
+      count: unlocks.length
+    });
+
+  } catch (error) {
+    console.error('[Paywall] My unlocks error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get unlocks'
+    });
+  }
+});
+
+// Get decryption key for creator (author can always see their own content)
+app.get('/api/paywall/creator-key/:noteId/:creatorPubkey', paywallReadLimiter, (req, res) => {
+  try {
+    const { noteId, creatorPubkey } = req.params;
+
+    if (!/^[0-9a-f]{64}$/i.test(creatorPubkey)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid pubkey format'
+      });
+    }
+
+    const decryptionKey = Paywall.getCreatorKey(noteId, creatorPubkey);
+
+    if (!decryptionKey) {
+      return res.status(404).json({
+        success: false,
+        error: 'Not found or not authorized'
+      });
+    }
+
+    res.json({
+      success: true,
+      decryption_key: decryptionKey
+    });
+
+  } catch (error) {
+    console.error('[Paywall] Creator key error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get creator key'
+    });
+  }
+});
+
+// Get creator stats
+app.get('/api/paywall/creator-stats/:creatorPubkey', paywallReadLimiter, (req, res) => {
+  try {
+    const { creatorPubkey } = req.params;
+
+    if (!/^[0-9a-f]{64}$/i.test(creatorPubkey)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid pubkey format'
+      });
+    }
+
+    const stats = Paywall.getCreatorStats(creatorPubkey);
+
+    res.json({
+      success: true,
+      stats
+    });
+
+  } catch (error) {
+    console.error('[Paywall] Creator stats error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get stats'
+    });
+  }
+});
+
+// Delete a paywall (creator only)
+app.delete('/api/paywall/:noteId', paywallLimiter, (req, res) => {
+  try {
+    const { noteId } = req.params;
+    const { creator_pubkey: creatorPubkey } = req.body;
+
+    if (!creatorPubkey) {
+      return res.status(400).json({
+        success: false,
+        error: 'creator_pubkey required'
+      });
+    }
+
+    Paywall.deletePaywall(noteId, creatorPubkey);
+
+    res.json({
+      success: true,
+      deleted: true
+    });
+
+  } catch (error) {
+    console.error('[Paywall] Delete error:', error.message);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -675,6 +1280,18 @@ Endpoints:
   GET  /api/relatr/new-voices           - New Voices discovery feed
   GET  /api/trending                    - Get trending searches
   POST /api/trending                    - Log a search term
+  POST /api/monero/rpc                  - Monero RPC proxy (wallet sync)
+  ALL  /api/monero/bin/*                - Monero binary endpoints proxy
+
+Paywall Endpoints:
+  POST /api/paywall/create              - Create paywalled content
+  GET  /api/paywall/info/:noteId        - Get paywall info
+  POST /api/paywall/info-batch          - Get batch paywall info
+  GET  /api/paywall/check-unlock/:n/:p  - Check if user unlocked
+  POST /api/paywall/purchase            - Initiate purchase
+  POST /api/paywall/verify              - Verify payment, get decryption key
+  GET  /api/paywall/my-unlocks/:pubkey  - Get user's unlocks
+  GET  /api/paywall/creator-stats/:pk   - Get creator stats
 
 Relatr Server: ${RELATR_BASE_URL}
 

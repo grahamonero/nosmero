@@ -5,10 +5,11 @@
 import * as Toasts from './toasts.js';
 import * as Skeleton from './skeleton.js';
 import * as Theme from './theme.js';
-import * as Navigation from './navigation.js';
+import * as Navigation from './navigation.js?v=2.9.54';
 import * as Modals from './modals.js';
 import * as Profile from './profile.js';
 import * as Thread from './thread.js';
+// Old wallet.js removed - using wallet-modal.js now (loaded separately in index.html)
 
 // ==================== RE-EXPORTS ====================
 
@@ -109,6 +110,10 @@ export const muteUser = Thread.muteUser;
 export const reportPost = Thread.reportPost;
 export const requestDeletion = Thread.requestDeletion;
 
+// Wallet functions - now handled by wallet-modal.js via window.openWalletModal/closeWalletModal
+export const showWalletModal = () => window.openWalletModal?.();
+export const hideWalletModal = () => window.closeWalletModal?.();
+
 // ==================== WINDOW BINDINGS ====================
 // For HTML onclick handlers and global access
 
@@ -189,6 +194,10 @@ window.viewPostSource = Thread.viewPostSource;
 window.muteUser = Thread.muteUser;
 window.reportPost = Thread.reportPost;
 window.requestDeletion = Thread.requestDeletion;
+
+// Wallet functions
+window.showWalletModal = () => window.openWalletModal?.();
+window.hideWalletModal = () => window.closeWalletModal?.();
 
 // ==================== INITIALIZATION ====================
 
