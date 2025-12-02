@@ -64,6 +64,19 @@ export async function verifyTransactionProof({ txid, txKey, recipientAddress, ex
  * Verify transaction proof with a specific RPC node using direct JSON-RPC calls
  */
 async function verifyWithRpcNode(rpcUrl, { txid, txKey, recipientAddress, expectedAmount }) {
+  // Force wallet-rpc to reconnect to daemon before check_tx_key
+  // This prevents stale internal connection issues
+  try {
+    await makeRpcCall(rpcUrl, {
+      jsonrpc: '2.0',
+      id: '0',
+      method: 'set_daemon',
+      params: { address: 'http://127.0.0.1:18081' }
+    });
+  } catch (e) {
+    console.warn('[Verify] set_daemon failed (non-fatal):', e.message);
+  }
+
   // Make JSON-RPC call to check_tx_key
   const requestData = {
     jsonrpc: '2.0',
@@ -132,7 +145,8 @@ function makeRpcCall(rpcUrl, requestData) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
+        'Content-Length': Buffer.byteLength(postData),
+        'Connection': 'close'  // Force new TCP connection each request - avoids wallet-rpc stale state
       },
       timeout: config.verification.timeout
     };

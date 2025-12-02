@@ -1,0 +1,2061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>XMR Tip Jar - nosmero</title>
+    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
+    <link rel="stylesheet" href="/styles.css?v=1.9.15-wallet">
+
+    <!-- Eruda mobile debugging console (DEV ONLY) -->
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>eruda.init();</script>
+
+    <style>
+        /* Override body overflow:hidden from main styles.css for wallet page */
+        html, body {
+            overflow: auto !important;
+            height: auto !important;
+            min-height: 100vh;
+        }
+
+        /* Mobile Wallet Page Styles */
+        .wallet-container {
+            max-width: 100%;
+            margin: 0 auto;
+            padding: 16px;
+            padding-top: 80px;
+            padding-bottom: 100px; /* Space for bottom nav */
+        }
+
+        .wallet-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .wallet-header h1 {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #FF6600, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .back-btn {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 44px; /* Touch target */
+        }
+
+        .back-btn:hover, .back-btn:active {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+        }
+
+        .wallet-card {
+            background: linear-gradient(135deg, #1a1a1a, #2a2a2a);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        .balance-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .balance-available {
+            color: #FF6600;
+            font-size: 28px;
+            font-weight: 700;
+            font-family: monospace;
+            word-break: break-all;
+        }
+
+        .balance-total {
+            color: #888;
+            font-size: 14px;
+            font-family: monospace;
+        }
+
+        .balance-locked {
+            background: rgba(255, 193, 7, 0.1);
+            color: #ffc107;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-top: 12px;
+            display: none;
+        }
+
+        .address-section {
+            border-top: 1px solid #333;
+            padding-top: 16px;
+            margin-top: 16px;
+        }
+
+        .address-label {
+            color: #666;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .address-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .address-text {
+            font-family: monospace;
+            font-size: 11px;
+            color: #aaa;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .copy-btn {
+            background: #333;
+            border: none;
+            color: #fff;
+            padding: 10px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            min-height: 44px;
+        }
+
+        .copy-btn:active {
+            background: #444;
+        }
+
+        .action-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .action-btn {
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 56px; /* Large touch target */
+        }
+
+        .action-btn:active {
+            transform: scale(0.98);
+        }
+
+        .action-btn.send {
+            background: linear-gradient(135deg, #FF6600, #cc5200);
+            color: #000;
+        }
+
+        .action-btn.receive {
+            background: linear-gradient(135deg, #8B5CF6, #6b21a8);
+            color: #fff;
+        }
+
+        .section-title {
+            color: #ccc;
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tx-list {
+            background: #1a1a1a;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .tx-item {
+            padding: 14px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            min-height: 60px;
+        }
+
+        .tx-item:active {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tx-item:last-child {
+            border-bottom: none;
+        }
+
+        .tx-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .tx-icon.incoming {
+            background: rgba(74, 222, 128, 0.2);
+        }
+
+        .tx-icon.outgoing {
+            background: rgba(255, 102, 0, 0.2);
+        }
+
+        .tx-details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .tx-amount {
+            font-weight: 600;
+            font-size: 14px;
+            font-family: monospace;
+        }
+
+        .tx-amount.incoming {
+            color: #4ade80;
+        }
+
+        .tx-amount.outgoing {
+            color: #FF6600;
+        }
+
+        .tx-meta {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 4px;
+        }
+
+        .tx-date {
+            color: #666;
+            font-size: 11px;
+        }
+
+        .tx-hash {
+            color: #555;
+            font-size: 10px;
+            font-family: monospace;
+        }
+
+        .tx-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            flex-shrink: 0;
+        }
+
+        .tx-status.confirmed {
+            background: rgba(74, 222, 128, 0.1);
+            color: #4ade80;
+        }
+
+        .tx-status.pending {
+            background: rgba(255, 193, 7, 0.1);
+            color: #ffc107;
+        }
+
+        /* Transaction Detail View */
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #333;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-label {
+            color: #999;
+            font-size: 13px;
+        }
+
+        .detail-value {
+            color: #fff;
+            font-size: 13px;
+            font-family: monospace;
+            text-align: right;
+            word-break: break-all;
+            max-width: 100%;
+        }
+
+        .detail-value.copyable {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .detail-value.copyable:active {
+            color: #FF6600;
+        }
+
+        /* Sync status */
+        .sync-status {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .sync-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #333;
+            border-top-color: #FF6600;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            flex-shrink: 0;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .sync-text {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .sync-btn {
+            background: #333;
+            border: none;
+            color: #fff;
+            padding: 10px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            min-height: 44px;
+        }
+
+        /* Views */
+        .wallet-view {
+            display: none;
+        }
+
+        .wallet-view.active {
+            display: block;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 30px 16px;
+            color: #666;
+        }
+
+        /* Quick actions */
+        .quick-actions {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #333;
+        }
+
+        .quick-action-btn {
+            width: 100%;
+            padding: 14px;
+            background: transparent;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #999;
+            cursor: pointer;
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-align: center;
+            min-height: 48px;
+        }
+
+        .quick-action-btn:active {
+            background: rgba(255, 255, 255, 0.03);
+            color: #ccc;
+        }
+
+        /* Locked state */
+        .locked-view {
+            text-align: center;
+            padding: 40px 16px;
+        }
+
+        .locked-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        .pin-input {
+            width: 100%;
+            max-width: 200px;
+            padding: 14px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 20px;
+            text-align: center;
+            letter-spacing: 8px;
+            margin: 16px auto;
+            display: block;
+        }
+
+        .unlock-btn {
+            background: linear-gradient(135deg, #FF6600, #8B5CF6);
+            border: none;
+            color: #000;
+            padding: 16px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            min-height: 52px;
+        }
+
+        .error-msg {
+            color: #ff6b6b;
+            font-size: 13px;
+            margin-top: 12px;
+        }
+
+        /* Form inputs */
+        input[type="text"],
+        input[type="number"],
+        input[type="password"],
+        textarea,
+        select {
+            font-size: 16px !important; /* Prevent iOS zoom */
+        }
+
+        /* Bottom Navigation */
+        .mobile-bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #0a0a0a;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-around;
+            padding: 8px 0;
+            padding-bottom: max(8px, env(safe-area-inset-bottom));
+            z-index: 1000;
+        }
+
+        .nav-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            padding: 8px 16px;
+            cursor: pointer;
+            min-width: 60px;
+        }
+
+        .nav-btn.active {
+            color: #FF6600;
+        }
+
+        .nav-icon {
+            font-size: 20px;
+        }
+
+        .nav-label {
+            font-size: 11px;
+        }
+
+        /* Header */
+        .minimal-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #0a0a0a;
+            border-bottom: 1px solid var(--border-color);
+            z-index: 100;
+            padding: 12px 16px;
+        }
+
+        .header-single-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .mobile-menu-btn {
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 8px;
+            min-width: 44px;
+            min-height: 44px;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .header-logo {
+            height: 28px;
+            width: auto;
+        }
+
+        .tagline {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        /* Slide-out menu */
+        .menu-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 999;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+
+        .menu-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .slide-menu {
+            position: fixed;
+            top: 0;
+            left: -280px;
+            width: 280px;
+            height: 100%;
+            background: #0a0a0a;
+            z-index: 1000;
+            transition: left 0.3s;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .slide-menu.active {
+            left: 0;
+        }
+
+        .menu-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .menu-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 8px;
+        }
+
+        .menu-nav {
+            flex: 1;
+            padding: 16px 0;
+        }
+
+        .menu-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+            color: var(--text-primary);
+            text-decoration: none;
+            cursor: pointer;
+            min-height: 48px;
+        }
+
+        .menu-item:active {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .menu-icon {
+            font-size: 18px;
+            width: 24px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- Menu Overlay -->
+    <div class="menu-overlay" id="menuOverlay" onclick="closeHamburgerMenu()"></div>
+
+    <!-- Slide-out Hamburger Menu -->
+    <nav class="slide-menu" id="slideMenu">
+        <div class="menu-header">
+            <span style="font-weight: 600; color: var(--text-primary);">Menu</span>
+            <button class="menu-close" onclick="closeHamburgerMenu()">✕</button>
+        </div>
+        <div class="menu-nav">
+            <a href="/" class="menu-item" style="text-decoration: none;">
+                <span class="menu-icon">🏠</span>
+                <span>Home</span>
+            </a>
+            <a href="/?tab=search" class="menu-item" style="text-decoration: none;">
+                <span class="menu-icon">🔍</span>
+                <span>Search</span>
+            </a>
+            <a href="/?tab=messages" class="menu-item" style="text-decoration: none;">
+                <span class="menu-icon">💬</span>
+                <span>Messages</span>
+            </a>
+            <a href="/?tab=profile" class="menu-item" style="text-decoration: none;">
+                <span class="menu-icon">👤</span>
+                <span>Profile</span>
+            </a>
+            <a href="/?tab=settings" class="menu-item" style="text-decoration: none;">
+                <span class="menu-icon">⚙️</span>
+                <span>Settings</span>
+            </a>
+            <a href="/wallet.html" class="menu-item" style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px; margin: 8px 16px; text-decoration: none;">
+                <span class="menu-icon">⛏️</span>
+                <span style="background: linear-gradient(135deg, #FF6600, #8B5CF6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 600;">XMR Tip Jar</span>
+            </a>
+        </div>
+    </nav>
+
+    <!-- Standard Header -->
+    <header class="minimal-header">
+        <div class="header-single-row">
+            <button class="mobile-menu-btn" onclick="openHamburgerMenu()" aria-label="Open menu">☰</button>
+            <a href="/" class="logo-container" style="text-decoration: none;">
+                <img src="/nosmero-logo-new.png" alt="nosmero" class="header-logo">
+                <span class="tagline">nostr + monero</span>
+            </a>
+        </div>
+    </header>
+
+    <script>
+        // Hamburger menu functions for wallet page
+        function openHamburgerMenu() {
+            document.getElementById('slideMenu').classList.add('active');
+            document.getElementById('menuOverlay').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+        function closeHamburgerMenu() {
+            document.getElementById('slideMenu').classList.remove('active');
+            document.getElementById('menuOverlay').classList.remove('active');
+            document.body.style.overflow = '';
+        }
+    </script>
+
+    <!-- Wallet Container -->
+    <div class="wallet-container">
+        <!-- Loading View -->
+        <div id="loadingView" class="wallet-view active">
+            <div style="text-align: center; padding: 60px 20px;">
+                <div class="sync-spinner" style="width: 40px; height: 40px; margin: 0 auto 20px;"></div>
+                <p style="color: #999;">Loading wallet...</p>
+            </div>
+        </div>
+
+        <!-- No Wallet View -->
+        <div id="noWalletView" class="wallet-view">
+            <div class="wallet-header">
+                <h1>⛏️ XMR Tip Jar</h1>
+            </div>
+            <div class="wallet-card" style="text-align: center; padding: 30px 20px;">
+                <p style="color: #999; margin-bottom: 24px;">
+                    Your keys stay on this device. We never see them.
+                </p>
+                <button onclick="walletPage.showCreatePin()" class="action-btn send" style="width: 100%; margin-bottom: 12px;">
+                    🆕 Create New Tip Jar
+                </button>
+                <button onclick="walletPage.showRestoreSeed()" class="action-btn" style="width: 100%; background: #333; color: #fff;">
+                    🔑 Restore from Seed
+                </button>
+            </div>
+        </div>
+
+        <!-- Create PIN View -->
+        <div id="createPinView" class="wallet-view">
+            <div class="wallet-header">
+                <button onclick="walletPage.showView('noWalletView')" class="back-btn">← Back</button>
+                <h1>🔐 Set PIN</h1>
+            </div>
+            <div class="wallet-card" style="text-align: center;">
+                <p style="color: #999; margin-bottom: 20px;">Choose a PIN to encrypt your wallet.<br>You'll need this to unlock it.</p>
+                <input type="password" id="createPin" class="pin-input" placeholder="PIN" maxlength="20" style="margin-bottom: 12px;">
+                <input type="password" id="confirmPin" class="pin-input" placeholder="Confirm PIN" maxlength="20">
+                <div id="createPinError" class="error-msg" style="display: none; margin-top: 12px;"></div>
+                <br><br>
+                <button onclick="walletPage.createWallet()" class="unlock-btn" style="width: 100%;">Create Wallet</button>
+            </div>
+        </div>
+
+        <!-- Backup Seed View -->
+        <div id="backupSeedView" class="wallet-view">
+            <div class="wallet-header">
+                <h1>📝 Backup Seed</h1>
+            </div>
+            <div class="wallet-card">
+                <div style="background: rgba(255, 0, 0, 0.1); border: 1px solid rgba(255, 0, 0, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                    <p style="color: #ff6b6b; font-size: 13px; margin: 0; font-weight: 600;">🚨 Write these words down NOW!</p>
+                    <p style="color: #ff9999; font-size: 12px; margin: 6px 0 0 0;">This is the ONLY way to recover your wallet.</p>
+                </div>
+                <div id="backupSeedWords" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 16px;"></div>
+                <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                    <p style="color: #FF6600; font-size: 13px; margin: 0; font-weight: 600;">📍 Restore Height: <span id="backupRestoreHeight" style="font-family: monospace;">...</span></p>
+                    <p style="color: #cc8844; font-size: 11px; margin: 6px 0 0 0;">Save this number for faster recovery.</p>
+                </div>
+                <button onclick="walletPage.copyBackupSeed()" class="quick-action-btn" style="margin-bottom: 16px;">📋 Copy Seed + Height</button>
+                <button onclick="walletPage.showConfirmSeed()" class="unlock-btn" style="width: 100%;">I've Saved My Seed →</button>
+            </div>
+        </div>
+
+        <!-- Confirm Seed View -->
+        <div id="confirmSeedView" class="wallet-view">
+            <div class="wallet-header">
+                <h1>✓ Confirm Seed</h1>
+            </div>
+            <div class="wallet-card" style="text-align: center;">
+                <p style="color: #999; margin-bottom: 20px;">Enter the requested words to confirm.</p>
+                <div id="confirmSeedPrompt" style="margin-bottom: 16px;"></div>
+                <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+                    <input type="text" id="confirmWord1" placeholder="Word #?" style="flex: 1; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; text-align: center; font-size: 16px;">
+                    <input type="text" id="confirmWord2" placeholder="Word #?" style="flex: 1; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; text-align: center; font-size: 16px;">
+                </div>
+                <div id="confirmSeedError" class="error-msg" style="display: none; margin-bottom: 12px;"></div>
+                <button onclick="walletPage.verifySeed()" class="unlock-btn" style="width: 100%;">Verify & Complete</button>
+            </div>
+        </div>
+
+        <!-- Restore Seed View -->
+        <div id="restoreSeedView" class="wallet-view">
+            <div class="wallet-header">
+                <button onclick="walletPage.showView('noWalletView')" class="back-btn">← Back</button>
+                <h1>🔑 Restore</h1>
+            </div>
+            <div class="wallet-card">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">25-Word Seed Phrase</label>
+                    <textarea id="restoreSeedInput" placeholder="Enter your 25 words separated by spaces..." style="width: 100%; height: 100px; padding: 12px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px; resize: none;"></textarea>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Restore Height (optional)</label>
+                    <input type="number" id="restoreHeight" placeholder="3554000" style="width: 100%; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px;">
+                    <p style="color: #666; font-size: 11px; margin-top: 6px;">Block height when wallet was created.</p>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Set PIN</label>
+                    <input type="password" id="restorePin" class="pin-input" placeholder="PIN" maxlength="20" style="width: 100%; margin-bottom: 8px;">
+                    <input type="password" id="restorePinConfirm" class="pin-input" placeholder="Confirm PIN" maxlength="20" style="width: 100%;">
+                </div>
+                <div id="restoreError" class="error-msg" style="display: none; margin-bottom: 12px;"></div>
+                <button id="restoreBtn" onclick="walletPage.restoreWallet()" class="unlock-btn" style="width: 100%;">Restore Wallet</button>
+            </div>
+        </div>
+
+        <!-- Locked View -->
+        <div id="lockedView" class="wallet-view">
+            <div class="wallet-header">
+                <h1>⛏️ XMR Tip Jar</h1>
+            </div>
+            <div class="wallet-card locked-view">
+                <div class="locked-icon">🔒</div>
+                <p style="color: #999; margin-bottom: 16px;">Enter your PIN to unlock</p>
+                <input type="password" id="unlockPin" class="pin-input" placeholder="••••••" maxlength="20">
+                <div id="unlockError" class="error-msg" style="display: none;"></div>
+                <br><br>
+                <button onclick="walletPage.unlock()" class="unlock-btn" style="width: 100%;">Unlock</button>
+            </div>
+        </div>
+
+        <!-- Dashboard View -->
+        <div id="dashboardView" class="wallet-view">
+            <div class="wallet-header">
+                <h1>⛏️ XMR Tip Jar</h1>
+                <div style="flex: 1;"></div>
+                <button onclick="walletPage.lock()" class="back-btn">🔒 Lock</button>
+            </div>
+
+            <!-- Balance Card -->
+            <div class="wallet-card">
+                <div class="balance-section">
+                    <div>
+                        <div style="color: #999; font-size: 13px; margin-bottom: 4px;">Available Balance</div>
+                        <div class="balance-available">
+                            <span id="availableBalance">0</span> <span style="font-size: 14px; color: #888;">XMR</span>
+                        </div>
+                        <div id="availableBalanceUSD" style="color: #888; font-size: 14px; margin-top: 2px;"></div>
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <span style="color: #666; font-size: 11px;">Total: </span>
+                        <span class="balance-total"><span id="totalBalance">0</span> XMR</span>
+                    </div>
+                </div>
+                <div id="lockedBalanceInfo" class="balance-locked">
+                    🔒 <span id="lockedAmount">0</span> XMR locked (awaiting confirmations)
+                </div>
+                <div id="pendingOutgoingInfo" style="background: rgba(255, 102, 0, 0.1); color: #FF6600; padding: 10px 12px; border-radius: 6px; font-size: 12px; margin-top: 12px; display: none;">
+                    📤 <span id="pendingOutgoingAmount">0</span> XMR recently sent (pending)
+                </div>
+                <div class="address-section">
+                    <div class="address-label">Your Address</div>
+                    <div class="address-row">
+                        <span id="walletAddress" class="address-text">...</span>
+                        <button onclick="walletPage.copyAddress()" class="copy-btn">📋</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button onclick="walletPage.showSend()" class="action-btn send">
+                    📤 Send
+                </button>
+                <button onclick="walletPage.showReceive()" class="action-btn receive">
+                    📥 Receive
+                </button>
+            </div>
+
+            <!-- Sync Status -->
+            <div class="sync-status">
+                <div id="syncSpinner" class="sync-spinner"></div>
+                <div class="sync-text">
+                    <div id="syncStatusText" style="color: #ccc; font-size: 13px;">Syncing...</div>
+                    <div id="syncProgress" style="color: #666; font-size: 11px;">Connecting...</div>
+                </div>
+                <button onclick="walletPage.sync()" class="sync-btn">↻</button>
+            </div>
+
+            <!-- Transaction History -->
+            <div class="section-title">📜 Transactions</div>
+            <div id="txHistory" class="tx-list">
+                <div class="empty-state">Loading transactions...</div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="quick-actions">
+                <button onclick="walletPage.showSeed()" class="quick-action-btn">🔑 View Seed Phrase</button>
+                <button onclick="walletPage.deleteWallet()" class="quick-action-btn" style="color: #ff6b6b; border-color: #ff6b6b33;">🗑️ Delete Wallet</button>
+            </div>
+        </div>
+
+        <!-- Send View -->
+        <div id="sendView" class="wallet-view">
+            <div class="wallet-header">
+                <button onclick="walletPage.showDashboard()" class="back-btn">← Back</button>
+                <h1>📤 Send</h1>
+            </div>
+            <div class="wallet-card">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Recipient Address</label>
+                    <input type="text" id="sendAddress" placeholder="4... or 8..." style="width: 100%; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; font-family: monospace;">
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Amount (XMR)</label>
+                    <input type="text" id="sendAmount" placeholder="0.001" oninput="walletPage.updateAmountUSD()" style="width: 100%; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px;">
+                    <div id="sendAmountUSD" style="color: #888; font-size: 13px; margin-top: 6px; display: none;">≈ $0.00 USD</div>
+                    <div style="margin-top: 10px;">
+                        <button id="maxAmountBtn" onclick="walletPage.setMaxAmount()" style="width: 100%; padding: 12px; background: #FF6600; border: none; border-radius: 6px; color: #000; cursor: pointer; font-weight: 600; min-height: 48px;">MAX (<span id="maxAmountDisplay">...</span> XMR<span id="maxAmountUSD" style="font-weight: normal; opacity: 0.8;"></span>)</button>
+                    </div>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Priority</label>
+                    <select id="sendPriority" style="width: 100%; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px;">
+                        <option value="low">Low (~0.00002 XMR)</option>
+                        <option value="normal" selected>Normal (~0.00004 XMR)</option>
+                        <option value="high">High (~0.00012 XMR)</option>
+                        <option value="urgent">Urgent (~0.00024 XMR)</option>
+                    </select>
+                </div>
+                <div id="sendError" class="error-msg" style="display: none; margin-bottom: 12px;"></div>
+                <button id="reviewBtn" onclick="walletPage.reviewTransaction()" class="action-btn send" style="width: 100%;">
+                    Review Transaction
+                </button>
+            </div>
+        </div>
+
+        <!-- Confirm Send View -->
+        <div id="confirmView" class="wallet-view">
+            <div class="wallet-header">
+                <button onclick="walletPage.cancelSend()" class="back-btn">← Back</button>
+                <h1>✓ Confirm</h1>
+            </div>
+            <div class="wallet-card">
+                <div class="detail-row">
+                    <span class="detail-label">Amount</span>
+                    <span class="detail-value"><span id="confirmAmount" style="color: #FF6600; font-weight: 600;">0 XMR</span></span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Fee</span>
+                    <span id="confirmFee" class="detail-value" style="color: #ffc107;">0 XMR</span>
+                </div>
+                <div class="detail-row" style="background: rgba(255, 102, 0, 0.1); margin: 0 -20px; padding: 12px 20px;">
+                    <span class="detail-label" style="font-weight: 600; color: #ccc;">Total</span>
+                    <span class="detail-value"><span id="confirmTotal" style="color: #FF6600; font-weight: 700; font-size: 16px;">0 XMR</span></span>
+                </div>
+                <div style="margin-top: 16px;">
+                    <div class="detail-label" style="margin-bottom: 8px;">Sending to</div>
+                    <div id="confirmAddress" style="font-family: monospace; font-size: 10px; color: #aaa; word-break: break-all; background: #0a0a0a; padding: 12px; border-radius: 8px;"></div>
+                </div>
+
+                <!-- Disclosure Options (shown only when tipping a note) -->
+                <div id="disclosureSection" style="display: none; margin-top: 16px;">
+                    <div class="detail-label" style="margin-bottom: 8px;">Tip Disclosure</div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: #0a0a0a; border-radius: 8px; cursor: pointer; border: 2px solid transparent;" id="disclosureSecretLabel">
+                            <input type="radio" name="disclosure" value="secret" checked style="width: 18px; height: 18px;">
+                            <div>
+                                <div style="color: #fff; font-weight: 500;">🔒 Keep it Secret</div>
+                                <div style="color: #666; font-size: 11px;">No public record</div>
+                            </div>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: #0a0a0a; border-radius: 8px; cursor: pointer; border: 2px solid transparent;" id="disclosureVerifiedLabel">
+                            <input type="radio" name="disclosure" value="verified" style="width: 18px; height: 18px;">
+                            <div>
+                                <div style="color: #10B981; font-weight: 500;">✓ Verified Disclosure</div>
+                                <div style="color: #666; font-size: 11px;">Shown on note with proof</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="confirmError" class="error-msg" style="display: none; margin-top: 12px;"></div>
+                <div style="background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 8px; padding: 12px; margin-top: 16px;">
+                    <p style="color: #ffc107; font-size: 12px; margin: 0;">⚠️ Cannot be reversed once sent.</p>
+                </div>
+            </div>
+            <div style="display: flex; gap: 12px; margin-top: 16px;">
+                <button onclick="walletPage.cancelSend()" class="back-btn" style="flex: 1; min-height: 52px;">
+                    Cancel
+                </button>
+                <button id="confirmBtn" onclick="walletPage.confirmSend()" class="action-btn send" style="flex: 2;">
+                    Confirm & Send
+                </button>
+            </div>
+        </div>
+
+        <!-- Receive View -->
+        <div id="receiveView" class="wallet-view">
+            <div class="wallet-header">
+                <button onclick="walletPage.showDashboard()" class="back-btn">← Back</button>
+                <h1>📥 Receive</h1>
+            </div>
+            <div class="wallet-card" style="text-align: center;">
+                <p style="color: #999; margin-bottom: 20px;">Share this address to receive Monero</p>
+                <div id="qrCode" style="background: #fff; padding: 16px; border-radius: 12px; display: inline-block; margin-bottom: 20px;"></div>
+                <div style="background: #0a0a0a; padding: 14px; border-radius: 8px; margin-bottom: 16px;">
+                    <div id="receiveAddress" style="font-family: monospace; font-size: 10px; color: #ccc; word-break: break-all; line-height: 1.6;"></div>
+                </div>
+                <button onclick="walletPage.copyAddress()" class="action-btn receive" style="width: 100%;">
+                    📋 Copy Address
+                </button>
+            </div>
+        </div>
+
+        <!-- Transaction Detail View -->
+        <div id="txDetailView" class="wallet-view">
+            <div class="wallet-header">
+                <button onclick="walletPage.showDashboard()" class="back-btn">← Back</button>
+                <h1>📄 Details</h1>
+            </div>
+            <div class="wallet-card">
+                <div id="txDetailContent">
+                    <!-- Filled dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Seed View -->
+        <div id="seedView" class="wallet-view">
+            <div class="wallet-header">
+                <button onclick="walletPage.showDashboard()" class="back-btn">← Back</button>
+                <h1>🔑 Seed</h1>
+            </div>
+            <div class="wallet-card">
+                <div style="background: rgba(255, 0, 0, 0.1); border: 1px solid rgba(255, 0, 0, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                    <p style="color: #ff6b6b; font-size: 13px; margin: 0; font-weight: 600;">🚨 Never share these words!</p>
+                </div>
+                <div id="seedWords" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 16px;"></div>
+                <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                    <p style="color: #FF6600; font-size: 13px; margin: 0; font-weight: 600;">📍 Restore Height: <span id="seedRestoreHeight" style="font-family: monospace;">...</span></p>
+                </div>
+                <button onclick="walletPage.copySeed()" class="quick-action-btn">📋 Copy Seed + Height</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Navigation -->
+    <nav class="mobile-bottom-nav">
+        <a href="/" class="nav-btn">
+            <span class="nav-icon">🏠</span>
+            <span class="nav-label">Home</span>
+        </a>
+        <a href="/?tab=search" class="nav-btn">
+            <span class="nav-icon">🔍</span>
+            <span class="nav-label">Search</span>
+        </a>
+        <a href="/wallet.html" class="nav-btn active">
+            <span class="nav-icon">⛏️</span>
+            <span class="nav-label">Tip Jar</span>
+        </a>
+        <a href="/?tab=messages" class="nav-btn">
+            <span class="nav-icon">💬</span>
+            <span class="nav-label">Messages</span>
+        </a>
+        <a href="/?tab=notifications" class="nav-btn">
+            <span class="nav-icon">🔔</span>
+            <span class="nav-label">Alerts</span>
+        </a>
+    </nav>
+
+    <!-- Nostr Tools (for disclosure publishing) -->
+    <script src="/lib/nostr-tools.bundle.js"></script>
+
+    <!-- Monero Wallet Library -->
+    <script src="/lib/monero-wallet.iife.js"></script>
+
+    <!-- Wallet Module -->
+    <script type="module">
+        import * as Wallet from '/js/wallet/index.js';
+        import { privateKey as getStatePrivateKey } from '/js/state.js';
+
+        // Check if user is logged into Nostr first
+        function checkNostrLogin() {
+            const nostrKey = localStorage.getItem('nostr-private-key');
+            const encryptedKey = localStorage.getItem('nostr-private-key-encrypted');
+            return !!(nostrKey || encryptedKey);
+        }
+
+        // Redirect to main page if not logged in
+        if (!checkNostrLogin()) {
+            console.log('[WalletPage] Not logged into Nostr, redirecting...');
+            window.location.href = '/?login=required';
+            throw new Error('Not logged in');
+        }
+
+        // Make Wallet available globally
+        window.Wallet = Wallet;
+
+        // XMR price cache
+        let xmrPriceUSD = null;
+        let priceLastFetched = 0;
+        const PRICE_CACHE_MS = 5 * 60 * 1000;
+
+        async function fetchXMRPrice() {
+            const now = Date.now();
+            if (xmrPriceUSD && (now - priceLastFetched) < PRICE_CACHE_MS) {
+                return xmrPriceUSD;
+            }
+            try {
+                const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd');
+                const data = await res.json();
+                xmrPriceUSD = data.monero?.usd || null;
+                priceLastFetched = now;
+                return xmrPriceUSD;
+            } catch (err) {
+                console.warn('[WalletPage] Failed to fetch XMR price:', err);
+                return xmrPriceUSD;
+            }
+        }
+
+        function formatXMRWithMinDecimals(atomicUnits, minDecimals = 5) {
+            const xmr = Number(atomicUnits) / 1e12;
+            if (xmr === 0) return '0';
+            if (xmr < 1) {
+                const formatted = xmr.toFixed(minDecimals);
+                return formatted.replace(/(\.\d*[1-9])0+$/, '$1').replace(/\.0+$/, '.00000');
+            }
+            return xmr.toFixed(minDecimals).replace(/\.?0+$/, '');
+        }
+
+        function formatUSD(usd) {
+            if (usd === null || usd === undefined) return null;
+            return '$' + usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        // Wallet page controller
+        const walletPage = {
+            currentView: 'loading',
+            currentTx: null,
+            pendingTxDetails: null,
+
+            async init() {
+                console.log('[WalletPage] Initializing...');
+                const hasWallet = await Wallet.hasWallet();
+
+                if (!hasWallet) {
+                    this.showView('noWalletView');
+                    return;
+                }
+
+                if (!Wallet.isWalletUnlocked()) {
+                    this.showView('lockedView');
+                    document.getElementById('unlockPin').addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter') this.unlock();
+                    });
+                    return;
+                }
+
+                await this.showDashboard();
+            },
+
+            showView(viewId) {
+                document.querySelectorAll('.wallet-view').forEach(v => v.classList.remove('active'));
+                document.getElementById(viewId)?.classList.add('active');
+                this.currentView = viewId;
+            },
+
+            async unlock() {
+                const pin = document.getElementById('unlockPin').value;
+                const errorEl = document.getElementById('unlockError');
+
+                if (!pin) {
+                    errorEl.textContent = 'Please enter your PIN';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                try {
+                    await Wallet.unlock(pin);
+                    await this.showDashboard();
+                } catch (err) {
+                    errorEl.textContent = err.message || 'Incorrect PIN';
+                    errorEl.style.display = 'block';
+                }
+            },
+
+            lock() {
+                Wallet.lock();
+                this.showView('lockedView');
+                document.getElementById('unlockPin').value = '';
+                window.showToast?.('Wallet locked', 'info');
+            },
+
+            async showDashboard() {
+                this.showView('dashboardView');
+                const address = await Wallet.getPrimaryAddress();
+                document.getElementById('walletAddress').textContent = address ? `${address.slice(0, 10)}...${address.slice(-10)}` : '...';
+                this.sync();
+                this.startPeriodicRefresh();
+
+                // Check for URL params to auto-navigate to send
+                this.checkUrlParams();
+            },
+
+            checkUrlParams() {
+                const params = new URLSearchParams(window.location.search);
+                const action = params.get('action');
+
+                if (action === 'send') {
+                    const address = params.get('address');
+                    const amount = params.get('amount');
+                    const note = params.get('note'); // e.g. "nosmero.com/n/abc123"
+
+                    if (address) {
+                        // Store params for pre-filling
+                        this.pendingSendParams = { address, amount, note };
+
+                        // Extract note ID if this is a tip (note format: nosmero.com/n/NOTEID)
+                        if (note && note.includes('/n/')) {
+                            const noteId = note.split('/n/')[1];
+                            if (noteId) {
+                                this.tipMeta = {
+                                    noteId: noteId,
+                                    address: address,
+                                    amount: amount
+                                };
+                            }
+                        }
+
+                        this.showSend();
+
+                        // Clear URL params to prevent re-triggering
+                        window.history.replaceState({}, '', '/wallet.html');
+                    }
+                }
+            },
+
+            startPeriodicRefresh() {
+                if (this.refreshInterval) clearInterval(this.refreshInterval);
+                this.refreshInterval = setInterval(async () => {
+                    if (!Wallet.isWalletUnlocked()) {
+                        clearInterval(this.refreshInterval);
+                        this.showView('lockedView');
+                        document.getElementById('unlockPin').value = '';
+                        window.showToast?.('Wallet locked', 'info');
+                        return;
+                    }
+                    if (this.currentView === 'dashboardView') {
+                        await this.updateBalance();
+                        await this.updateTransactions();
+                    }
+                }, 30000);
+            },
+
+            async sync() {
+                const spinner = document.getElementById('syncSpinner');
+                const statusText = document.getElementById('syncStatusText');
+                const progressEl = document.getElementById('syncProgress');
+
+                spinner.style.display = 'block';
+                statusText.textContent = 'Syncing...';
+
+                try {
+                    await Wallet.sync((progress) => {
+                        const percent = Math.round(progress.percentDone * 100) || 0;
+                        progressEl.textContent = `${percent}% - Block ${progress.currentHeight || 0}`;
+                    });
+
+                    spinner.style.display = 'none';
+                    statusText.textContent = '✓ Synced';
+                    await this.updateBalance();
+                    await this.updateTransactions();
+                } catch (err) {
+                    console.error('[WalletPage] Sync failed:', err);
+                    spinner.style.display = 'none';
+                    statusText.textContent = '⚠ Sync failed';
+                    progressEl.textContent = err.message;
+                }
+            },
+
+            async updateBalance() {
+                try {
+                    const balance = await Wallet.getBalance();
+                    const totalXMR = Wallet.formatXMR(balance.balance);
+                    const unlockedXMR = Wallet.formatXMR(balance.unlockedBalance);
+
+                    document.getElementById('availableBalance').textContent = unlockedXMR;
+                    document.getElementById('totalBalance').textContent = totalXMR;
+
+                    const price = await fetchXMRPrice();
+                    if (price) {
+                        const unlockedUSD = (Number(balance.unlockedBalance) / 1e12) * price;
+                        document.getElementById('availableBalanceUSD').textContent = '≈ ' + formatUSD(unlockedUSD);
+                    }
+
+                    const lockedInfo = document.getElementById('lockedBalanceInfo');
+                    if (balance.balance > balance.unlockedBalance) {
+                        const lockedXMR = Wallet.formatXMR(balance.balance - balance.unlockedBalance);
+                        document.getElementById('lockedAmount').textContent = lockedXMR;
+                        lockedInfo.style.display = 'block';
+                    } else {
+                        lockedInfo.style.display = 'none';
+                    }
+
+                    const pendingInfo = document.getElementById('pendingOutgoingInfo');
+                    if (balance.pendingOutgoing && balance.pendingOutgoing > 0n) {
+                        const pendingXMR = Wallet.formatXMR(balance.pendingOutgoing);
+                        document.getElementById('pendingOutgoingAmount').textContent = pendingXMR;
+                        pendingInfo.style.display = 'block';
+                    } else {
+                        pendingInfo.style.display = 'none';
+                    }
+                } catch (err) {
+                    console.error('[WalletPage] Balance update failed:', err);
+                }
+            },
+
+            async updateTransactions() {
+                const historyEl = document.getElementById('txHistory');
+
+                try {
+                    const txs = await Wallet.getTransactions(50);
+
+                    if (txs.length === 0) {
+                        historyEl.innerHTML = '<div class="empty-state">No transactions yet</div>';
+                        return;
+                    }
+
+                    historyEl.innerHTML = txs.map(tx => {
+                        const isIncoming = tx.isIncoming;
+                        const amountXMR = Wallet.formatXMR(tx.amount || 0n);
+                        const confirmations = tx.confirmations || 0;
+                        const isConfirmed = confirmations >= 10;
+
+                        let dateStr = 'Pending...';
+                        if (tx.timestamp) {
+                            const date = new Date(tx.timestamp * 1000);
+                            dateStr = date.toLocaleDateString();
+                        }
+
+                        const shortTxid = tx.txid ? `${tx.txid.slice(0, 6)}...` : '';
+
+                        return `
+                            <div class="tx-item" onclick="walletPage.showTxDetail('${tx.txid}')">
+                                <div class="tx-icon ${isIncoming ? 'incoming' : 'outgoing'}">${isIncoming ? '📥' : '📤'}</div>
+                                <div class="tx-details">
+                                    <div class="tx-amount ${isIncoming ? 'incoming' : 'outgoing'}">
+                                        ${isIncoming ? '+' : '-'}${amountXMR} XMR
+                                    </div>
+                                    <div class="tx-meta">
+                                        <span class="tx-date">${dateStr}</span>
+                                        <span class="tx-hash">${shortTxid}</span>
+                                    </div>
+                                </div>
+                                <div class="tx-status ${isConfirmed ? 'confirmed' : 'pending'}">
+                                    ${isConfirmed ? '✓' : confirmations + '/10'}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                } catch (err) {
+                    console.error('[WalletPage] Transaction update failed:', err);
+                    historyEl.innerHTML = '<div class="empty-state">Unable to load transactions</div>';
+                }
+            },
+
+            async showTxDetail(txid) {
+                this.showView('txDetailView');
+                const contentEl = document.getElementById('txDetailContent');
+                contentEl.innerHTML = '<div class="empty-state">Loading...</div>';
+
+                try {
+                    const wallet = await Wallet.getFullWallet();
+                    let txs = await wallet.getTxs({ hashes: [txid] });
+
+                    if (!txs || txs.length === 0) {
+                        try {
+                            txs = await wallet.getTxs({ hashes: [txid], inTxPool: true });
+                        } catch (e) {}
+                    }
+
+                    // Check cached transactions if not found
+                    if (!txs || txs.length === 0) {
+                        const currentPubkey = localStorage.getItem('nostr-public-key');
+                        const cachedTxs = await Wallet.storage.getCachedTransactions(currentPubkey, 100);
+                        const cachedTx = cachedTxs.find(t => t.txid === txid);
+
+                        if (cachedTx) {
+                            const amountXMR = cachedTx.amount ? Wallet.formatXMR(BigInt(cachedTx.amount)) : '?';
+                            const feeXMR = cachedTx.fee ? Wallet.formatXMR(BigInt(cachedTx.fee)) : '?';
+                            const date = cachedTx.timestamp ? new Date(cachedTx.timestamp * 1000).toLocaleString() : 'Recently';
+
+                            contentEl.innerHTML = `
+                                <div class="detail-row">
+                                    <span class="detail-label">Status</span>
+                                    <span class="detail-value" style="color: #ffc107;">⏳ Pending</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Amount</span>
+                                    <span class="detail-value">${amountXMR} XMR</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Fee</span>
+                                    <span class="detail-value">${feeXMR} XMR</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Date</span>
+                                    <span class="detail-value">${date}</span>
+                                </div>
+                                <div style="margin-top: 16px;">
+                                    <div class="detail-label" style="margin-bottom: 8px;">Transaction ID</div>
+                                    <div class="detail-value copyable" onclick="walletPage.copyText('${txid}')" style="background: #0a0a0a; padding: 12px; border-radius: 8px; font-size: 9px;">
+                                        ${txid} 📋
+                                    </div>
+                                </div>
+                                ${cachedTx.txKey ? `
+                                <div style="margin-top: 16px;">
+                                    <div class="detail-label" style="margin-bottom: 8px;">Tx Key</div>
+                                    <div class="detail-value copyable" onclick="walletPage.copyText('${cachedTx.txKey}')" style="background: #0a0a0a; padding: 12px; border-radius: 8px; font-size: 9px;">
+                                        ${cachedTx.txKey} 📋
+                                    </div>
+                                </div>
+                                ` : ''}
+                            `;
+                            return;
+                        }
+
+                        contentEl.innerHTML = '<div class="empty-state">Transaction not found</div>';
+                        return;
+                    }
+
+                    const tx = txs[0];
+                    const getValue = (obj, method, prop) => {
+                        if (typeof obj[method] === 'function') return obj[method]();
+                        if (prop && obj[prop] !== undefined) return obj[prop];
+                        return undefined;
+                    };
+
+                    const hash = getValue(tx, 'getHash', 'hash') || txid;
+                    const height = getValue(tx, 'getHeight', 'height');
+                    const confirmations = getValue(tx, 'getNumConfirmations', 'numConfirmations') || 0;
+                    const fee = getValue(tx, 'getFee', 'fee');
+                    let timestamp = getValue(tx, 'getTimestamp', 'timestamp');
+
+                    const incomingTransfers = getValue(tx, 'getIncomingTransfers', 'incomingTransfers');
+                    const outgoingTransfer = getValue(tx, 'getOutgoingTransfer', 'outgoingTransfer');
+                    const isIncoming = incomingTransfers && incomingTransfers.length > 0;
+                    const isOutgoing = outgoingTransfer !== undefined && outgoingTransfer !== null;
+
+                    let txKey = '';
+                    if (isOutgoing) {
+                        try {
+                            const currentPubkey = localStorage.getItem('nostr-public-key');
+                            const cachedTxs = await Wallet.storage.getCachedTransactions(currentPubkey, 100);
+                            const cachedTx = cachedTxs.find(t => t.txid === hash);
+                            if (cachedTx) txKey = cachedTx.txKey || '';
+                        } catch (e) {}
+
+                        if (!txKey) {
+                            try { txKey = await wallet.getTxKey(hash); } catch (e) {}
+                        }
+                    }
+
+                    let amount = 0n;
+                    if (isIncoming) {
+                        amount = getValue(tx, 'getIncomingAmount', 'incomingAmount') || 0n;
+                    } else {
+                        amount = getValue(tx, 'getOutgoingAmount', 'outgoingAmount') || 0n;
+                    }
+
+                    let dateStr = 'Pending';
+                    if (timestamp) {
+                        dateStr = new Date(timestamp * 1000).toLocaleString();
+                    }
+
+                    const amountXMR = Wallet.formatXMR(amount);
+                    const feeXMR = fee ? Wallet.formatXMR(fee) : 'N/A';
+                    const status = confirmations >= 10 ? 'Confirmed' : `${confirmations}/10`;
+
+                    contentEl.innerHTML = `
+                        <div class="detail-row">
+                            <span class="detail-label">Type</span>
+                            <span class="detail-value" style="color: ${isIncoming ? '#4ade80' : '#FF6600'};">
+                                ${isIncoming ? '📥 Received' : '📤 Sent'}
+                            </span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Amount</span>
+                            <span class="detail-value" style="color: ${isIncoming ? '#4ade80' : '#FF6600'}; font-weight: 600;">
+                                ${isIncoming ? '+' : '-'}${amountXMR} XMR
+                            </span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Fee</span>
+                            <span class="detail-value">${feeXMR} XMR</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Status</span>
+                            <span class="detail-value" style="color: ${confirmations >= 10 ? '#4ade80' : '#ffc107'};">${status}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Date</span>
+                            <span class="detail-value">${dateStr}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Block</span>
+                            <span class="detail-value">${height || 'Pending'}</span>
+                        </div>
+                        <div style="margin-top: 16px;">
+                            <div class="detail-label" style="margin-bottom: 8px;">Transaction ID</div>
+                            <div class="detail-value copyable" onclick="walletPage.copyText('${hash}')" style="background: #0a0a0a; padding: 12px; border-radius: 8px; font-size: 9px;">
+                                ${hash} 📋
+                            </div>
+                        </div>
+                        ${txKey ? `
+                        <div style="margin-top: 16px;">
+                            <div class="detail-label" style="margin-bottom: 8px;">Tx Key (Proof of Payment)</div>
+                            <div class="detail-value copyable" onclick="walletPage.copyText('${txKey}')" style="background: #0a0a0a; padding: 12px; border-radius: 8px; font-size: 9px;">
+                                ${txKey} 📋
+                            </div>
+                        </div>
+                        ` : ''}
+                    `;
+                } catch (err) {
+                    console.error('[WalletPage] Failed to load tx details:', err);
+                    contentEl.innerHTML = `<div class="empty-state">Error: ${err.message}</div>`;
+                }
+            },
+
+            async showSend() {
+                this.showView('sendView');
+                document.getElementById('sendError').style.display = 'none';
+                document.getElementById('sendAmountUSD').style.display = 'none';
+
+                // Check for pre-filled params from tip flow
+                if (this.pendingSendParams) {
+                    const { address, amount, note } = this.pendingSendParams;
+                    document.getElementById('sendAddress').value = address || '';
+                    document.getElementById('sendAmount').value = amount || '';
+                    this.pendingSendParams = null; // Clear after use
+
+                    if (amount) {
+                        this.updateAmountUSD();
+                    }
+
+                    // Show notification about pre-filled tip
+                    if (note) {
+                        window.showToast?.(`Tipping: ${note}`, 'info');
+                    }
+                } else {
+                    document.getElementById('sendAddress').value = '';
+                    document.getElementById('sendAmount').value = '';
+                }
+
+                fetchXMRPrice();
+
+                try {
+                    const balance = await Wallet.getBalance();
+                    const maxXMR = formatXMRWithMinDecimals(balance.unlockedBalance);
+                    document.getElementById('maxAmountDisplay').textContent = maxXMR;
+
+                    const price = await fetchXMRPrice();
+                    if (price) {
+                        const maxUSD = (Number(balance.unlockedBalance) / 1e12) * price;
+                        document.getElementById('maxAmountUSD').textContent = ' ≈ ' + formatUSD(maxUSD);
+                    }
+                } catch (err) {
+                    document.getElementById('maxAmountDisplay').textContent = '0';
+                }
+            },
+
+            async setMaxAmount() {
+                try {
+                    const balance = await Wallet.getBalance();
+                    const maxXMR = formatXMRWithMinDecimals(balance.unlockedBalance);
+                    document.getElementById('sendAmount').value = maxXMR;
+                    this.updateAmountUSD();
+                } catch (err) {
+                    console.error('[WalletPage] Get balance failed:', err);
+                }
+            },
+
+            async updateAmountUSD() {
+                const amountStr = document.getElementById('sendAmount').value.trim();
+                const usdEl = document.getElementById('sendAmountUSD');
+
+                if (!amountStr || isNaN(parseFloat(amountStr)) || parseFloat(amountStr) <= 0) {
+                    usdEl.style.display = 'none';
+                    return;
+                }
+
+                const xmrAmount = parseFloat(amountStr);
+                const price = await fetchXMRPrice();
+
+                if (price) {
+                    const usdAmount = xmrAmount * price;
+                    usdEl.textContent = '≈ ' + formatUSD(usdAmount) + ' USD';
+                    usdEl.style.display = 'block';
+                }
+            },
+
+            async reviewTransaction() {
+                const address = document.getElementById('sendAddress').value.trim();
+                const amountStr = document.getElementById('sendAmount').value.trim();
+                const priority = document.getElementById('sendPriority').value;
+                const errorEl = document.getElementById('sendError');
+                const btn = document.getElementById('reviewBtn');
+
+                if (!address) {
+                    errorEl.textContent = 'Enter recipient address';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                if (!address.startsWith('4') && !address.startsWith('8')) {
+                    errorEl.textContent = 'Invalid Monero address';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                if (!amountStr || isNaN(parseFloat(amountStr)) || parseFloat(amountStr) <= 0) {
+                    errorEl.textContent = 'Enter valid amount';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                errorEl.style.display = 'none';
+                btn.textContent = 'Creating...';
+                btn.disabled = true;
+
+                try {
+                    const amount = Wallet.parseXMR(amountStr);
+                    const txDetails = await Wallet.createTransaction(address, amount, priority);
+                    this.pendingTxDetails = txDetails;
+
+                    document.getElementById('confirmAmount').textContent = Wallet.formatXMR(txDetails.amount) + ' XMR';
+                    document.getElementById('confirmFee').textContent = Wallet.formatXMR(txDetails.fee) + ' XMR';
+                    document.getElementById('confirmTotal').textContent = Wallet.formatXMR(txDetails.amount + txDetails.fee) + ' XMR';
+                    document.getElementById('confirmAddress').textContent = txDetails.address;
+
+                    // Show disclosure section if this is a tip (we have tipMeta)
+                    const disclosureSection = document.getElementById('disclosureSection');
+                    const verifiedOption = document.getElementById('disclosureVerifiedLabel');
+                    if (this.tipMeta && this.tipMeta.noteId) {
+                        disclosureSection.style.display = 'block';
+                        // Reset to secret by default
+                        document.querySelector('input[name="disclosure"][value="secret"]').checked = true;
+
+                        // Check if verified disclosure is available
+                        const isEncrypted = localStorage.getItem('encryption-enabled') === 'true';
+                        const privateKey = localStorage.getItem('nostr-private-key');
+                        const canVerify = !isEncrypted && privateKey && privateKey !== 'extension' && privateKey !== 'amber' && privateKey !== 'nsec-app';
+
+                        if (verifiedOption) {
+                            if (canVerify) {
+                                verifiedOption.style.display = 'flex';
+                                verifiedOption.style.opacity = '1';
+                            } else {
+                                // Hide or disable verified option for PIN-encrypted accounts
+                                verifiedOption.style.display = 'none';
+                            }
+                        }
+                    } else {
+                        disclosureSection.style.display = 'none';
+                    }
+
+                    this.showView('confirmView');
+                } catch (err) {
+                    console.error('[WalletPage] Create tx failed:', err);
+                    let errorMsg = err.message || 'Failed to create transaction';
+                    if (errorMsg.includes('not enough money')) {
+                        errorMsg = 'Insufficient funds';
+                    }
+                    errorEl.textContent = errorMsg;
+                    errorEl.style.display = 'block';
+                } finally {
+                    btn.textContent = 'Review Transaction';
+                    btn.disabled = false;
+                }
+            },
+
+            cancelSend() {
+                Wallet.cancelPendingTransaction();
+                this.pendingTxDetails = null;
+                this.showView('sendView');
+            },
+
+            async confirmSend() {
+                const errorEl = document.getElementById('confirmError');
+                const btn = document.getElementById('confirmBtn');
+
+                btn.textContent = 'Sending...';
+                btn.disabled = true;
+
+                try {
+                    // Get disclosure preference if this is a tip
+                    const disclosureRadio = document.querySelector('input[name="disclosure"]:checked');
+                    const disclosure = disclosureRadio ? disclosureRadio.value : 'secret';
+
+                    // Relay the transaction
+                    const result = await Wallet.relayTransaction();
+
+                    window.showToast?.('Transaction sent!', 'success');
+
+                    // Handle disclosure if user selected verified and we have tip metadata
+                    if (disclosure === 'verified' && this.tipMeta && this.tipMeta.noteId) {
+                        try {
+                            btn.textContent = 'Publishing disclosure...';
+                            await this.publishVerifiedDisclosure(result.txHash, result.txKey);
+                            window.showToast?.('Tip disclosed!', 'success');
+                        } catch (discErr) {
+                            console.error('[WalletPage] Disclosure failed:', discErr);
+                            window.showToast?.('Tip sent, but disclosure failed', 'error');
+                        }
+                    }
+
+                    this.pendingTxDetails = null;
+                    this.tipMeta = null;
+                    await this.showDashboard();
+                } catch (err) {
+                    console.error('[WalletPage] Relay failed:', err);
+                    errorEl.textContent = err.message || 'Failed to send';
+                    errorEl.style.display = 'block';
+                    btn.textContent = 'Confirm & Send';
+                    btn.disabled = false;
+                }
+            },
+
+            async publishVerifiedDisclosure(txHash, txKey) {
+                if (!this.tipMeta) return;
+
+                const { noteId, address, amount } = this.tipMeta;
+                const senderPubkey = localStorage.getItem('nostr-public-key');
+
+                if (!senderPubkey) {
+                    throw new Error('Not logged in');
+                }
+
+                console.log('[WalletPage] Publishing verified disclosure for note:', noteId);
+
+                // Create kind 9736 event (Monero Zap Disclosure)
+                const event = {
+                    kind: 9736,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [
+                        ['e', noteId],
+                        ['amount', amount],
+                        ['proof', txHash],
+                        ['txkey', txKey]
+                    ],
+                    content: '',
+                    pubkey: senderPubkey
+                };
+
+                // Sign and publish
+                try {
+                    const NostrTools = window.NostrTools;
+                    if (!NostrTools) {
+                        throw new Error('NostrTools not available');
+                    }
+
+                    // Get private key for signing from localStorage (only works for unencrypted keys)
+                    let privateKey = localStorage.getItem('nostr-private-key');
+
+                    // Check if using encrypted storage
+                    const isEncrypted = localStorage.getItem('encryption-enabled') === 'true';
+                    if (isEncrypted) {
+                        // Key is PIN-encrypted - can't sign from wallet page
+                        // User can disclose manually from main app after tip is sent
+                        console.warn('[WalletPage] Key is PIN-encrypted, cannot auto-disclose');
+                        throw new Error('Verified disclosure not available with PIN-protected accounts. Tip will be sent anonymously.');
+                    }
+
+                    if (!privateKey || privateKey === 'extension' || privateKey === 'amber' || privateKey === 'nsec-app') {
+                        // For extension/remote signers, try window.nostr
+                        if (window.nostr && typeof window.nostr.signEvent === 'function') {
+                            console.log('[WalletPage] Using window.nostr to sign disclosure');
+                            const signedEvent = await window.nostr.signEvent(event);
+                            // Continue with publishing below
+                            return await this.publishSignedDisclosure(signedEvent, NostrTools);
+                        }
+                        console.warn('[WalletPage] Cannot sign disclosure - no signing method available');
+                        throw new Error('Disclosure requires signing capability');
+                    }
+
+                    // Sign the event with local key
+                    const signedEvent = NostrTools.finalizeEvent(event, privateKey);
+
+                    // Publish signed event
+                    await this.publishSignedDisclosure(signedEvent, NostrTools);
+
+                } catch (err) {
+                    console.error('[WalletPage] Disclosure publishing failed:', err);
+                    throw err;
+                }
+            },
+
+            async publishSignedDisclosure(signedEvent, NostrTools) {
+                // Publish to relays
+                const relays = [
+                    'wss://nosmero.com',
+                    'wss://relay.damus.io',
+                    'wss://nos.lol'
+                ];
+
+                let published = false;
+                for (const relayUrl of relays) {
+                    try {
+                        const relay = await NostrTools.Relay.connect(relayUrl);
+                        await relay.publish(signedEvent);
+                        relay.close();
+                        published = true;
+                        console.log('[WalletPage] Disclosure published to', relayUrl);
+                        break;
+                    } catch (e) {
+                        console.warn('[WalletPage] Failed to publish to', relayUrl, e);
+                    }
+                }
+
+                if (!published) {
+                    throw new Error('Failed to publish to any relay');
+                }
+            },
+
+            async showReceive() {
+                this.showView('receiveView');
+
+                const address = await Wallet.getPrimaryAddress();
+                document.getElementById('receiveAddress').textContent = address;
+
+                const qrEl = document.getElementById('qrCode');
+                qrEl.innerHTML = '';
+                if (window.QRCode && address) {
+                    new QRCode(qrEl, {
+                        text: `monero:${address}`,
+                        width: 180,
+                        height: 180,
+                        colorDark: '#000000',
+                        colorLight: '#ffffff'
+                    });
+                }
+            },
+
+            async copyAddress() {
+                const address = await Wallet.getPrimaryAddress();
+                if (address) {
+                    await navigator.clipboard.writeText(address);
+                    window.showToast?.('Address copied!', 'success');
+                }
+            },
+
+            async copyText(text) {
+                await navigator.clipboard.writeText(text);
+                window.showToast?.('Copied!', 'success');
+            },
+
+            async showSeed() {
+                if (!confirm('View seed phrase? Make sure no one is watching.')) return;
+
+                const seed = await Wallet.getSeed();
+                const restoreHeight = await Wallet.getRestoreHeight();
+                const words = seed.split(' ');
+
+                document.getElementById('seedWords').innerHTML = words.map((word, i) => `
+                    <div style="background: #0a0a0a; padding: 6px 8px; border-radius: 6px; font-family: monospace; font-size: 11px;">
+                        <span style="color: #666;">${i + 1}.</span>
+                        <span style="color: #fff;">${word}</span>
+                    </div>
+                `).join('');
+
+                document.getElementById('seedRestoreHeight').textContent = restoreHeight || 'Unknown';
+                this.showView('seedView');
+            },
+
+            async copySeed() {
+                const seed = await Wallet.getSeed();
+                const restoreHeight = await Wallet.getRestoreHeight();
+                const text = `${seed}\n\nRestore Height: ${restoreHeight || 0}`;
+                await navigator.clipboard.writeText(text);
+                window.showToast?.('Seed copied!', 'success');
+            },
+
+            async deleteWallet() {
+                if (!confirm('Delete wallet? Cannot be undone without seed phrase!')) return;
+                if (!confirm('FINAL WARNING: All funds lost without seed. Continue?')) return;
+
+                await Wallet.delete_();
+                window.showToast?.('Wallet deleted', 'info');
+                this.showView('noWalletView');
+            },
+
+            // Create wallet flow
+            tempSeed: null,
+            tempPin: null,
+            tempRestoreHeight: 0,
+            confirmWordIndexes: [],
+
+            showCreatePin() {
+                this.showView('createPinView');
+                document.getElementById('createPin').value = '';
+                document.getElementById('confirmPin').value = '';
+                document.getElementById('createPinError').style.display = 'none';
+            },
+
+            async createWallet() {
+                const pin = document.getElementById('createPin').value;
+                const confirmPin = document.getElementById('confirmPin').value;
+                const errorEl = document.getElementById('createPinError');
+
+                if (!pin || pin.length < 4) {
+                    errorEl.textContent = 'PIN must be at least 4 characters';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                if (pin !== confirmPin) {
+                    errorEl.textContent = 'PINs do not match';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                errorEl.style.display = 'none';
+                this.tempPin = pin;
+
+                try {
+                    const result = await Wallet.create(pin);
+                    this.tempSeed = result.seed;
+                    this.tempRestoreHeight = result.restoreHeight || 0;
+
+                    const words = this.tempSeed.split(' ');
+                    document.getElementById('backupSeedWords').innerHTML = words.map((word, i) => `
+                        <div style="background: #0a0a0a; padding: 6px 8px; border-radius: 6px; font-family: monospace; font-size: 11px;">
+                            <span style="color: #666;">${i + 1}.</span>
+                            <span style="color: #fff;">${word}</span>
+                        </div>
+                    `).join('');
+
+                    document.getElementById('backupRestoreHeight').textContent = this.tempRestoreHeight;
+                    this.showView('backupSeedView');
+                } catch (err) {
+                    console.error('[WalletPage] Create wallet failed:', err);
+                    errorEl.textContent = err.message || 'Failed to create wallet';
+                    errorEl.style.display = 'block';
+                }
+            },
+
+            async copyBackupSeed() {
+                if (this.tempSeed) {
+                    const text = `${this.tempSeed}\n\nRestore Height: ${this.tempRestoreHeight || 0}`;
+                    await navigator.clipboard.writeText(text);
+                    window.showToast?.('Seed copied!', 'success');
+                }
+            },
+
+            showConfirmSeed() {
+                const words = this.tempSeed.split(' ');
+                const idx1 = Math.floor(Math.random() * 12);
+                const idx2 = Math.floor(Math.random() * 12) + 13;
+                this.confirmWordIndexes = [idx1, idx2];
+
+                document.getElementById('confirmSeedPrompt').innerHTML = `
+                    <p style="color: #FF6600;">Enter word #${idx1 + 1} and #${idx2 + 1}</p>
+                `;
+                document.getElementById('confirmWord1').placeholder = `Word #${idx1 + 1}`;
+                document.getElementById('confirmWord2').placeholder = `Word #${idx2 + 1}`;
+                document.getElementById('confirmWord1').value = '';
+                document.getElementById('confirmWord2').value = '';
+                document.getElementById('confirmSeedError').style.display = 'none';
+
+                this.showView('confirmSeedView');
+            },
+
+            async verifySeed() {
+                const word1 = document.getElementById('confirmWord1').value.trim().toLowerCase();
+                const word2 = document.getElementById('confirmWord2').value.trim().toLowerCase();
+                const errorEl = document.getElementById('confirmSeedError');
+                const words = this.tempSeed.split(' ');
+
+                const expected1 = words[this.confirmWordIndexes[0]].toLowerCase();
+                const expected2 = words[this.confirmWordIndexes[1]].toLowerCase();
+
+                if (word1 !== expected1 || word2 !== expected2) {
+                    errorEl.textContent = 'Incorrect words. Check your backup.';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                this.tempSeed = null;
+                this.tempPin = null;
+                window.showToast?.('Wallet created!', 'success');
+                await this.showDashboard();
+            },
+
+            showRestoreSeed() {
+                this.showView('restoreSeedView');
+                document.getElementById('restoreSeedInput').value = '';
+                document.getElementById('restoreHeight').value = '';
+                document.getElementById('restorePin').value = '';
+                document.getElementById('restorePinConfirm').value = '';
+                document.getElementById('restoreError').style.display = 'none';
+            },
+
+            async restoreWallet() {
+                const seed = document.getElementById('restoreSeedInput').value.trim();
+                const heightStr = document.getElementById('restoreHeight').value.trim();
+                const pin = document.getElementById('restorePin').value;
+                const pinConfirm = document.getElementById('restorePinConfirm').value;
+                const errorEl = document.getElementById('restoreError');
+                const btn = document.getElementById('restoreBtn');
+
+                const words = seed.split(/\s+/).filter(w => w.length > 0);
+                if (words.length !== 25) {
+                    errorEl.textContent = `Seed must be 25 words (got ${words.length})`;
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                if (!pin || pin.length < 4) {
+                    errorEl.textContent = 'PIN must be at least 4 characters';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                if (pin !== pinConfirm) {
+                    errorEl.textContent = 'PINs do not match';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                const height = heightStr ? parseInt(heightStr, 10) : 0;
+
+                errorEl.style.display = 'none';
+                btn.textContent = 'Restoring...';
+                btn.disabled = true;
+
+                try {
+                    await Wallet.restore(words.join(' '), pin, height);
+                    window.showToast?.('Wallet restored!', 'success');
+                    await this.showDashboard();
+                } catch (err) {
+                    console.error('[WalletPage] Restore failed:', err);
+                    errorEl.textContent = err.message || 'Failed to restore';
+                    errorEl.style.display = 'block';
+                } finally {
+                    btn.textContent = 'Restore Wallet';
+                    btn.disabled = false;
+                }
+            }
+        };
+
+        // Toast function
+        window.showToast = (message, type = 'info') => {
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                bottom: 80px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: ${type === 'success' ? '#4ade80' : type === 'error' ? '#ff6b6b' : '#333'};
+                color: ${type === 'success' || type === 'error' ? '#000' : '#fff'};
+                padding: 12px 24px;
+                border-radius: 8px;
+                font-size: 14px;
+                z-index: 9999;
+            `;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        };
+
+        window.walletPage = walletPage;
+        walletPage.init();
+    </script>
+</body>
+</html>

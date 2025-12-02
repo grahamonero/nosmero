@@ -44,6 +44,11 @@ logo_nosmero.svg
 nosmero-logo-orange.svg
 nosmeroav.png
 
+# Environment and secrets
+.env
+api/.env
+*.env
+
 # System files
 .DS_Store
 Thumbs.db

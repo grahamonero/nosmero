@@ -1,0 +1,371 @@
+/**
+ * Nosmero Wallet - IndexedDB Storage Layer
+ *
+ * Handles encrypted wallet data persistence in the browser.
+ * Keys are stored encrypted with user's PIN - we never see plaintext keys.
+ */
+
+const DB_NAME = 'nosmero-wallet';
+const DB_VERSION = 1;
+
+// Object store names
+const STORES = {
+    WALLET: 'wallet',      // Encrypted keys and wallet metadata
+    SYNC: 'sync_state',    // Blockchain sync progress
+    TX_CACHE: 'tx_cache'   // Cached transaction data
+};
+
+let db = null;
+
+/**
+ * Initialize the IndexedDB database
+ * @returns {Promise<IDBDatabase>}
+ */
+export async function initDB() {
+    if (db) return db;
+
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+        request.onerror = () => {
+            console.error('[WalletStorage] Failed to open database:', request.error);
+            reject(request.error);
+        };
+
+        request.onsuccess = async () => {
+            db = request.result;
+            console.log('[WalletStorage] Database opened successfully');
+
+            // Migration: clear old tx cache entries without owner_pubkey
+            try {
+                await migrateOldTransactionCache();
+            } catch (e) {
+                console.warn('[WalletStorage] Migration error (non-fatal):', e.message);
+            }
+
+            resolve(db);
+        };
+
+        request.onupgradeneeded = (event) => {
+            const database = event.target.result;
+            console.log('[WalletStorage] Upgrading database schema...');
+
+            // Wallet store - holds encrypted keys
+            if (!database.objectStoreNames.contains(STORES.WALLET)) {
+                const walletStore = database.createObjectStore(STORES.WALLET, { keyPath: 'id' });
+                walletStore.createIndex('created_at', 'created_at', { unique: false });
+            }
+
+            // Sync state store - tracks blockchain sync progress
+            if (!database.objectStoreNames.contains(STORES.SYNC)) {
+                database.createObjectStore(STORES.SYNC, { keyPath: 'id' });
+            }
+
+            // Transaction cache - stores tx history locally
+            if (!database.objectStoreNames.contains(STORES.TX_CACHE)) {
+                const txStore = database.createObjectStore(STORES.TX_CACHE, { keyPath: 'txid' });
+                txStore.createIndex('timestamp', 'timestamp', { unique: false });
+                txStore.createIndex('height', 'height', { unique: false });
+            }
+        };
+    });
+}
+
+/**
+ * Check if a wallet exists in storage for a specific user
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @returns {Promise<boolean>}
+ */
+export async function walletExists(pubkey) {
+    if (!pubkey) {
+        return false;
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.WALLET, 'readonly');
+        const store = tx.objectStore(STORES.WALLET);
+        const request = store.get(pubkey);
+
+        request.onsuccess = () => {
+            resolve(request.result !== undefined);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Save encrypted wallet data
+ * @param {Object} walletData - Encrypted wallet data
+ * @param {Uint8Array} walletData.encrypted_keys - AES-GCM encrypted private keys
+ * @param {Uint8Array} walletData.iv - Initialization vector
+ * @param {Uint8Array} walletData.salt - PBKDF2 salt
+ * @param {string} walletData.primary_address - Primary wallet address (safe to store plaintext)
+ * @param {number} [walletData.restore_height] - Blockchain height when wallet was created
+ * @param {string} walletData.owner_pubkey - Nostr pubkey of wallet owner (required)
+ * @returns {Promise<void>}
+ */
+export async function saveWallet(walletData) {
+    if (!walletData.owner_pubkey) {
+        throw new Error('owner_pubkey is required to save wallet');
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.WALLET, 'readwrite');
+        const store = tx.objectStore(STORES.WALLET);
+
+        const record = {
+            id: walletData.owner_pubkey, // Use pubkey as unique ID
+            encrypted_keys: walletData.encrypted_keys,
+            iv: walletData.iv,
+            salt: walletData.salt,
+            primary_address: walletData.primary_address,
+            restore_height: walletData.restore_height || 0,
+            owner_pubkey: walletData.owner_pubkey,
+            created_at: Date.now(),
+            updated_at: Date.now()
+        };
+
+        const request = store.put(record);
+        request.onsuccess = () => {
+            console.log('[WalletStorage] Wallet saved for user:', walletData.owner_pubkey.substring(0, 8));
+            resolve();
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Load encrypted wallet data for a specific user
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @returns {Promise<Object|null>} Encrypted wallet data or null if not found
+ */
+export async function loadWallet(pubkey) {
+    if (!pubkey) {
+        console.warn('[WalletStorage] loadWallet called without pubkey');
+        return null;
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.WALLET, 'readonly');
+        const store = tx.objectStore(STORES.WALLET);
+        const request = store.get(pubkey);
+
+        request.onsuccess = () => {
+            resolve(request.result || null);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Delete wallet from storage for a specific user
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @returns {Promise<void>}
+ */
+export async function deleteWallet(pubkey) {
+    if (!pubkey) {
+        throw new Error('pubkey is required to delete wallet');
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORES.WALLET, STORES.SYNC, STORES.TX_CACHE], 'readwrite');
+
+        // Delete only this user's wallet data
+        tx.objectStore(STORES.WALLET).delete(pubkey);
+        tx.objectStore(STORES.SYNC).delete(pubkey);
+
+        // For tx cache, we need to delete all entries for this user
+        // Since tx cache uses txid as key, we need to clear all (or add user prefix later)
+        // For now, clear all tx cache when any wallet is deleted
+        tx.objectStore(STORES.TX_CACHE).clear();
+
+        tx.oncomplete = () => {
+            console.log('[WalletStorage] Wallet deleted for user:', pubkey.substring(0, 8));
+            resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+/**
+ * Save sync state (last synced height, etc.)
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @param {Object} syncState
+ * @param {number} syncState.height - Last synced blockchain height
+ * @param {number} [syncState.timestamp] - Last sync timestamp
+ * @returns {Promise<void>}
+ */
+export async function saveSyncState(pubkey, syncState) {
+    if (!pubkey) {
+        throw new Error('pubkey is required to save sync state');
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.SYNC, 'readwrite');
+        const store = tx.objectStore(STORES.SYNC);
+
+        const record = {
+            id: pubkey,
+            height: syncState.height,
+            timestamp: syncState.timestamp || Date.now()
+        };
+
+        const request = store.put(record);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Load sync state for a specific user
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @returns {Promise<Object|null>}
+ */
+export async function loadSyncState(pubkey) {
+    if (!pubkey) {
+        return null;
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.SYNC, 'readonly');
+        const store = tx.objectStore(STORES.SYNC);
+        const request = store.get(pubkey);
+
+        request.onsuccess = () => {
+            resolve(request.result || null);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Cache a transaction
+ * @param {Object} txData - Transaction data
+ * @param {string} ownerPubkey - Nostr pubkey of wallet owner
+ * @returns {Promise<void>}
+ */
+export async function cacheTransaction(txData, ownerPubkey) {
+    if (!ownerPubkey) {
+        console.warn('[WalletStorage] cacheTransaction called without ownerPubkey, skipping');
+        return;
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.TX_CACHE, 'readwrite');
+        const store = tx.objectStore(STORES.TX_CACHE);
+
+        // Use composite key: pubkey:txid to ensure per-user storage
+        const request = store.put({
+            ...txData,
+            txid: `${ownerPubkey}:${txData.txid}`, // Composite key
+            original_txid: txData.txid, // Keep original for display
+            owner_pubkey: ownerPubkey,
+            cached_at: Date.now()
+        });
+
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Get cached transactions for a specific user
+ * @param {string} ownerPubkey - Nostr pubkey of wallet owner
+ * @param {number} [limit=50] - Max transactions to return
+ * @returns {Promise<Array>}
+ */
+export async function getCachedTransactions(ownerPubkey, limit = 50) {
+    if (!ownerPubkey) {
+        console.warn('[WalletStorage] getCachedTransactions called without ownerPubkey');
+        return [];
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.TX_CACHE, 'readonly');
+        const store = tx.objectStore(STORES.TX_CACHE);
+        const index = store.index('timestamp');
+
+        const transactions = [];
+        const request = index.openCursor(null, 'prev'); // Newest first
+
+        request.onsuccess = (event) => {
+            const cursor = event.target.result;
+            if (cursor && transactions.length < limit) {
+                const txData = cursor.value;
+                // Only include transactions for this user
+                if (txData.owner_pubkey === ownerPubkey) {
+                    // Restore original txid for display
+                    transactions.push({
+                        ...txData,
+                        txid: txData.original_txid || txData.txid
+                    });
+                }
+                cursor.continue();
+            } else {
+                resolve(transactions);
+            }
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Clear transaction cache
+ * @returns {Promise<void>}
+ */
+export async function clearTransactionCache() {
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.TX_CACHE, 'readwrite');
+        const store = tx.objectStore(STORES.TX_CACHE);
+        const request = store.clear();
+
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Update wallet metadata (without changing encrypted keys)
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @param {Object} updates - Fields to update
+ * @returns {Promise<void>}
+ */
+export async function updateWalletMeta(pubkey, updates) {
+    if (!pubkey) {
+        throw new Error('pubkey is required to update wallet metadata');
+    }
+
+    await initDB();
+
+    const existing = await loadWallet(pubkey);
+    if (!existing) {
+        throw new Error('No wallet found to update');
+    }
+
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.WALLET, 'readwrite');
+        const store = tx.objectStore(STORES.WALLET);
+
+        const record = {
+            ...existing,
+            ...updates,
+            updated_at: Date.now()
+        };
+
+        const request = store.put(record);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+// Export store names for direct access if needed
+export { STORES, DB_NAME };

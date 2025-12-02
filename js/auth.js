@@ -158,6 +158,9 @@ export async function createNewAccount() {
         const derivedPublicKey = getPublicKey(privateKey);
         setPublicKey(derivedPublicKey);
 
+        // Save pubkey to localStorage for wallet and other modules
+        localStorage.setItem('nostr-public-key', derivedPublicKey);
+
         // Convert to nsec format for user display - use the original Uint8Array for encoding
         const nsec = nip19.nsecEncode(secretKey instanceof Uint8Array ? secretKey : privateKey);
 
@@ -270,6 +273,9 @@ export async function loginWithNsec() {
         // Generate and set public key
         const derivedPublicKey = getPublicKey(normalizedKey);
         setPublicKey(derivedPublicKey);
+
+        // Save pubkey to localStorage for wallet and other modules
+        localStorage.setItem('nostr-public-key', derivedPublicKey);
 
         // Mark login method
         localStorage.setItem('login-method', 'nsec');

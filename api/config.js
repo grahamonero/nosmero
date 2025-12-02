@@ -24,7 +24,7 @@ export const config = {
   // Note: check_tx_proof requires wallet RPC, not daemon RPC
   // You must run monero-wallet-rpc locally or use a wallet RPC service
   moneroRpcNodes: [
-    'http://127.0.0.1:18082',  // Local wallet RPC (IPv4)
+    'http://127.0.0.1:18083',  // Local wallet RPC (empty wallet, verification only)
     // Add additional wallet RPC nodes here for failover
   ],
 

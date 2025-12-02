@@ -807,6 +807,15 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
             console.error('[Trending] Error stack:', error.stack);
         }
 
+        // Process paywalled notes - check unlock status and reveal content if unlocked
+        try {
+            if (window.NostrPaywall?.processPaywalledNotes && homeFeedList) {
+                await window.NostrPaywall.processPaywalledNotes(homeFeedList);
+            }
+        } catch (error) {
+            console.error('Error processing paywalled notes in trending feed:', error);
+        }
+
         // Hide the home feed header for anonymous users (trending feed has its own banner)
         if (homeFeedHeader) {
             homeFeedHeader.style.display = 'none';
@@ -975,6 +984,15 @@ async function renderCachedTrendingFeed(cache) {
         console.error('[Trending Cache] Error stack:', error.stack);
     }
 
+    // Process paywalled notes - check unlock status and reveal content if unlocked
+    try {
+        if (window.NostrPaywall?.processPaywalledNotes) {
+            await window.NostrPaywall.processPaywalledNotes(homeFeedList);
+        }
+    } catch (error) {
+        console.error('Error processing paywalled notes in cached trending feed:', error);
+    }
+
     // Hide the home feed header for anonymous users (trending feed has its own banner)
     const header = document.getElementById('homeFeedHeader');
     if (header) {
@@ -1118,6 +1136,15 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
         console.error('[Trending Cache Logged-In] Error adding trust badges:', error);
     }
 
+    // Process paywalled notes - check unlock status and reveal content if unlocked
+    try {
+        if (window.NostrPaywall?.processPaywalledNotes) {
+            await window.NostrPaywall.processPaywalledNotes(feed);
+        }
+    } catch (error) {
+        console.error('Error processing paywalled notes in cached trending feed for logged-in user:', error);
+    }
+
     // Expose trending data to window for Puppeteer extraction (even when loaded from cache)
     window.__nosmeroTrendingCache__ = cache;
 
@@ -1210,6 +1237,15 @@ async function loadMoreTrendingPosts() {
             console.log(`[Trending Load More] Trust badges added for ${postsToRender.length} notes`);
         } catch (badgeError) {
             console.error('[Trending Load More] Error adding trust badges:', badgeError);
+        }
+
+        // Process paywalled notes - check unlock status and reveal content if unlocked
+        try {
+            if (window.NostrPaywall?.processPaywalledNotes && homeFeedList) {
+                await window.NostrPaywall.processPaywalledNotes(homeFeedList);
+            }
+        } catch (error) {
+            console.error('Error processing paywalled notes in load more trending posts:', error);
         }
 
         console.log(`📄 Loaded ${postsToRender.length} more trending posts (showing ${displayedTrendingPostCount} of ${cachedTrendingPosts.length})`);
@@ -2545,6 +2581,10 @@ export async function renderFeed(loadMore = false) {
             tips: []
         };
 
+        // Check if this is a paywalled post
+        const isPaywalled = window.NostrPaywall?.isPaywalled?.(post);
+        const paywallMeta = isPaywalled ? window.NostrPaywall.getPaywallMetadata(post) : null;
+
         // Check if this is a reply and get parent post info
         const parentPost = parentPostsMap[post.id];
         let parentHtml = '';
@@ -2587,7 +2627,22 @@ export async function renderFeed(loadMore = false) {
                         <span class="timestamp">${Utils.formatTime(post.created_at)}</span>
                     </div>
                 </div>
+                ${isPaywalled ? `
+                <div class="paywall-locked" data-note-id="${post.id}" onclick="openThreadView('${post.id}')" style="cursor: pointer;">
+                    <div class="paywall-preview">
+                        <p>${Utils.escapeHtml(paywallMeta?.preview || 'Premium content')}</p>
+                    </div>
+                    <div class="paywall-overlay">
+                        <div class="paywall-lock-icon">🔒</div>
+                        <div class="paywall-price">${paywallMeta?.priceXmr || '?'} XMR</div>
+                        <button class="paywall-unlock-btn" onclick="NostrPaywall.showUnlockModal('${post.id}'); event.stopPropagation();">
+                            Unlock Content
+                        </button>
+                    </div>
+                </div>
+                ` : `
                 <div class="post-content" onclick="openThreadView('${post.id}')" style="cursor: pointer;">${Utils.parseContent(post.content)}</div>
+                `}
                 <div class="post-actions" onclick="event.stopPropagation();">
                     <button class="action-btn" onclick="NostrPosts.replyToPost('${post.id}')">
                         💬 ${engagement.replies > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${engagement.replies}</span>` : ''}
@@ -2694,6 +2749,15 @@ export async function renderFeed(loadMore = false) {
         await Utils.processEmbeddedNotes('feed');
     } catch (error) {
         console.error('Error processing embedded notes in main feed:', error);
+    }
+
+    // Process paywalled notes (check unlock status, show locked/unlocked UI)
+    try {
+        if (window.NostrPaywall?.processPaywalledNotes) {
+            await window.NostrPaywall.processPaywalledNotes(feed);
+        }
+    } catch (error) {
+        console.error('Error processing paywalled notes in main feed:', error);
     }
 }
 
@@ -3877,6 +3941,10 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
             tips: []
         };
 
+        // Check if this is a paywalled post
+        const isPaywalled = window.NostrPaywall?.isPaywalled?.(post);
+        const paywallMeta = isPaywalled ? window.NostrPaywall.getPaywallMetadata(post) : null;
+
         // Check if this is a reply and get parent post info (only for feed context)
         let parentHtml = '';
         if (context === 'feed') {
@@ -3928,7 +3996,22 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                         <span class="timestamp">${Utils.formatTime(post.created_at)}</span>
                     </div>
                 </div>
+                ${isPaywalled ? `
+                <div class="paywall-locked" data-note-id="${post.id}" ${context !== 'thread' ? `onclick="openThreadView('${post.id}')" style="cursor: pointer;"` : ''}>
+                    <div class="paywall-preview">
+                        <p>${Utils.escapeHtml(paywallMeta?.preview || 'Premium content')}</p>
+                    </div>
+                    <div class="paywall-overlay">
+                        <div class="paywall-lock-icon">🔒</div>
+                        <div class="paywall-price">${paywallMeta?.priceXmr || '?'} XMR</div>
+                        <button class="paywall-unlock-btn" onclick="NostrPaywall.showUnlockModal('${post.id}'); event.stopPropagation();">
+                            Unlock Content
+                        </button>
+                    </div>
+                </div>
+                ` : `
                 <div class="post-content" ${context !== 'thread' ? `onclick="openThreadView('${post.id}')" style="cursor: pointer;"` : ''}>${Utils.parseContent(post.content)}</div>
+                `}
                 <div class="post-actions" onclick="event.stopPropagation();">
                     <button class="action-btn" onclick="NostrPosts.replyToPost('${post.id}')">
                         💬 ${engagement.replies > 0 ? `<span class="reply-count" style="font-size: 12px; margin-left: 2px;">${engagement.replies}</span>` : '<span class="reply-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
@@ -4106,8 +4189,79 @@ export function toggleCompose() {
                     textarea.scrollTop = textarea.scrollHeight;
                 }, 100);
             }
+
+            // Auto-populate XMR address if not already set
+            autoPopulateMoneroAddress();
         }
     }
+}
+
+// Auto-populate Monero address from wallet or localStorage
+async function autoPopulateMoneroAddress() {
+    const moneroInput = document.getElementById('composeMoneroAddress');
+    if (!moneroInput || moneroInput.value.trim()) return; // Already has value
+
+    // Try localStorage first
+    const storedAddress = localStorage.getItem('user-monero-address');
+    if (storedAddress?.startsWith('4')) {
+        moneroInput.value = storedAddress;
+        State.setUserMoneroAddress(storedAddress);
+        updateMoneroInputHint(moneroInput, null);
+        return;
+    }
+
+    // Try wallet address
+    try {
+        const MoneroClient = await import('./wallet/monero-client.js');
+
+        // Check if wallet exists but is locked
+        const walletExists = await MoneroClient.hasWallet();
+        const isUnlocked = MoneroClient.isWalletUnlocked();
+
+        if (walletExists && !isUnlocked) {
+            // Wallet exists but locked - show hint
+            updateMoneroInputHint(moneroInput, 'unlock');
+            return;
+        }
+
+        if (isUnlocked) {
+            const walletAddress = await MoneroClient.getPrimaryAddress();
+            if (walletAddress?.startsWith('4')) {
+                moneroInput.value = walletAddress;
+                localStorage.setItem('user-monero-address', walletAddress);
+                State.setUserMoneroAddress(walletAddress);
+                updateMoneroInputHint(moneroInput, null);
+            }
+        }
+    } catch (e) {
+        // Wallet not available, that's fine
+        console.log('[Compose] Wallet not available for auto-populate:', e.message);
+    }
+}
+
+// Update hint below Monero address input
+function updateMoneroInputHint(input, hintType) {
+    // Remove existing hint
+    const existingHint = input.parentElement?.querySelector('.monero-input-hint');
+    if (existingHint) existingHint.remove();
+
+    if (!hintType) return;
+
+    const hint = document.createElement('div');
+    hint.className = 'monero-input-hint';
+    hint.style.cssText = 'font-size: 11px; color: #888; margin-top: 4px; cursor: pointer;';
+
+    if (hintType === 'unlock') {
+        hint.innerHTML = '🔒 <span style="text-decoration: underline;">Unlock wallet</span> to auto-fill address';
+        hint.onclick = async () => {
+            // Trigger wallet unlock
+            if (window.WalletModal?.show) {
+                window.WalletModal.show();
+            }
+        };
+    }
+
+    input.parentElement?.appendChild(hint);
 }
 
 // Hide the compose area
@@ -4179,7 +4333,33 @@ export async function sendPost() {
                 return;
             }
         }
-        
+
+        // Check if paywall is enabled
+        const paywallSettings = window.NostrPaywall?.getPaywallSettings?.();
+        let paywallData = null;
+
+        if (paywallSettings?.enabled) {
+            // Validate paywall requirements
+            if (!State.userMoneroAddress) {
+                UI.showErrorToast('You must set a Monero address to create paywalled content');
+                return;
+            }
+
+            try {
+                // Create encrypted content and get public preview
+                paywallData = await window.NostrPaywall.createPaywalledContent({
+                    content: content,
+                    preview: paywallSettings.preview || null,
+                    priceXmr: paywallSettings.priceXmr,
+                    paymentAddress: State.userMoneroAddress
+                });
+            } catch (error) {
+                console.error('Failed to create paywalled content:', error);
+                UI.showErrorToast(`Failed to encrypt content: ${error.message}`);
+                return;
+            }
+        }
+
         // Create Nostr event
         const event = {
             kind: 1,
@@ -4187,16 +4367,45 @@ export async function sendPost() {
             tags: [
                 ['client', 'nosmero']
             ],
-            content: content
+            content: paywallData ? paywallData.publicContent : content
         };
 
         // Add Monero address tag if set
         if (State.userMoneroAddress) {
             event.tags.push(['monero_address', State.userMoneroAddress]);
         }
-        
+
+        // Add paywall tags if enabled
+        if (paywallData) {
+            const paywallTags = window.NostrPaywall.createPaywallTags({
+                priceXmr: paywallData.priceXmr,
+                paymentAddress: paywallData.paymentAddress,
+                preview: paywallData.preview,
+                encryptedContent: paywallData.encryptedContent
+            });
+            event.tags.push(...paywallTags);
+        }
+
         // Sign the event using helper function
         const signedEvent = await Utils.signEvent(event);
+
+        // If paywalled, register with backend before publishing
+        if (paywallData) {
+            try {
+                await window.NostrPaywall.registerPaywall({
+                    noteId: signedEvent.id,
+                    encryptedContent: paywallData.encryptedContent,
+                    decryptionKey: paywallData.decryptionKey,
+                    preview: paywallData.preview,
+                    priceXmr: paywallData.priceXmr,
+                    paymentAddress: paywallData.paymentAddress
+                });
+            } catch (error) {
+                console.error('Failed to register paywall:', error);
+                UI.showErrorToast(`Failed to register paywall: ${error.message}`);
+                return;
+            }
+        }
         
         // Publish to write relays only (NIP-65 compliant)
         const writeRelays = Relays.getWriteRelays();
@@ -4223,7 +4432,12 @@ export async function sendPost() {
         if (moneroInput) moneroInput.value = '';
         removeMedia('compose');
         updateCharacterCount(textarea, 'mainCharCount');
-        
+
+        // Reset paywall UI if it was used
+        if (window.NostrPaywall?.resetPaywallUI) {
+            window.NostrPaywall.resetPaywallUI();
+        }
+
         // Hide compose area
         hideCompose();
 
@@ -4620,8 +4834,19 @@ export function closeNewPostModal() {
 export async function showDisclosedTipDetails(postId, event) {
     if (event) event.stopPropagation();
 
-    const disclosedTips = disclosedTipsCache[postId];
-    // Check if there are ANY tips (including muted ones)
+    let disclosedTips = disclosedTipsCache[postId];
+
+    // If cache is empty or has no tips, fetch fresh data from relay
+    if (!disclosedTips || disclosedTips.tips.length === 0) {
+        console.log('💰 Cache empty for', postId, '- fetching fresh tip data...');
+        const freshData = await fetchDisclosedTips([postId]);
+        if (freshData[postId]) {
+            disclosedTipsCache[postId] = freshData[postId];
+            disclosedTips = freshData[postId];
+        }
+    }
+
+    // Check again after fresh fetch
     if (!disclosedTips || disclosedTips.tips.length === 0) {
         Utils.showNotification('No disclosed tips found', 'error');
         return;
