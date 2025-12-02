@@ -6,6 +6,7 @@ import { loadNostrLogin } from '../nostr-login-loader.js';
 import * as State from '../state.js';
 import { zapQueue, privateKey } from '../state.js';
 import { showSuccessToast, showErrorToast, showWarningToast } from './toasts.js';
+import * as Wallet from '../wallet/index.js';
 
 // Nosmerotips Bot npub (for receiving disclosure notifications)
 const NOSMEROTIPS_BOT_NPUB = 'npub1fxyuwwup7hh3x4up5tgg9hmflhfzskvkryh236cau4ujkj7wramqzmy9f2';
@@ -292,15 +293,16 @@ export function showGeneratedKeyModal(nsec) {
     // Hide login modal and show key modal
     hideLoginModal();
 
+    // Store nsec globally for the copy button (avoids inline escaping issues)
+    window._generatedNsec = nsec;
+
     // Create modal HTML
     const keyModal = document.getElementById('keyModal');
     if (keyModal) {
         keyModal.innerHTML = `
             <div class="modal-content" style="max-width: 500px;">
                 <div class="modal-header" style="color: #FF6600;">🔑 Your New Private Key</div>
-                <div style="margin: 20px 0; padding: 20px; background: #1a1a1a; border-radius: 8px; font-family: monospace; word-break: break-all; font-size: 14px; color: #fff;">
-                    ${nsec}
-                </div>
+                <div id="nsecDisplay" style="margin: 20px 0; padding: 20px; background: #1a1a1a; border-radius: 8px; font-family: monospace; word-break: break-all; font-size: 14px; color: #fff;"></div>
                 <div style="margin-bottom: 20px; color: #ff6600; font-weight: bold;">
                     ⚠️ CRITICAL: Save this key securely - it cannot be recovered!
                 </div>
@@ -311,7 +313,7 @@ export function showGeneratedKeyModal(nsec) {
                     • This is your only backup - if lost, your account is gone forever
                 </div>
                 <div style="display: flex; gap: 10px; justify-content: center;">
-                    <button onclick="copyToClipboard('${nsec}')" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                    <button id="copyNsecBtn" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                         📋 Copy Key
                     </button>
                     <button onclick="closeKeyModal()" style="background: #333; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">
@@ -320,6 +322,22 @@ export function showGeneratedKeyModal(nsec) {
                 </div>
             </div>
         `;
+
+        // Set nsec text safely (avoids XSS)
+        document.getElementById('nsecDisplay').textContent = nsec;
+
+        // Attach click handler for copy button
+        document.getElementById('copyNsecBtn').addEventListener('click', () => {
+            if (window._generatedNsec) {
+                navigator.clipboard.writeText(window._generatedNsec).then(() => {
+                    showSuccessToast('Copied to clipboard!');
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                    showErrorToast('Failed to copy to clipboard');
+                });
+            }
+        });
+
         keyModal.classList.add('show');
     }
 }
@@ -373,6 +391,11 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                 <label style="display: block; text-align: center; margin-bottom: 8px; color: #FF6600; font-weight: bold;">
                     Amount (XMR)
                 </label>
+                <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 8px;">
+                    <button class="preset-amount-btn" data-amount="0.00009" style="background: #333; border: 1px solid #FF6600; color: #FF6600; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">0.00009</button>
+                    <button class="preset-amount-btn" data-amount="0.00018" style="background: #333; border: 1px solid #FF6600; color: #FF6600; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">0.00018</button>
+                    <button class="preset-amount-btn" data-amount="custom" style="background: #333; border: 1px solid #888; color: #888; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">Custom</button>
+                </div>
                 <input type="number"
                        id="moneroZapAmount"
                        value="${escapeHtml(defaultAmount)}"
@@ -383,13 +406,28 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
             <div style="margin-bottom: 20px; font-size: 12px; color: #666; word-break: break-all; text-align: center;">
                 ${escapeHtml(moneroAddress)}
             </div>
+
+            <!-- Nosmero Wallet Option -->
+            <div id="walletTipSection" style="margin-bottom: 16px; padding: 16px; background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px;">
+                <div style="text-align: center; margin-bottom: 12px;">
+                    <span style="color: #FF6600; font-weight: 600;">💳 Pay with Nosmero Wallet</span>
+                </div>
+                <button id="walletTipBtn"
+                        style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                    Send from Wallet
+                </button>
+                <div id="walletTipStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: #888;"></div>
+            </div>
+
+            <div style="text-align: center; color: #666; font-size: 12px; margin-bottom: 12px;">─── OR ───</div>
+
             <div style="display: flex; gap: 12px; justify-content: center;">
                 <button id="zapNowBtn"
-                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
-                    Tip Now
+                        style="background: #333; border: 1px solid #888; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                    QR Code
                 </button>
                 <button id="addToQueueBtn"
-                        style="background: #6B73FF; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        style="background: #333; border: 1px solid #6B73FF; color: #6B73FF; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                     Add to Queue (${zapQueue.length}/20)
                 </button>
             </div>
@@ -404,6 +442,26 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
         setTimeout(() => {
             const zapNowBtn = document.getElementById('zapNowBtn');
             const addToQueueBtn = document.getElementById('addToQueueBtn');
+            const walletTipBtn = document.getElementById('walletTipBtn');
+            const presetBtns = document.querySelectorAll('.preset-amount-btn');
+
+            // Preset amount buttons
+            presetBtns.forEach(btn => {
+                btn.onclick = () => {
+                    const amt = btn.dataset.amount;
+                    if (amt !== 'custom') {
+                        document.getElementById('moneroZapAmount').value = amt;
+                    }
+                    // Highlight selected
+                    presetBtns.forEach(b => {
+                        b.style.background = '#333';
+                        b.style.borderColor = b.dataset.amount === 'custom' ? '#888' : '#FF6600';
+                    });
+                    btn.style.background = '#FF6600';
+                    btn.style.borderColor = '#FF6600';
+                    btn.style.color = '#000';
+                };
+            });
 
             if (zapNowBtn) {
                 zapNowBtn.onclick = () => zapWithCustomAmount(postId, authorName, moneroAddress);
@@ -412,6 +470,13 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
             if (addToQueueBtn) {
                 addToQueueBtn.onclick = () => addToQueueAndClose(postId, authorName, moneroAddress);
             }
+
+            if (walletTipBtn) {
+                walletTipBtn.onclick = () => handleWalletTip(postId, authorName, moneroAddress, recipientPubkey);
+            }
+
+            // Check wallet status and update button
+            updateWalletTipButton();
         }, 0);
 
     } else if (mode === 'immediate') {
@@ -505,6 +570,681 @@ export function zapWithCustomAmount(postId, authorName, moneroAddress) {
     openZapModal(postId, authorName, moneroAddress, 'immediate', customAmount, recipientPubkey);
 }
 
+// ==================== NOSMERO WALLET TIP FUNCTIONS ====================
+
+// Check wallet status and update the tip button accordingly
+async function updateWalletTipButton() {
+    const btn = document.getElementById('walletTipBtn');
+    const status = document.getElementById('walletTipStatus');
+    if (!btn || !status) return;
+
+    try {
+        const hasWallet = await Wallet.hasWallet();
+        const isUnlocked = await Wallet.isWalletUnlocked();
+
+        if (!hasWallet) {
+            btn.textContent = 'Create Tip Jar';
+            status.textContent = 'Create a tip jar to send tips instantly';
+        } else if (!isUnlocked) {
+            btn.textContent = 'Unlock & Send';
+            status.textContent = 'Enter PIN to unlock wallet';
+        } else {
+            btn.textContent = 'Send from Wallet';
+            const balance = await Wallet.getBalance();
+            const availableXMR = Wallet.formatXMR(balance.unlockedBalance);
+            status.textContent = `Available: ${availableXMR} XMR`;
+        }
+    } catch (err) {
+        console.error('[WalletTip] Error checking wallet status:', err);
+        btn.textContent = 'Create Tip Jar';
+        status.textContent = 'Create a tip jar to send tips instantly';
+    }
+}
+
+// Handle the wallet tip button click
+async function handleWalletTip(postId, authorName, moneroAddress, recipientPubkey) {
+    const btn = document.getElementById('walletTipBtn');
+    const status = document.getElementById('walletTipStatus');
+    const amountInput = document.getElementById('moneroZapAmount');
+    const amount = parseFloat(amountInput?.value);
+
+    if (!amount || amount <= 0 || isNaN(amount)) {
+        showErrorToast('Please enter a valid amount');
+        return;
+    }
+
+    try {
+        const hasWallet = await Wallet.hasWallet();
+
+        if (!hasWallet) {
+            // Open wallet modal to create wallet
+            closeZapModal();
+            window.openWalletModal();
+            return;
+        }
+
+        const isUnlocked = await Wallet.isWalletUnlocked();
+
+        if (!isUnlocked) {
+            // Show PIN input inline
+            showWalletPinInput(postId, authorName, moneroAddress, amount, recipientPubkey);
+            return;
+        }
+
+        // Wallet is unlocked, proceed with tip
+        await sendWalletTip(postId, authorName, moneroAddress, amount, recipientPubkey);
+
+    } catch (err) {
+        console.error('[WalletTip] Error:', err);
+        showErrorToast(err.message || 'Wallet error');
+    }
+}
+
+// Show inline PIN input for unlocking wallet
+function showWalletPinInput(postId, authorName, moneroAddress, amount, recipientPubkey) {
+    const section = document.getElementById('walletTipSection');
+    if (!section) return;
+
+    section.innerHTML = `
+        <div style="text-align: center; margin-bottom: 12px;">
+            <span style="color: #FF6600; font-weight: 600;">🔐 Unlock Wallet</span>
+        </div>
+        <input type="password" id="walletTipPin" placeholder="Enter PIN"
+               style="width: 100%; padding: 12px; background: #1a1a1a; border: 2px solid #FF6600; border-radius: 8px; color: #fff; text-align: center; font-size: 16px; margin-bottom: 12px;">
+        <button id="walletUnlockBtn"
+                style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+            Unlock & Send ${amount} XMR
+        </button>
+        <div id="walletTipStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: #888;"></div>
+    `;
+
+    setTimeout(() => {
+        const pinInput = document.getElementById('walletTipPin');
+        const unlockBtn = document.getElementById('walletUnlockBtn');
+
+        pinInput?.focus();
+
+        // Handle enter key
+        pinInput?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                unlockAndSend();
+            }
+        });
+
+        unlockBtn?.addEventListener('click', unlockAndSend);
+
+        async function unlockAndSend() {
+            const pin = pinInput?.value;
+            if (!pin) {
+                showErrorToast('Please enter your PIN');
+                return;
+            }
+
+            const status = document.getElementById('walletTipStatus');
+            if (status) status.textContent = 'Unlocking...';
+
+            try {
+                await Wallet.unlock(pin);
+                await sendWalletTip(postId, authorName, moneroAddress, amount, recipientPubkey);
+            } catch (err) {
+                console.error('[WalletTip] Unlock failed:', err);
+                if (status) status.textContent = 'Invalid PIN';
+                status.style.color = '#ef4444';
+            }
+        }
+    }, 0);
+}
+
+// Send the tip from wallet and show disclosure options
+async function sendWalletTip(postId, authorName, moneroAddress, amount, recipientPubkey) {
+    const section = document.getElementById('walletTipSection');
+    if (!section) return;
+
+    // Show sending state
+    section.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <div style="color: #FF6600; font-weight: 600; margin-bottom: 12px;">💳 Sending Tip...</div>
+            <div id="walletTipProgress" style="color: #888; font-size: 14px;">Syncing wallet...</div>
+        </div>
+    `;
+
+    const progress = document.getElementById('walletTipProgress');
+
+    try {
+        // Sync wallet before sending
+        if (progress) progress.textContent = 'Syncing wallet...';
+        await Wallet.sync();
+
+        // Check balance before attempting transaction
+        const balance = await Wallet.getBalance();
+        const atomicAmount = Wallet.parseXMR(amount.toString());
+
+        // Estimate fee (roughly 0.00005 XMR for normal priority)
+        const estimatedFee = 50000000n; // 0.00005 XMR in atomic units (1 XMR = 1e12 piconero)
+
+        // Ensure we're comparing BigInts properly
+        const unlockedBigInt = BigInt(balance.unlockedBalance);
+        const neededTotal = atomicAmount + estimatedFee;
+
+        if (unlockedBigInt < neededTotal) {
+            const availableXMR = Wallet.formatXMR(unlockedBigInt);
+            throw new Error(`Insufficient balance. Available: ${availableXMR} XMR`);
+        }
+
+        // Create transaction (get fee preview) - use 'low' priority for tips to minimize fees
+        if (progress) progress.textContent = 'Calculating fee...';
+        const txDetails = await Wallet.createTransaction(moneroAddress, atomicAmount, 'low');
+
+        // Show confirmation with fee
+        const feeXMR = Wallet.formatXMR(txDetails.fee);
+        const totalXMR = Wallet.formatXMR(txDetails.amount + txDetails.fee);
+
+        section.innerHTML = `
+            <div style="text-align: center; margin-bottom: 12px;">
+                <span style="color: #FF6600; font-weight: 600;">💳 Confirm Tip</span>
+            </div>
+            <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <span style="color: #888;">Amount:</span>
+                    <span style="color: #fff;">${amount} XMR</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <span style="color: #888;">Fee:</span>
+                    <span style="color: #ffc107;">${feeXMR} XMR</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 8px;">
+                    <span style="color: #888; font-weight: 600;">Total:</span>
+                    <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR</span>
+                </div>
+            </div>
+            <div style="margin-bottom: 12px;">
+                <label style="display: block; margin-bottom: 8px; color: #888; font-size: 13px;">Disclosure:</label>
+                <select id="walletTipDisclosure" style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff;">
+                    <option value="verified">✓ Verified (shown on note with proof)</option>
+                    <option value="secret">🔒 Secret (no disclosure)</option>
+                </select>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button id="confirmTipBtn"
+                        style="flex: 1; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                    Confirm & Send
+                </button>
+                <button id="cancelTipBtn"
+                        style="background: #333; border: none; color: #fff; padding: 12px 16px; border-radius: 8px; cursor: pointer;">
+                    Cancel
+                </button>
+            </div>
+        `;
+
+        setTimeout(() => {
+            const confirmBtn = document.getElementById('confirmTipBtn');
+            const cancelBtn = document.getElementById('cancelTipBtn');
+
+            confirmBtn?.addEventListener('click', async () => {
+                const disclosure = document.getElementById('walletTipDisclosure')?.value || 'secret';
+
+                section.innerHTML = `
+                    <div style="text-align: center; padding: 20px;">
+                        <div style="color: #FF6600; font-weight: 600; margin-bottom: 12px;">💳 Sending...</div>
+                        <div style="color: #888; font-size: 14px;">Broadcasting transaction...</div>
+                    </div>
+                `;
+
+                try {
+                    // Relay the transaction with recipient metadata
+                    const recipients = [{
+                        address: moneroAddress,
+                        amount: amount.toString(),
+                        noteId: postId,
+                        authorName: authorName
+                    }];
+                    const result = await Wallet.relayTransaction(recipients);
+
+                    // Show success
+                    section.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <div style="color: #10B981; font-weight: 600; font-size: 18px; margin-bottom: 8px;">✓ Tip Sent!</div>
+                            <div style="color: #888; font-size: 12px; word-break: break-all;">${result.txHash.slice(0, 16)}...</div>
+                        </div>
+                    `;
+
+                    showSuccessToast(`Sent ${amount} XMR to ${authorName}`);
+
+                    // Handle disclosure
+                    if (disclosure === 'verified') {
+                        await publishVerifiedTip(postId, moneroAddress, amount, result.txHash, result.txKey, recipientPubkey);
+                    }
+
+                    // Close modal after delay
+                    setTimeout(() => {
+                        closeZapModal();
+                    }, 2000);
+
+                } catch (err) {
+                    console.error('[WalletTip] Send failed:', err);
+                    section.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Send Failed</div>
+                            <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
+                        </div>
+                    `;
+                }
+            });
+
+            cancelBtn?.addEventListener('click', async () => {
+                await Wallet.cancelPendingTransaction();
+                // Reset to original state
+                const modal = document.getElementById('zapModal');
+                if (modal) {
+                    openZapModal(postId, authorName, moneroAddress, 'choose', amount, recipientPubkey);
+                }
+            });
+        }, 0);
+
+    } catch (err) {
+        console.error('[WalletTip] Create transaction failed:', err);
+        section.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+                <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Transaction Failed</div>
+                <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
+            </div>
+        `;
+    }
+}
+
+// Publish verified tip event (kind 9736) with tx_key
+async function publishVerifiedTip(postId, moneroAddress, amount, txHash, txKey, recipientPubkey) {
+    try {
+        // Validate recipientPubkey - must be 64 hex chars for relay to accept
+        if (!recipientPubkey || recipientPubkey.length !== 64) {
+            console.warn('[WalletTip] Skipping tip event - invalid recipientPubkey:', recipientPubkey);
+            return;
+        }
+
+        // Get current user's pubkey for P tag (tipper)
+        const State = await import('../state.js');
+        const tipperPubkey = State.default?.publicKey || State.publicKey || '';
+
+        // Create kind 9736 event for verified tip
+        const event = {
+            kind: 9736,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ['e', postId],                          // Referenced note
+                ['p', recipientPubkey],                 // Recipient (note author)
+                ['P', tipperPubkey],                    // Tipper pubkey (capital P)
+                ['amount', amount.toString()],          // XMR amount
+                ['txid', txHash],                       // Transaction ID
+                ['tx_key', txKey || ''],                // Transaction key for verification
+                ['verified', 'true']                    // Mark as verified (has txid + tx_key)
+            ],
+            content: ''
+        };
+
+        // Sign and publish
+        const signedEvent = await signEvent(event);
+        if (signedEvent) {
+            // Publish to nosmero relay (required for tip disclosures) AND user's relays
+            const StateModule = await import('../state.js');
+            const pool = StateModule.default?.pool || StateModule.pool;
+
+            if (pool) {
+                // Always include nosmero relay for tip disclosures
+                const nosmeroRelay = window.location.protocol === 'https:'
+                    ? 'wss://nosmero.com/nip78-relay'
+                    : 'ws://nosmero.com:8080/nip78-relay';
+
+                const userRelays = JSON.parse(localStorage.getItem('nostr-relays') || '[]');
+                const allRelays = [...new Set([nosmeroRelay, ...userRelays])];
+
+                if (allRelays.length > 0) {
+                    await pool.publish(allRelays, signedEvent);
+                    console.log('[WalletTip] Published verified tip event:', signedEvent.id, 'to', allRelays.length, 'relays');
+                }
+            } else {
+                console.error('[WalletTip] No relay pool available');
+            }
+        } else {
+            console.error('[WalletTip] Failed to sign event');
+        }
+    } catch (err) {
+        console.error('[WalletTip] Failed to publish tip event:', err);
+        // Don't show error to user - tip was still sent successfully
+    }
+}
+
+// ==================== QUEUE BATCH WALLET SEND ====================
+
+// Handle wallet batch send for queue
+async function handleQueueWalletSend(queue) {
+    const section = document.getElementById('queueWalletSection');
+    if (!section) return;
+
+    try {
+        const hasWallet = await Wallet.hasWallet();
+
+        if (!hasWallet) {
+            // Open wallet modal to create wallet
+            closeZapQueueModal();
+            window.openWalletModal();
+            return;
+        }
+
+        const isUnlocked = await Wallet.isWalletUnlocked();
+
+        if (!isUnlocked) {
+            // Show PIN input
+            showQueueWalletPinInput(queue);
+            return;
+        }
+
+        // Wallet is unlocked, show disclosure options and confirm
+        await showQueueBatchConfirm(queue);
+
+    } catch (err) {
+        console.error('[QueueWallet] Error:', err);
+        showErrorToast(err.message || 'Wallet error');
+    }
+}
+
+// Show inline PIN input for queue wallet
+function showQueueWalletPinInput(queue) {
+    const section = document.getElementById('queueWalletSection');
+    if (!section) return;
+
+    section.innerHTML = `
+        <div style="text-align: center; margin-bottom: 12px;">
+            <span style="color: #FF6600; font-weight: 600;">🔐 Unlock Wallet</span>
+        </div>
+        <input type="password" id="queueWalletPin" placeholder="Enter PIN"
+               style="width: 100%; padding: 12px; background: #1a1a1a; border: 2px solid #FF6600; border-radius: 8px; color: #fff; text-align: center; font-size: 16px; margin-bottom: 12px;">
+        <button id="queueUnlockBtn"
+                style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+            Unlock & Continue
+        </button>
+        <div id="queueWalletStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: #888;"></div>
+    `;
+
+    setTimeout(() => {
+        const pinInput = document.getElementById('queueWalletPin');
+        const unlockBtn = document.getElementById('queueUnlockBtn');
+
+        pinInput?.focus();
+
+        pinInput?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') unlockAndContinue();
+        });
+
+        unlockBtn?.addEventListener('click', unlockAndContinue);
+
+        async function unlockAndContinue() {
+            const pin = pinInput?.value;
+            if (!pin) {
+                showErrorToast('Please enter your PIN');
+                return;
+            }
+
+            const status = document.getElementById('queueWalletStatus');
+            if (status) status.textContent = 'Unlocking...';
+
+            try {
+                await Wallet.unlock(pin);
+                await showQueueBatchConfirm(queue);
+            } catch (err) {
+                console.error('[QueueWallet] Unlock failed:', err);
+                if (status) {
+                    status.textContent = 'Invalid PIN';
+                    status.style.color = '#ef4444';
+                }
+            }
+        }
+    }, 0);
+}
+
+// Show batch confirmation with disclosure options
+async function showQueueBatchConfirm(queue) {
+    const section = document.getElementById('queueWalletSection');
+    if (!section) return;
+
+    // Show loading
+    section.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <div style="color: #FF6600; font-weight: 600; margin-bottom: 12px;">💳 Preparing Batch...</div>
+            <div id="queueBatchProgress" style="color: #888; font-size: 14px;">Syncing wallet...</div>
+        </div>
+    `;
+
+    const progress = document.getElementById('queueBatchProgress');
+
+    try {
+        // Sync wallet before sending
+        await Wallet.sync();
+
+        if (progress) progress.textContent = 'Calculating fees...';
+
+        // Build destinations
+        const destinations = queue.map(item => ({
+            address: item.moneroAddress,
+            amount: Wallet.parseXMR((item.amount || '0.00018').toString())
+        }));
+
+        // Check balance before attempting transaction
+        const balance = await Wallet.getBalance();
+
+        console.log('[QueueBatch] Raw balance:', balance);
+        console.log('[QueueBatch] Destinations:', destinations.map(d => ({ addr: d.address.slice(0,8), amount: String(d.amount) })));
+
+        const totalAmount = destinations.reduce((sum, d) => sum + BigInt(d.amount), 0n);
+        const estimatedFee = 50000000n; // 0.00005 XMR estimate (1 XMR = 1e12 piconero)
+
+        // Ensure we're comparing BigInts properly
+        const unlockedBigInt = BigInt(balance.unlockedBalance);
+        const neededTotal = totalAmount + estimatedFee;
+
+        console.log('[QueueBatch] Balance check - unlocked:', unlockedBigInt.toString(), 'needed:', neededTotal.toString(), 'comparison:', unlockedBigInt >= neededTotal);
+
+        if (unlockedBigInt < neededTotal) {
+            const availableXMR = Wallet.formatXMR(unlockedBigInt);
+            const neededXMR = Wallet.formatXMR(totalAmount);
+            throw new Error(`Insufficient balance. Need ~${neededXMR} XMR + fee, available: ${availableXMR} XMR`);
+        }
+
+        // Create batch transaction for fee preview - use 'low' priority for tips to minimize fees
+        const txDetails = await Wallet.createBatchTransaction(destinations, 'low');
+        const feeXMR = Wallet.formatXMR(txDetails.fee);
+        const totalXMR = Wallet.formatXMR(txDetails.totalAmount + txDetails.fee);
+
+        section.innerHTML = `
+            <div style="text-align: center; margin-bottom: 12px;">
+                <span style="color: #FF6600; font-weight: 600;">💳 Confirm Batch Send</span>
+            </div>
+            <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <span style="color: #888;">Tips (${queue.length}):</span>
+                    <span style="color: #fff;">${Wallet.formatXMR(txDetails.totalAmount)} XMR</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <span style="color: #888;">Fee (one!):</span>
+                    <span style="color: #ffc107;">${feeXMR} XMR</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 8px;">
+                    <span style="color: #888; font-weight: 600;">Total:</span>
+                    <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR</span>
+                </div>
+            </div>
+
+            <!-- Disclosure Options -->
+            <div style="margin-bottom: 12px;">
+                <label style="display: block; margin-bottom: 8px; color: #888; font-size: 13px;">Disclosure:</label>
+                <div style="margin-bottom: 8px;">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="radio" name="queueDisclosureMode" value="all" checked style="margin-right: 8px;">
+                        <span style="color: #fff;">Apply to all:</span>
+                    </label>
+                    <select id="queueDisclosureAll" style="width: 100%; padding: 8px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; margin-top: 4px;">
+                        <option value="verified">✓ Verified (shown on notes with proof)</option>
+                        <option value="secret">🔒 Secret (no disclosure)</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="radio" name="queueDisclosureMode" value="individual" style="margin-right: 8px;">
+                        <span style="color: #fff;">Per tip:</span>
+                    </label>
+                    <div id="queuePerTipDisclosure" style="display: none; max-height: 150px; overflow-y: auto; margin-top: 8px;">
+                        ${queue.map((item, i) => `
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                <span style="color: #FF6600; font-size: 12px; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.authorName)}</span>
+                                <select id="queueDisclosure_${i}" style="flex: 1; padding: 6px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 12px;">
+                                    <option value="verified">✓ Verified</option>
+                                    <option value="secret">🔒 Secret</option>
+                                </select>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 8px;">
+                <button id="queueConfirmBtn"
+                        style="flex: 1; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                    Send All
+                </button>
+                <button id="queueCancelBtn"
+                        style="background: #333; border: none; color: #fff; padding: 12px 16px; border-radius: 8px; cursor: pointer;">
+                    Cancel
+                </button>
+            </div>
+        `;
+
+        // Handle disclosure mode toggle
+        setTimeout(() => {
+            const modeRadios = document.querySelectorAll('input[name="queueDisclosureMode"]');
+            const perTipSection = document.getElementById('queuePerTipDisclosure');
+            const allSelect = document.getElementById('queueDisclosureAll');
+
+            modeRadios.forEach(radio => {
+                radio.addEventListener('change', () => {
+                    if (radio.value === 'individual') {
+                        perTipSection.style.display = 'block';
+                        allSelect.style.display = 'none';
+                    } else {
+                        perTipSection.style.display = 'none';
+                        allSelect.style.display = 'block';
+                    }
+                });
+            });
+
+            const confirmBtn = document.getElementById('queueConfirmBtn');
+            const cancelBtn = document.getElementById('queueCancelBtn');
+
+            confirmBtn?.addEventListener('click', async () => {
+                // Get disclosure settings
+                const mode = document.querySelector('input[name="queueDisclosureMode"]:checked')?.value || 'all';
+                const disclosures = queue.map((item, i) => {
+                    if (mode === 'all') {
+                        return document.getElementById('queueDisclosureAll')?.value || 'secret';
+                    } else {
+                        return document.getElementById(`queueDisclosure_${i}`)?.value || 'secret';
+                    }
+                });
+
+                await sendQueueBatch(queue, disclosures);
+            });
+
+            cancelBtn?.addEventListener('click', async () => {
+                await Wallet.cancelPendingTransaction();
+                showZapQueue(); // Refresh queue view
+            });
+        }, 0);
+
+    } catch (err) {
+        console.error('[QueueWallet] Create batch failed:', err);
+        section.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+                <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Transaction Failed</div>
+                <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
+                <button onclick="showZapQueue()" style="margin-top: 12px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                    Back
+                </button>
+            </div>
+        `;
+    }
+}
+
+// Send the batch transaction and handle disclosures
+async function sendQueueBatch(queue, disclosures) {
+    const section = document.getElementById('queueWalletSection');
+    if (!section) return;
+
+    section.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <div style="color: #FF6600; font-weight: 600; margin-bottom: 12px;">💳 Sending...</div>
+            <div style="color: #888; font-size: 14px;">Broadcasting batch transaction...</div>
+        </div>
+    `;
+
+    try {
+        // Build recipient metadata for caching
+        const recipients = queue.map(item => ({
+            address: item.moneroAddress,
+            amount: (item.amount || '0.00018').toString(),
+            noteId: item.postId,
+            authorName: item.authorName
+        }));
+
+        // Relay the transaction with recipient metadata
+        const result = await Wallet.relayTransaction(recipients);
+
+        // Show success
+        section.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+                <div style="color: #10B981; font-weight: 600; font-size: 18px; margin-bottom: 8px;">✓ All Tips Sent!</div>
+                <div style="color: #888; font-size: 12px; word-break: break-all;">${result.txHash.slice(0, 20)}...</div>
+                <div style="color: #888; font-size: 12px; margin-top: 8px;">${queue.length} tips in one transaction</div>
+            </div>
+        `;
+
+        showSuccessToast(`Sent ${queue.length} tips in one transaction!`);
+
+        // Publish verified tip events for each tip that has disclosure = 'verified'
+        for (let i = 0; i < queue.length; i++) {
+            if (disclosures[i] === 'verified') {
+                const item = queue[i];
+                await publishVerifiedTip(
+                    item.postId,
+                    item.moneroAddress,
+                    item.amount || '0.00018',
+                    result.txHash,
+                    result.txKey,
+                    item.recipientPubkey || ''
+                );
+            }
+        }
+
+        // Clear the queue
+        clearZapQueue();
+        updateZapQueueIndicator();
+
+        // Close modal after delay
+        setTimeout(() => {
+            closeZapQueueModal();
+        }, 2500);
+
+    } catch (err) {
+        console.error('[QueueWallet] Send failed:', err);
+        section.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+                <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Send Failed</div>
+                <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
+                <button onclick="showZapQueue()" style="margin-top: 12px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                    Back
+                </button>
+            </div>
+        `;
+    }
+}
+
 // Generate QR code for Monero payment
 function generateMoneroQRCode(container, address, amount, postId) {
     const txNote = `nosmero.com/n/${postId}`;
@@ -578,11 +1318,24 @@ export function addToQueueAndClose(postId, authorName, moneroAddress) {
     const amountInput = document.getElementById('moneroZapAmount');
     const customAmount = amountInput ? parseFloat(amountInput.value) : null;
 
-    // Mark that user initiated a tip
-    userInitiatedTip = true;
+    // Get recipient pubkey from modal dataset
+    const modal = document.getElementById('zapModal');
+    const recipientPubkey = modal?.dataset?.recipientPubkey || '';
 
-    if (addToZapQueue(postId, authorName, moneroAddress, customAmount)) {
-        closeZapModal();
+    // DON'T set userInitiatedTip - adding to queue shouldn't trigger disclosure
+    // Disclosure happens when the queue is processed and payment is sent
+
+    if (addToZapQueue(postId, authorName, moneroAddress, customAmount, recipientPubkey)) {
+        // Clear tip context so disclosure modal doesn't show
+        lastTipContext = null;
+        userInitiatedTip = false;
+
+        // Close modal and show confirmation
+        const modal = document.getElementById('zapModal');
+        if (modal) {
+            modal.classList.remove('show');
+        }
+        showSuccessToast('Added to queue!');
     }
 }
 
@@ -616,6 +1369,152 @@ function showDisclosurePromptModal() {
 
     modal.classList.add('show');
 }
+
+// Close disclosure prompt modal
+export function closeDisclosurePromptModal() {
+    const modal = document.getElementById('disclosurePromptModal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+    // Clear tip context
+    lastTipContext = null;
+    userInitiatedTip = false;
+
+    // Reset to default option (secret)
+    const secretRadio = document.querySelector('input[name="disclosureOption"][value="secret"]');
+    if (secretRadio) secretRadio.checked = true;
+
+    // Hide sections
+    const messageSection = document.getElementById('messageSection');
+    const verificationFields = document.getElementById('verificationFields');
+    if (messageSection) messageSection.style.display = 'none';
+    if (verificationFields) verificationFields.style.display = 'none';
+
+    // Clear inputs
+    const messageInput = document.getElementById('disclosurePromptMessage');
+    const txidInput = document.getElementById('verificationTxid');
+    const txKeyInput = document.getElementById('verificationTxKey');
+    if (messageInput) messageInput.value = '';
+    if (txidInput) txidInput.value = '';
+    if (txKeyInput) txKeyInput.value = '';
+}
+
+// Update UI based on selected disclosure option
+export function updateDisclosureOption() {
+    const selectedOption = document.querySelector('input[name="disclosureOption"]:checked');
+    if (!selectedOption) return;
+
+    const value = selectedOption.value;
+    const messageSection = document.getElementById('messageSection');
+    const verificationFields = document.getElementById('verificationFields');
+
+    // Show/hide sections based on selection
+    if (value === 'secret') {
+        // Option A: Keep it secret - hide everything
+        if (messageSection) messageSection.style.display = 'none';
+        if (verificationFields) verificationFields.style.display = 'none';
+    } else if (value === 'disclose') {
+        // Option B: Disclose without verification
+        if (messageSection) messageSection.style.display = 'block';
+        if (verificationFields) verificationFields.style.display = 'none';
+    } else if (value === 'verify') {
+        // Option C: Disclose with verification (DM proofs)
+        if (messageSection) messageSection.style.display = 'block';
+        if (verificationFields) verificationFields.style.display = 'block';
+    }
+}
+
+// Submit disclosure prompt
+export async function submitDisclosurePrompt() {
+    if (!lastTipContext) {
+        showNotification('Tip context lost. Please try again.', 'error');
+        return;
+    }
+
+    // Get selected disclosure option
+    const selectedOption = document.querySelector('input[name="disclosureOption"]:checked');
+    if (!selectedOption) {
+        showNotification('Please select an option', 'error');
+        return;
+    }
+
+    const disclosureType = selectedOption.value;
+
+    // Path A: Keep it secret - just close modal, don't publish
+    if (disclosureType === 'secret') {
+        closeDisclosurePromptModal();
+        showSuccessToast('Tip sent privately');
+        return;
+    }
+
+    // For all public paths, get message and validate amount
+    const messageInput = document.getElementById('disclosurePromptMessage');
+    const message = messageInput?.value?.trim() || '';
+
+    const amount = lastTipContext.amount;
+    if (!amount || parseFloat(amount) <= 0) {
+        showNotification('Invalid tip amount', 'error');
+        return;
+    }
+
+    // Save context before closing modal
+    const postId = lastTipContext.postId;
+    const recipientPubkey = lastTipContext.recipientPubkey;
+    const moneroAddress = lastTipContext.moneroAddress;
+
+    let verificationData = null;
+
+    // Option C: Verification required (proofs sent via DM)
+    if (disclosureType === 'verify') {
+        const txidInput = document.getElementById('verificationTxid');
+        const txKeyInput = document.getElementById('verificationTxKey');
+
+        const txid = txidInput?.value?.trim() || '';
+        const txKey = txKeyInput?.value?.trim() || '';
+
+        // Validate both fields provided
+        if (!txid || !txKey) {
+            showNotification('Both TXID and tx_key are required for verification', 'error');
+            return;
+        }
+
+        // Basic format validation
+        if (txid.length !== 64) {
+            showNotification('Invalid TXID format (must be 64 characters)', 'error');
+            return;
+        }
+
+        if (txKey.length !== 64) {
+            showNotification('Invalid tx_key format (must be 64 characters)', 'error');
+            return;
+        }
+
+        verificationData = {
+            txid: txid,
+            txKey: txKey
+        };
+    }
+
+    // Close the modal
+    closeDisclosurePromptModal();
+
+    // Publish the tip disclosure
+    try {
+        await publishVerifiedTip(postId, moneroAddress, amount,
+            verificationData?.txid || '',
+            verificationData?.txKey || '',
+            recipientPubkey);
+        showSuccessToast('Tip disclosed!');
+    } catch (err) {
+        console.error('[Disclosure] Failed to publish:', err);
+        showErrorToast('Failed to publish disclosure');
+    }
+}
+
+// Make disclosure functions available globally
+window.closeDisclosurePromptModal = closeDisclosurePromptModal;
+window.updateDisclosureOption = updateDisclosureOption;
+window.submitDisclosurePrompt = submitDisclosurePrompt;
 
 // ==================== LIGHTNING ZAP MODAL ====================
 
@@ -965,7 +1864,7 @@ export function copyToClipboard(text) {
 // ==================== XMR ZAP QUEUE ====================
 
 // Add a zap to the queue (max 20 items)
-function addToZapQueue(postId, authorName, moneroAddress, customAmount = null) {
+function addToZapQueue(postId, authorName, moneroAddress, customAmount = null, recipientPubkey = '') {
     // Import state
     const StateModule = window.NostrState || {};
     let queue = StateModule.zapQueue || [];
@@ -991,6 +1890,7 @@ function addToZapQueue(postId, authorName, moneroAddress, customAmount = null) {
         authorName,
         moneroAddress,
         amount,
+        recipientPubkey,
         timestamp: Date.now()
     });
 
@@ -1009,7 +1909,7 @@ function addToZapQueue(postId, authorName, moneroAddress, customAmount = null) {
 }
 
 // Show the zap queue modal
-export function showZapQueue() {
+export async function showZapQueue() {
     const StateModule = window.NostrState || {};
     const queue = StateModule.zapQueue || JSON.parse(localStorage.getItem('zapQueue') || '[]');
 
@@ -1018,6 +1918,26 @@ export function showZapQueue() {
 
     const content = document.getElementById('zapQueueContent');
     if (!content) return;
+
+    // Check wallet status
+    let hasWallet = false;
+    let isUnlocked = false;
+    let availableBalance = 0n;
+    try {
+        hasWallet = await Wallet.hasWallet();
+        if (hasWallet) {
+            isUnlocked = await Wallet.isWalletUnlocked();
+            if (isUnlocked) {
+                const balance = await Wallet.getBalance();
+                availableBalance = balance.unlockedBalance;
+            }
+        }
+    } catch (e) {}
+
+    // Calculate total amount
+    const totalAmount = queue.reduce((sum, item) => {
+        return sum + parseFloat(item.amount || '0.00018');
+    }, 0);
 
     if (queue.length === 0) {
         content.innerHTML = `
@@ -1031,9 +1951,34 @@ export function showZapQueue() {
         content.innerHTML = `
             <div style="margin-bottom: 16px; padding: 12px; background: #1a1a1a; border-radius: 8px;">
                 <strong>${queue.length} note${queue.length === 1 ? '' : 's'} in queue</strong>
-                <p style="font-size: 14px; color: #666; margin-top: 4px;">Process queue to display QR codes sequentially for one transaction</p>
+                <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">Total: ${totalAmount.toFixed(5)} XMR</div>
             </div>
-            <div style="max-height: 400px; overflow-y: auto;">
+
+            <!-- Wallet Batch Send Option -->
+            <div id="queueWalletSection" style="margin-bottom: 16px; padding: 16px; background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px;">
+                <div style="text-align: center; margin-bottom: 12px;">
+                    <span style="color: #FF6600; font-weight: 600;">💳 Send All with Nosmero Wallet</span>
+                    <div style="font-size: 12px; color: #888; margin-top: 4px;">One transaction, one fee!</div>
+                </div>
+                <button id="queueWalletSendBtn"
+                        style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                    ${hasWallet ? (isUnlocked ? 'Send All' : 'Unlock & Send All') : 'Create Tip Jar'}
+                </button>
+                <div id="queueWalletStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: #888;">
+                    ${hasWallet && isUnlocked ? `Available: ${Wallet.formatXMR(availableBalance)} XMR` : (hasWallet ? 'Enter PIN to unlock' : 'Create a tip jar to batch send')}
+                </div>
+            </div>
+
+            <div style="text-align: center; color: #666; font-size: 12px; margin-bottom: 12px;">─── OR ───</div>
+
+            <div style="margin-bottom: 16px;">
+                <button onclick="showBatchQrCodes()" style="width: 100%; background: #333; border: 1px solid #888; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                    Show QR Codes Sequentially
+                </button>
+                <div style="font-size: 11px; color: #666; text-align: center; margin-top: 4px;">For external wallet users</div>
+            </div>
+
+            <div style="max-height: 300px; overflow-y: auto;">
                 ${queue.map((item, index) => `
                     <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1;">
@@ -1048,6 +1993,14 @@ export function showZapQueue() {
                 `).join('')}
             </div>
         `;
+
+        // Attach wallet send button handler
+        setTimeout(() => {
+            const walletBtn = document.getElementById('queueWalletSendBtn');
+            if (walletBtn) {
+                walletBtn.onclick = () => handleQueueWalletSend(queue);
+            }
+        }, 0);
     }
 
     modal.classList.add('show');

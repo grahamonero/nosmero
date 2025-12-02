@@ -86,22 +86,39 @@ export async function storeSecurePrivateKey(privateKey, pin) {
 // Retrieve and decrypt private key
 export async function getSecurePrivateKey(pin) {
     const isEncrypted = localStorage.getItem('encryption-enabled') === 'true';
-    
+
     if (!isEncrypted) {
         // Return unencrypted key for backward compatibility
         return localStorage.getItem('nostr-private-key');
     }
-    
+
     const encryptedKey = localStorage.getItem('nostr-private-key-encrypted');
     if (!encryptedKey || !pin) return null;
-    
+
     try {
         const key = await deriveKey(pin);
-        return await decryptData(encryptedKey, key);
+        const decryptedKey = await decryptData(encryptedKey, key);
+
+        // Store in sessionStorage so page reloads within same session don't require PIN
+        if (decryptedKey) {
+            sessionStorage.setItem('nostr-session-key', decryptedKey);
+        }
+
+        return decryptedKey;
     } catch (error) {
         console.error('Failed to decrypt private key:', error);
         return null;
     }
+}
+
+// Check if session key is available (for page reloads within same session)
+export function getSessionKey() {
+    return sessionStorage.getItem('nostr-session-key');
+}
+
+// Clear session key (called on logout)
+export function clearSessionKey() {
+    sessionStorage.removeItem('nostr-session-key');
 }
 
 // ==================== ACCOUNT CREATION ====================
@@ -157,11 +174,23 @@ export async function createNewAccount() {
         // Generate and set public key
         const derivedPublicKey = getPublicKey(privateKey);
         setPublicKey(derivedPublicKey);
+        localStorage.setItem('nostr-public-key', derivedPublicKey);
+
+        // Mark login method
+        localStorage.setItem('login-method', 'nsec');
 
         // Convert to nsec format for user display - use the original Uint8Array for encoding
         const nsec = nip19.nsecEncode(secretKey instanceof Uint8Array ? secretKey : privateKey);
 
-        showNotification(`Account created and secured with PIN! Save your backup: ${nsec.substring(0, 20)}...`, 'success');
+        // Show the nsec backup modal so user can copy/save their key
+        if (window.NostrUI && window.NostrUI.showGeneratedKeyModal) {
+            window.NostrUI.showGeneratedKeyModal(nsec);
+        } else {
+            // Fallback: show in alert if modal not available
+            alert(`IMPORTANT - Save your private key:\n\n${nsec}\n\nThis cannot be recovered if lost!`);
+        }
+
+        showNotification('Account created! Make sure to save your private key backup.', 'success');
 
         // Clear all home feed state to prevent anonymous posts from persisting
         if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
@@ -270,6 +299,7 @@ export async function loginWithNsec() {
         // Generate and set public key
         const derivedPublicKey = getPublicKey(normalizedKey);
         setPublicKey(derivedPublicKey);
+        localStorage.setItem('nostr-public-key', derivedPublicKey);
 
         // Mark login method
         localStorage.setItem('login-method', 'nsec');
@@ -642,6 +672,9 @@ export async function logout() {
     localStorage.removeItem('encryption-enabled');
     localStorage.removeItem('nostr-private-key-encrypted');
     localStorage.removeItem('amber-bunker-uri');
+
+    // Clear session key (used for same-session page navigation without PIN)
+    clearSessionKey();
 
     // Use comprehensive settings clearing function
     clearUserSettings();

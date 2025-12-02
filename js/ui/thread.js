@@ -3,6 +3,7 @@
 
 import { showSkeletonLoader } from './skeleton.js';
 import { setPreviousPage, getPreviousPage } from './profile.js';
+import * as PaywallUI from '../paywall-ui.js';
 
 // ==================== THREAD TREE BUILDING ====================
 
@@ -368,6 +369,13 @@ export async function openThreadView(eventId, skipHistory = false) {
             console.error('Error adding trust badges to thread:', error);
         }
 
+        // Process paywalled notes (check unlock status, show locked/unlocked UI)
+        try {
+            await PaywallUI.processPaywalledNotes(threadContent);
+        } catch (error) {
+            console.error('Error processing paywalled notes in thread:', error);
+        }
+
     } catch (error) {
         console.error('Error opening thread view:', error);
         const threadContent = document.getElementById('threadContent');
@@ -496,6 +504,13 @@ export async function openSingleNoteView(eventId) {
             await Utils.processEmbeddedNotes('threadPageContent');
         } catch (error) {
             console.error('Error processing embedded notes:', error);
+        }
+
+        // Process paywalled notes (check unlock status, show locked/unlocked UI)
+        try {
+            await PaywallUI.processPaywalledNotes(threadContent);
+        } catch (error) {
+            console.error('Error processing paywalled notes:', error);
         }
 
     } catch (error) {

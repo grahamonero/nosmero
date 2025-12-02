@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monero Wallet Test - Nosmero</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 { color: #ff6600; }
+        .test-section {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #10b981;
+        }
+        button {
+            background: linear-gradient(135deg, #ff6600, #8b5cf6);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        button:hover { opacity: 0.9; }
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        pre {
+            background: #111;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status.success { background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; }
+        .status.error { background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; }
+        .status.info { background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #fff;
+            margin: 5px 0;
+        }
+        .seed-words {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+            margin: 15px 0;
+        }
+        .seed-word {
+            background: #333;
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+            font-family: monospace;
+        }
+        .seed-word span { color: #666; font-size: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Monero Wallet Test</h1>
+    <p>Testing monero-ts WebAssembly bundle for Nosmero</p>
+
+    <!-- Test 1: Library Load -->
+    <div class="test-section">
+        <h3>1. Library Load Status</h3>
+        <div id="loadStatus">Checking...</div>
+    </div>
+
+    <!-- Test 2: Keys-Only Wallet -->
+    <div class="test-section">
+        <h3>2. Create Keys-Only Wallet (Fast)</h3>
+        <p>Generates seed phrase and keys without syncing - instant.</p>
+        <button onclick="createKeysOnlyWallet()">Create Keys-Only Wallet</button>
+        <div id="keysOnlyResult"></div>
+    </div>
+
+    <!-- Test 3: Restore from Seed -->
+    <div class="test-section">
+        <h3>3. Restore Wallet from Seed</h3>
+        <p>Enter a 25-word seed to restore keys.</p>
+        <textarea id="seedInput" rows="3" style="width: 100%; background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 6px;"
+            placeholder="Enter 25-word seed phrase..."></textarea>
+        <button onclick="restoreFromSeed()">Restore Keys</button>
+        <div id="restoreResult"></div>
+    </div>
+
+    <!-- Test 4: Daemon Connection -->
+    <div class="test-section">
+        <h3>4. Connect to Daemon</h3>
+        <p>Test connection to our Monero node.</p>
+        <input type="text" id="daemonUri" value="https://nosmero.com:18089" placeholder="Daemon URI">
+        <button onclick="testDaemonConnection()">Test Connection</button>
+        <div id="daemonResult"></div>
+    </div>
+
+    <!-- Test 5: Full Wallet (with sync) -->
+    <div class="test-section">
+        <h3>5. Create Full Wallet (With Sync)</h3>
+        <p>Creates a wallet that can sync with the network. This is slower.</p>
+        <button onclick="createFullWallet()">Create Full Wallet</button>
+        <div id="fullWalletResult"></div>
+    </div>
+
+    <!-- Load the bundle (includes SES sandbox workaround for MetaMask/Coinbase/Phantom) -->
+    <script src="/lib/monero-wallet.iife.js"></script>
+
+    <script>
+        // Test 1: Check if library loaded
+        function checkLibraryLoad() {
+            const statusDiv = document.getElementById('loadStatus');
+            if (typeof MoneroTS !== 'undefined') {
+                statusDiv.innerHTML = `
+                    <div class="status success">
+                        <strong>MoneroTS loaded successfully!</strong><br>
+                        Bundle version: ${MoneroTS._bundleVersion || 'unknown'}<br>
+                        monero-ts version: ${MoneroTS._moneroTsVersion || 'unknown'}<br>
+                        Available functions: ${Object.keys(MoneroTS).slice(0, 10).join(', ')}...
+                    </div>
+                `;
+            } else {
+                statusDiv.innerHTML = `
+                    <div class="status error">
+                        <strong>MoneroTS failed to load!</strong><br>
+                        Check browser console for errors.
+                    </div>
+                `;
+            }
+        }
+
+        // Test 2: Create keys-only wallet (instant)
+        async function createKeysOnlyWallet() {
+            const resultDiv = document.getElementById('keysOnlyResult');
+            resultDiv.innerHTML = '<div class="status info">Creating wallet...</div>';
+
+            try {
+                // Create a keys-only wallet (no sync needed)
+                const wallet = await MoneroTS.createWalletKeys({
+                    networkType: MoneroTS.MoneroNetworkType.MAINNET,
+                    language: "English"
+                });
+
+                const seed = await wallet.getSeed();
+                const address = await wallet.getPrimaryAddress();
+                const privateViewKey = await wallet.getPrivateViewKey();
+                const privateSpendKey = await wallet.getPrivateSpendKey();
+
+                // Format seed as grid
+                const words = seed.split(' ');
+                let seedHtml = '<div class="seed-words">';
+                words.forEach((word, i) => {
+                    seedHtml += `<div class="seed-word"><span>${i + 1}.</span> ${word}</div>`;
+                });
+                seedHtml += '</div>';
+
+                resultDiv.innerHTML = `
+                    <div class="status success">
+                        <strong>Wallet Created!</strong>
+                    </div>
+                    <h4>Seed Phrase (25 words):</h4>
+                    ${seedHtml}
+                    <h4>Primary Address:</h4>
+                    <pre>${address}</pre>
+                    <h4>Private View Key:</h4>
+                    <pre>${privateViewKey}</pre>
+                    <h4>Private Spend Key:</h4>
+                    <pre>${privateSpendKey}</pre>
+                `;
+
+                await wallet.close();
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="status error">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                    <pre>${error.stack}</pre>
+                `;
+            }
+        }
+
+        // Test 3: Restore from seed
+        async function restoreFromSeed() {
+            const resultDiv = document.getElementById('restoreResult');
+            const seedInput = document.getElementById('seedInput').value.trim();
+
+            if (!seedInput) {
+                resultDiv.innerHTML = '<div class="status error">Please enter a seed phrase</div>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<div class="status info">Restoring wallet...</div>';
+
+            try {
+                const wallet = await MoneroTS.createWalletKeys({
+                    networkType: MoneroTS.MoneroNetworkType.MAINNET,
+                    seed: seedInput
+                });
+
+                const address = await wallet.getPrimaryAddress();
+                const privateViewKey = await wallet.getPrivateViewKey();
+
+                resultDiv.innerHTML = `
+                    <div class="status success">
+                        <strong>Wallet Restored!</strong>
+                    </div>
+                    <h4>Primary Address:</h4>
+                    <pre>${address}</pre>
+                    <h4>Private View Key:</h4>
+                    <pre>${privateViewKey}</pre>
+                `;
+
+                await wallet.close();
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="status error">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Test 4: Daemon connection
+        async function testDaemonConnection() {
+            const resultDiv = document.getElementById('daemonResult');
+            const daemonUri = document.getElementById('daemonUri').value;
+
+            resultDiv.innerHTML = '<div class="status info">Connecting to daemon...</div>';
+
+            try {
+                const daemon = await MoneroTS.connectToDaemonRpc(daemonUri);
+                const height = await daemon.getHeight();
+                const info = await daemon.getInfo();
+
+                resultDiv.innerHTML = `
+                    <div class="status success">
+                        <strong>Connected!</strong>
+                    </div>
+                    <h4>Blockchain Height:</h4>
+                    <pre>${height.toLocaleString()}</pre>
+                    <h4>Network Info:</h4>
+                    <pre>${JSON.stringify({
+                        height: info.getHeight(),
+                        difficulty: info.getDifficulty()?.toString(),
+                        networkType: info.getNetworkType(),
+                        isSynchronized: info.getIsSynchronized()
+                    }, null, 2)}</pre>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="status error">
+                        <strong>Connection Failed:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Test 5: Full wallet
+        async function createFullWallet() {
+            const resultDiv = document.getElementById('fullWalletResult');
+            resultDiv.innerHTML = '<div class="status info">Creating full wallet (this may take a moment)...</div>';
+
+            try {
+                const wallet = await MoneroTS.createWalletFull({
+                    networkType: MoneroTS.MoneroNetworkType.MAINNET,
+                    language: "English",
+                    // Don't connect to daemon yet, just create
+                });
+
+                const seed = await wallet.getSeed();
+                const address = await wallet.getPrimaryAddress();
+
+                resultDiv.innerHTML = `
+                    <div class="status success">
+                        <strong>Full Wallet Created!</strong>
+                    </div>
+                    <h4>Address:</h4>
+                    <pre>${address}</pre>
+                    <h4>Seed (first 5 words):</h4>
+                    <pre>${seed.split(' ').slice(0, 5).join(' ')}...</pre>
+                    <p><em>Full wallet is ready for syncing with daemon.</em></p>
+                `;
+
+                await wallet.close();
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="status error">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                    <pre>${error.stack}</pre>
+                `;
+            }
+        }
+
+        // Run initial check
+        window.addEventListener('load', () => {
+            setTimeout(checkLibraryLoad, 500);
+        });
+    </script>
+</body>
+</html>

@@ -10,8 +10,10 @@ import {
     relays,
     posts,
     profileCache,
+    eventCache,
     setCurrentPage
 } from './state.js';
+import * as PaywallUI from './paywall-ui.js';
 
 // ==================== GLOBAL VARIABLES ====================
 
@@ -1840,6 +1842,11 @@ function renderSearchResults() {
             break;
     }
 
+    // Cache events in eventCache for paywall processing
+    sortedResults.forEach(post => {
+        eventCache[post.id] = post;
+    });
+
     resultsEl.innerHTML = sortedResults.map(post => {
         const engagement = searchEngagementData[post.id] || { reactions: 0, reposts: 0, replies: 0 };
         return renderSingleResult(post, engagement);
@@ -1849,6 +1856,13 @@ function renderSearchResults() {
     sortedResults.forEach(post => {
         updateLikeButtonState(post.id);
     });
+
+    // Process paywalled notes (check unlock status, show locked/unlocked UI)
+    try {
+        PaywallUI.processPaywalledNotes(resultsEl);
+    } catch (e) {
+        console.warn('[Search] Paywall processing error:', e);
+    }
 }
 
 // Render a single search result
@@ -1872,7 +1886,7 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
     }
 
     return `
-        <div class="post" style="background: #1a1a1a; border-bottom: 1px solid #333; padding: 16px; margin-bottom: 1px;">
+        <div class="post" data-note-id="${escapeHtml(post.id)}" style="background: #1a1a1a; border-bottom: 1px solid #333; padding: 16px; margin-bottom: 1px;">
             <div class="post-header" style="display: flex; align-items: center; margin-bottom: 12px;">
                 ${author.picture ?
                     `<img class="avatar" src="${escapeHtml(author.picture)}" alt="${escapeHtml(author.name)}" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` :
