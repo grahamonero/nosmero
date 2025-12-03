@@ -1058,7 +1058,8 @@
     <script src="/lib/nostr-tools.bundle.js"></script>
 
     <!-- Monero Wallet Library -->
-    <script src="/lib/monero-wallet.iife.js"></script>
+    <!-- SRI hash protects against supply chain attacks on the WASM bundle -->
+    <script src="/lib/monero-wallet.iife.js" integrity="sha384-/bPHoGgNd6VwHiBPUzapfjKCa5QgS4l77vrHImA0Bmku2+QIezVJCxmPnArNZQBi" crossorigin="anonymous"></script>
 
     <!-- Wallet Module -->
     <script type="module">

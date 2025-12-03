@@ -1072,7 +1072,8 @@
     <script src="/lib/nostr-tools.bundle.js"></script>
 
     <!-- Monero wallet WASM library for paywall/wallet features -->
-    <script src="/lib/monero-wallet.iife.js"></script>
+    <!-- SRI hash protects against supply chain attacks on the WASM bundle -->
+    <script src="/lib/monero-wallet.iife.js" integrity="sha384-/bPHoGgNd6VwHiBPUzapfjKCa5QgS4l77vrHImA0Bmku2+QIezVJCxmPnArNZQBi" crossorigin="anonymous"></script>
 
     <!-- UI Redesign JS - New minimal header, hamburger menu, feed tabs -->
     <script src="/js/ui-redesign.js?v=3.2.1"></script>
@@ -1084,5 +1085,7 @@
     <script type="module" src="/js/wallet-modal.js?v=1.0.5"></script>
 
     <!-- Eruda Mobile Debugging Console (DEV ONLY) -->
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>eruda.init();</script>
 </body>
 </html>
