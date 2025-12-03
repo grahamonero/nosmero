@@ -1120,13 +1120,19 @@ export async function sync(onProgress) {
         }
     }
 
-    console.log('[MoneroClient] Starting sync...');
+    // Create a proper listener that extends MoneroWalletListener
+    // monero-ts checks instanceof MoneroWalletListener, so plain objects don't work
+    const MoneroTS = getMoneroTS();
 
-    // Create a proper listener with all required methods
-    const listener = {
-        onSyncProgress: (height, listenerStartHeight, endHeight, percentDone, message) => {
-            if (onProgress) {
-                onProgress({
+    class SyncListener extends MoneroTS.MoneroWalletListener {
+        constructor(progressCallback) {
+            super();
+            this.progressCallback = progressCallback;
+        }
+
+        async onSyncProgress(height, listenerStartHeight, endHeight, percentDone, message) {
+            if (this.progressCallback) {
+                this.progressCallback({
                     currentHeight: height,
                     numBlocksDone: height - listenerStartHeight,
                     numBlocksTotal: endHeight - listenerStartHeight,
@@ -1134,30 +1140,19 @@ export async function sync(onProgress) {
                     message: message || `Syncing block ${height}...`
                 });
             }
-        },
-        // Required stub methods to avoid errors
-        onNewBlock: (height) => {
-            // Block received during sync
-        },
-        onBalancesChanged: (newBalance, newUnlockedBalance) => {
-            // Balance changed
-        },
-        onOutputReceived: (output) => {
-            // Output received
-        },
-        onOutputSpent: (output) => {
-            // Output spent
         }
-    };
+    }
 
-    await wallet.addListener(listener);
+    const listener = new SyncListener(onProgress);
 
     try {
-        // Pass startHeight to resume from last sync position (delta sync)
-        await wallet.sync(undefined, startHeight);
-    } finally {
-        // Remove listener after sync
-        await wallet.removeListener(listener);
+        // Pass listener as first param and startHeight as second param
+        // monero-ts sync() signature: sync(listenerOrStartHeight?, startHeight?, allowConcurrentCalls?)
+        // The listener MUST be an instance of MoneroWalletListener for this to work correctly
+        await wallet.sync(listener, startHeight);
+    } catch (e) {
+        console.error('[MoneroClient] Sync error:', e);
+        throw e;
     }
 
     // Save sync state
