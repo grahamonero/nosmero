@@ -7,6 +7,12 @@
     <script src="/lib/qrcode.min.js"></script>
     <link rel="stylesheet" href="/styles.css?v=1.8.5-settings-scroll">
 
+    <!-- Eruda mobile debugging console (DEV ONLY - REMOVE BEFORE PRODUCTION) -->
+    <!-- SRI hash ensures CDN hasn't been tampered with -->
+    <script src="https://cdn.jsdelivr.net/npm/eruda"
+            integrity="sha384-F7xQBvh3l6dG/mMD6QPIeVmXtzWT4Ce3ZDu8ysPuzMWMx9bFOIMGnRPUhLuQipss"
+            crossorigin="anonymous"></script>
+    <script>eruda.init();</script>
 </head>
 <body>
     <!-- ==================================
@@ -1029,7 +1035,7 @@
 
     <!-- Monero wallet library (client-side WebAssembly) -->
     <!-- SRI hash protects against supply chain attacks on the WASM bundle -->
-    <script src="/lib/monero-wallet.iife.js" integrity="sha384-/bPHoGgNd6VwHiBPUzapfjKCa5QgS4l77vrHImA0Bmku2+QIezVJCxmPnArNZQBi" crossorigin="anonymous"></script>
+    <script src="/lib/monero-wallet.iife.js" integrity="sha384-gNGdgKHQok1SRL9i3qj4OuKW4FXf10WXAOiIqym1kzo7WLwIaXoRGCNOcxK5wLfe" crossorigin="anonymous"></script>
 
     <!-- Load the modular v2 application (UI modules consolidated into /js/ui/) -->
     <script type="module" src="/js/app.js?v=3.0.8-wallet-modal"></script>
