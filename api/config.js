@@ -14,7 +14,9 @@ export const config = {
     'https://m.nosmero.com:8443',
     'https://dev.m.nosmero.com:8443',
     'http://localhost:8443',
-    'http://localhost:3000'
+    'http://localhost:3000',
+    // Tor hidden service (HTTP only - Tor handles encryption)
+    'http://nosmeroix3mixibdzzkjncxa4pp4ovvwp7xgaxtucx2roskv52w3hpyd.onion'
   ],
 
   // Rate limiting

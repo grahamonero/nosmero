@@ -683,7 +683,10 @@ const ALLOWED_RPC_METHODS = [
   'get_fee_estimate',
 
   // Version
-  'get_version'
+  'get_version',
+
+  // Fork info (needed for createTx to determine earliest fork height)
+  'hard_fork_info'
 ];
 
 // Non-JSON-RPC endpoints (binary/other)
