@@ -1,3 +1,11 @@
+# Dependencies
+node_modules/
+
+# Environment files (contain secrets)
+.env
+*.env
+api/.env
+
 # Backup files
 *backup*
 *.backup
@@ -43,11 +51,6 @@ styles-full.min.css
 logo_nosmero.svg
 nosmero-logo-orange.svg
 nosmeroav.png
-
-# Environment and secrets
-.env
-api/.env
-*.env
 
 # System files
 .DS_Store

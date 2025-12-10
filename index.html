@@ -33,7 +33,15 @@
                 </div>
                 <div class="menu-item" onclick="handleFeedMenuClick('global')">
                     <span class="menu-icon">🌐</span>
-                    <span>Web of Trust Feed</span>
+                    <span>Suggested Follows</span>
+                </div>
+                <div class="menu-item" onclick="handleFeedMenuClick('tipactivity')">
+                    <span class="menu-icon">💰</span>
+                    <span>Monero Tip Activity</span>
+                </div>
+                <div class="menu-item" onclick="handleFeedMenuClick('trending')">
+                    <span class="menu-icon">📈</span>
+                    <span>Popular Notes</span>
                 </div>
                 <div class="menu-item" onclick="handleFeedMenuClick('monero')">
                     <span class="menu-icon">🔥</span>
@@ -1084,8 +1092,5 @@
     <!-- Wallet Modal (loaded after app) -->
     <script type="module" src="/js/wallet-modal.js?v=1.0.5"></script>
 
-    <!-- Eruda Mobile Debugging Console (DEV ONLY) -->
-    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-    <script>eruda.init();</script>
 </body>
 </html>
