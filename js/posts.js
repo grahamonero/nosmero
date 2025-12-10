@@ -523,7 +523,7 @@ export async function loadTrendingFeed(forceRefresh = false) {
 
         // Add Load More button if needed
         const loadMoreButton = hasMorePosts ? `
-            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px; border-top: 1px solid #333;">
                 <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                     Load More Posts (${remainingCount} available)
                 </button>
@@ -783,7 +783,7 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
 
         // Add Load More button if needed
         const loadMoreButton = hasMorePosts ? `
-            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px; border-top: 1px solid #333;">
                 <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                     Load More Posts (${remainingCount} available)
                 </button>
@@ -962,7 +962,7 @@ async function renderCachedTrendingFeed(cache) {
 
     // Load More button
     const loadMoreButton = hasMorePosts ? `
-        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px; border-top: 1px solid #333;">
             <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                 Load More Posts (${remainingCount} available)
             </button>
@@ -1114,7 +1114,7 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
 
     // Load More button
     const loadMoreButton = hasMorePosts ? `
-        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px; border-top: 1px solid #333;">
             <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                 Load More Posts (${remainingCount} available)
             </button>
@@ -1214,7 +1214,7 @@ async function loadMoreTrendingPosts() {
 
         // Add new Load More button if needed
         const loadMoreButton = hasMorePosts ? `
-            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px; border-top: 1px solid #333;">
                 <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                     Load More Posts (${remainingCount} available)
                 </button>
@@ -1838,7 +1838,7 @@ export async function loadWebOfTrustFeed() {
 
             // Always show Load More button (infinite cycling)
             const loadMoreButton = `
-                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px; border-top: 1px solid #333;">
                     <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                         Load More Posts
                     </button>
@@ -1989,7 +1989,7 @@ export async function loadMoreWebOfTrustPosts() {
 
             // Always show Load More button (infinite cycling)
             const newLoadMoreButton = `
-                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px; border-top: 1px solid #333;">
                     <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                         Load More Posts
                     </button>
@@ -2009,7 +2009,7 @@ export async function loadMoreWebOfTrustPosts() {
 
             if (loadMoreContainer) {
                 loadMoreContainer.innerHTML = `
-                    <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                    <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px; border-top: 1px solid #333;">
                         <p style="color: #666; margin-bottom: 12px;">No posts in this batch</p>
                         <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                             Load More Posts
@@ -2024,7 +2024,7 @@ export async function loadMoreWebOfTrustPosts() {
         const loadMoreContainer = document.getElementById('webOfTrustLoadMoreContainer');
         if (loadMoreContainer) {
             loadMoreContainer.innerHTML = `
-                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px; border-top: 1px solid #333;">
                     <p style="color: #ff6666; margin-bottom: 12px;">Error loading posts. Please try again.</p>
                     <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                         Retry
@@ -5691,6 +5691,189 @@ function renderTipActivityWidget() {
         </div>
     `;
 }
+
+// ===================
+// POPULAR NOTES FEED (Trending All)
+// ===================
+
+let trendingAllNotes = [];
+let trendingAllOffset = 0;
+let trendingAllEngagement = {};
+
+export async function loadTrendingAllFeed() {
+    console.log('📈 Loading Popular Notes feed (all topics)...');
+
+    // Set current page to prevent other feeds from loading
+    State.setCurrentPage('trending');
+
+    // Reset state
+    trendingAllNotes = [];
+    trendingAllOffset = 0;
+    trendingAllEngagement = {};
+
+    const feed = document.getElementById('feed');
+    if (!feed) return;
+
+    // Show loading state
+    feed.innerHTML = `
+        <div style="padding: 20px; text-align: center; color: #999;">
+            <div class="spinner" style="width: 40px; height: 40px; border: 3px solid rgba(255, 255, 255, 0.1); border-top-color: #FF6600; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
+            <p>Loading popular notes...</p>
+        </div>
+    `;
+
+    try {
+        const relays = Relays.DEFAULT_RELAYS;
+
+        // Query for recent notes from last 24 hours
+        const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
+
+        const notes = await State.pool.querySync(relays, {
+            kinds: [1],
+            since: oneDayAgo,
+            limit: 200
+        });
+
+        console.log(`Found ${notes.length} recent notes`);
+
+        if (notes.length === 0) {
+            feed.innerHTML = `
+                <div style="text-align: center; color: #666; padding: 40px;">
+                    <p>No popular notes found.</p>
+                    <p style="font-size: 14px; margin-top: 10px;">Check back later!</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Fetch engagement data (replies, reactions, zaps)
+        trendingAllEngagement = await fetchEngagementCounts(notes.map(n => n.id));
+
+        // Sort by total engagement
+        notes.sort((a, b) => {
+            const engageA = (trendingAllEngagement[a.id]?.replies || 0) +
+                           (trendingAllEngagement[a.id]?.reactions || 0) +
+                           (trendingAllEngagement[a.id]?.zaps || 0);
+            const engageB = (trendingAllEngagement[b.id]?.replies || 0) +
+                           (trendingAllEngagement[b.id]?.reactions || 0) +
+                           (trendingAllEngagement[b.id]?.zaps || 0);
+            return engageB - engageA;
+        });
+
+        // Store all notes for pagination
+        trendingAllNotes = notes;
+
+        // Show first page
+        await showMoreTrendingAll();
+
+    } catch (error) {
+        console.error('Error loading popular notes:', error);
+        feed.innerHTML = `
+            <div style="text-align: center; color: #999; padding: 40px;">
+                <p>Error loading popular notes. Please try again.</p>
+            </div>
+        `;
+    }
+}
+
+async function showMoreTrendingAll() {
+    const feed = document.getElementById('feed');
+    if (!feed) return;
+
+    const pagesToShow = trendingAllNotes.slice(trendingAllOffset, trendingAllOffset + 20);
+
+    if (pagesToShow.length === 0) {
+        return; // No more notes
+    }
+
+    // Fetch profiles for authors
+    const authors = [...new Set(pagesToShow.map(n => n.pubkey))];
+    await fetchProfiles(authors);
+
+    // Fetch parent posts for replies
+    const parentPostsMap = await fetchParentPosts(pagesToShow);
+
+    // Render notes
+    const renderedNotes = await Promise.all(
+        pagesToShow.map(async (note) => {
+            try {
+                return await renderSinglePost(note, 'feed', trendingAllEngagement, parentPostsMap);
+            } catch (error) {
+                console.error('Error rendering note:', error);
+                return '';
+            }
+        })
+    );
+
+    // Update offset
+    trendingAllOffset += 20;
+
+    // Create Load More button if there are more notes
+    const hasMore = trendingAllOffset < trendingAllNotes.length;
+    const loadMoreButton = hasMore ? `
+        <div id="loadMoreContainer" style="text-align: center; padding: 20px; margin-bottom: 80px;">
+            <button onclick="window.loadMoreTrendingAll()" style="padding: 12px 24px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500;">
+                Load More
+            </button>
+        </div>
+    ` : '';
+
+    if (trendingAllOffset === 20) {
+        // First page - replace everything
+        feed.innerHTML = `
+            <div style="padding: 16px 20px; border-bottom: 1px solid #333; background: rgba(255, 255, 255, 0.02);">
+                <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Popular Notes</h3>
+                <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
+                    Popular notes across Nostr (past 24 hours)
+                </p>
+            </div>
+            <div id="homeFeedList">
+                ${renderedNotes.filter(n => n).join('')}
+            </div>
+            ${loadMoreButton}
+        `;
+    } else {
+        // Subsequent pages - append
+        const homeFeedList = document.getElementById('homeFeedList');
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+
+        if (homeFeedList) {
+            homeFeedList.insertAdjacentHTML('beforeend', renderedNotes.filter(n => n).join(''));
+        }
+
+        if (loadMoreContainer) {
+            loadMoreContainer.remove();
+        }
+
+        if (hasMore) {
+            feed.insertAdjacentHTML('beforeend', loadMoreButton);
+        }
+    }
+
+    // Add trust badges to rendered notes
+    try {
+        const TrustBadges = await import('./trust-badges.js');
+        console.log('[TrendingAll] Adding trust badges for Popular Notes feed...');
+
+        // Collect all pubkeys from rendered posts
+        const pubkeys = pagesToShow.map(n => n.pubkey).filter(pk => pk);
+        console.log(`[TrendingAll] Adding trust badges for ${pubkeys.length} users...`);
+
+        // Add trust badges to feed
+        await TrustBadges.addFeedTrustBadges(
+            pagesToShow.map(n => ({ id: n.id, pubkey: n.pubkey })),
+            '#homeFeedList'
+        );
+        console.log('[TrendingAll] Trust badges added');
+    } catch (error) {
+        console.error('[TrendingAll] Error adding trust badges:', error);
+        console.error('[TrendingAll] Error stack:', error.stack);
+    }
+}
+
+window.loadMoreTrendingAll = () => {
+    showMoreTrendingAll().catch(error => console.error('Error loading more popular notes:', error));
+};
 
 window.removeMedia = removeMedia;
 window.publishNewPost = publishNewPost;

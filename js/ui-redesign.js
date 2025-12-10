@@ -91,10 +91,11 @@ async function handleFeedTabClick(feedType, event) {
 
     // Push feed change to browser history
     const feedNames = {
-        'global': 'weboftrust',
+        'global': 'suggestedfollows',
         'following': 'following',
-        'monero': 'trending',
-        'tipactivity': 'tipactivity'
+        'monero': 'trendingmonero',
+        'tipactivity': 'tipactivity',
+        'trending': 'popular'
     };
     const feedPath = feedNames[feedType] || feedType;
     history.pushState(
@@ -134,6 +135,11 @@ async function handleFeedTabClick(feedType, event) {
             // Tip Activity feed: Shows disclosed Monero tips
             console.log('Loading Tip Activity feed...');
             PostsModule.loadTipActivityFeed();
+            break;
+        case 'trending':
+            // Popular Notes: Trending posts across all topics
+            console.log('Loading Popular Notes feed...');
+            PostsModule.loadTrendingAllFeed();
             break;
     }
 }

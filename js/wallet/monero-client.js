@@ -30,16 +30,12 @@ function isTorAccess() {
     return window.location.hostname.endsWith('.onion');
 }
 
-// Tor onion node pool - used when accessing via Tor for privacy
-// These are public nodes with high uptime from xmr.ditatompel.com
-const TOR_ONION_NODES = [
-    'http://qda3swvfutfovrmze3tbgtv2ivvgbpe2ddhocekuck6i4vr2xxrcbxyd.onion:18089',
-    'http://hrgzz4caeru4ylcxvfci6pcpbkdzpyowygutuwftjdm52pty2zn3isid.onion:18089',
-    'http://aclc4e2jhhtr44guufbnwk5bzwhaecinax4yip4wr4tjn27sjsfg6zqd.onion:18089'
-];
-
-// Nosmero's own Tor node (fallback if all public nodes fail)
-const NOSMERO_TOR_NODE = 'http://d56w6j5tjhrujgahlmxqn5z3lzy5g2s2wnbz7ssru6p4onsgxuzjctyd.onion:18081';
+// Tor daemon - same-origin proxy to avoid CORS issues
+// External onion nodes don't have CORS headers, so we proxy through our own nginx
+function getTorDaemonUri() {
+    // Use same-origin path that nginx proxies to local monerod
+    return `${window.location.origin}/monero-rpc`;
+}
 
 // Clearnet daemon - HTTPS proxy to local monerod with CORS support
 function getClearnetDaemonUri() {
@@ -55,22 +51,13 @@ export function getCurrentDaemonUri() {
 }
 
 /**
- * Get a random Tor onion node from the pool
- * @returns {string}
- */
-function getRandomTorNode() {
-    const randomIndex = Math.floor(Math.random() * TOR_ONION_NODES.length);
-    return TOR_ONION_NODES[randomIndex];
-}
-
-/**
  * Get a daemon URI for quick operations (like getting blockchain height)
- * Uses Tor nodes if on Tor, clearnet otherwise
+ * Uses same-origin proxy for both Tor and clearnet to avoid CORS issues
  * @returns {string}
  */
 function getDaemonUriForQuickOps() {
     if (isTorAccess()) {
-        return getRandomTorNode();
+        return getTorDaemonUri();
     }
     return getClearnetDaemonUri();
 }
@@ -524,40 +511,12 @@ export async function getFullWallet() {
         const torMode = isTorAccess();
 
         if (torMode) {
-            // TOR MODE: Use random onion node from pool for privacy
-            console.log('[MoneroClient] Tor access detected - using onion node pool');
-
-            // Shuffle the pool to try in random order
-            const shuffledNodes = [...TOR_ONION_NODES].sort(() => Math.random() - 0.5);
-
-            for (const onionNode of shuffledNodes) {
-                try {
-                    console.log('[MoneroClient] Trying Tor node:', onionNode);
-                    const testDaemon = await MoneroTS.connectToDaemonRpc(onionNode);
-                    const height = await testDaemon.getHeight();
-                    console.log('[MoneroClient] Tor node connected:', onionNode, 'height:', height);
-                    serverUri = onionNode;
-                    break;
-                } catch (e) {
-                    console.warn('[MoneroClient] Tor node failed:', onionNode, e.message);
-                }
-            }
-
-            // Fallback to Nosmero's own Tor node if all public nodes fail
-            if (!serverUri) {
-                try {
-                    console.log('[MoneroClient] Trying Nosmero Tor fallback:', NOSMERO_TOR_NODE);
-                    const testDaemon = await MoneroTS.connectToDaemonRpc(NOSMERO_TOR_NODE);
-                    const height = await testDaemon.getHeight();
-                    console.log('[MoneroClient] Nosmero Tor node connected, height:', height);
-                    serverUri = NOSMERO_TOR_NODE;
-                } catch (e) {
-                    console.warn('[MoneroClient] Nosmero Tor node failed:', e.message);
-                }
-            }
+            // TOR MODE: Use same-origin proxy to avoid CORS issues
+            // External onion nodes don't have CORS headers, browsers block cross-origin requests
+            serverUri = getTorDaemonUri();
+            console.log('[MoneroClient] Tor access - using same-origin proxy:', serverUri);
         } else {
-            // CLEARNET MODE: Use Nosmero's private daemon ONLY (no public fallback)
-            // Public nodes don't allow tx relay, so fallback would break transactions
+            // CLEARNET MODE: Use Nosmero's private daemon via HTTPS proxy
             serverUri = getClearnetDaemonUri();
             console.log('[MoneroClient] Clearnet access - using private daemon:', serverUri);
         }
