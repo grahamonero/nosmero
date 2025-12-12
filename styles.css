@@ -706,6 +706,41 @@
             gap: 4px;
         }
 
+        /* Repost header styling */
+        .repost-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            color: #888;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            transition: background 0.2s;
+        }
+
+        .repost-header:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .repost-header .repost-icon {
+            font-size: 14px;
+            color: #10B981;
+        }
+
+        .repost-header .reposter-name {
+            color: #fff;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .repost-header .reposter-name:hover {
+            text-decoration: underline;
+        }
+
+        .repost-header .repost-label {
+            color: #666;
+        }
+
         /* Post text content with proper word wrapping for long URLs */
         .post-content {
             margin: 12px 0;

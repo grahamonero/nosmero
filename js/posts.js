@@ -33,6 +33,23 @@ let cachedTrendingPosts = [];
 let displayedTrendingPostCount = 0;
 const TRENDING_POSTS_PER_PAGE = 30;
 
+// Track event to server-side analytics (fire and forget)
+function trackClientEvent(kind, pubkey, eventId = null) {
+    // Don't block on analytics - fire and forget
+    fetch('/api/analytics/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            kind: kind,
+            pubkey: pubkey,
+            event_id: eventId
+        })
+    }).catch(err => {
+        // Silent fail - analytics shouldn't break the app
+        console.debug('[Analytics] Failed to track event:', err.message);
+    });
+}
+
 // Clear all home feed state (used when switching users)
 export function clearHomeFeedState() {
     console.log('🧹 Clearing home feed state');
@@ -99,7 +116,7 @@ export async function loadFeedWithSubscription() {
 
         const sub = State.pool.subscribeMany(Relays.getReadRelays(), [
             {
-                kinds: [1], // Text notes
+                kinds: [1, 6], // Text notes and reposts
                 authors: feedAuthors,
                 limit: 100
             }
@@ -107,7 +124,7 @@ export async function loadFeedWithSubscription() {
             onevent(event) {
                 hasReceivedEvents = true;
                 clearTimeout(timeout);
-                
+
                 // Add new event to posts
                 if (!State.posts.find(p => p.id === event.id)) {
                     State.posts.push(event);
@@ -1753,7 +1770,7 @@ export async function loadWebOfTrustFeed() {
         await new Promise((resolve) => {
             const sub = State.pool.subscribeMany(readRelays, [
                 {
-                    kinds: [1], // Text notes only
+                    kinds: [1, 6], // Text notes and reposts
                     authors: followYsArray,
                     since: oneDayAgo, // Only posts from past 24 hours
                     limit: followYsArray.length * 2 // Get up to 2 posts per user
@@ -1914,7 +1931,7 @@ export async function loadMoreWebOfTrustPosts() {
         await new Promise((resolve) => {
             const sub = State.pool.subscribeMany(readRelays, [
                 {
-                    kinds: [1],
+                    kinds: [1, 6], // Text notes and reposts
                     authors: followYsArray,
                     since: oneDayAgo,
                     limit: followYsArray.length * 2 // Up to 2 posts per user
@@ -2093,7 +2110,7 @@ async function streamRelayPosts() {
     try {
         feedSub = State.pool.subscribeMany(readRelays, [
             {
-                kinds: [1], // Text notes
+                kinds: [1, 6], // Text notes and reposts
                 authors: followingArray,
                 limit: INITIAL_LIMIT
             }
@@ -2344,7 +2361,7 @@ async function renderHomeFeedResults() {
     console.log(`🎨 Rendering ${currentHomeFeedResults.length} notes to homeFeedList`);
 
     // Filter out posts from muted users
-    let sortedResults = currentHomeFeedResults.filter(post => {
+    let filteredResults = currentHomeFeedResults.filter(post => {
         if (State.mutedUsers?.has(post.pubkey)) {
             console.log('🔇 Filtered out post from muted user:', post.pubkey.substring(0, 16) + '...');
             return false;
@@ -2352,14 +2369,48 @@ async function renderHomeFeedResults() {
         return true;
     });
 
-    if (sortedResults.length < currentHomeFeedResults.length) {
-        console.log(`🔇 Filtered out ${currentHomeFeedResults.length - sortedResults.length} posts from muted users`);
+    if (filteredResults.length < currentHomeFeedResults.length) {
+        console.log(`🔇 Filtered out ${currentHomeFeedResults.length - filteredResults.length} posts from muted users`);
     }
 
-    // Apply sorting based on mode
+    // Normalize events: extract original posts from reposts (kind 6)
+    // De-duplicate by original post ID
+    const seenOriginalIds = new Set();
+    const repostContextMap = new Map(); // originalPostId -> { reposter, repostId, repostTimestamp }
+    const normalizedResults = [];
+
+    for (const event of filteredResults) {
+        const { post, reposter, repostId, repostTimestamp } = normalizeEventForDisplay(event);
+
+        if (!post) {
+            // Skip reposts we couldn't parse
+            continue;
+        }
+
+        // De-duplicate: skip if we've already seen this original post
+        if (seenOriginalIds.has(post.id)) {
+            continue;
+        }
+        seenOriginalIds.add(post.id);
+
+        // Store repost context if this is a repost
+        if (reposter) {
+            repostContextMap.set(post.id, { reposter, repostId, repostTimestamp });
+        }
+
+        // Use repost timestamp for sorting if available
+        normalizedResults.push({
+            ...post,
+            _sortTimestamp: repostTimestamp || post.created_at
+        });
+    }
+
+    let sortedResults = normalizedResults;
+
+    // Apply sorting based on mode (use _sortTimestamp for reposts)
     switch (currentHomeFeedSortMode) {
         case 'date':
-            sortedResults.sort((a, b) => b.created_at - a.created_at);
+            sortedResults.sort((a, b) => (b._sortTimestamp || b.created_at) - (a._sortTimestamp || a.created_at));
             break;
         case 'engagement':
             // Simple engagement score based on content length and recency
@@ -2379,7 +2430,10 @@ async function renderHomeFeedResults() {
     console.log('🚀 Rendering notes immediately with placeholders...');
 
     // 1. Deduplicate and batch fetch profiles (fast, keep this blocking)
-    const uniquePubkeys = [...new Set(sortedResults.map(p => p.pubkey))];
+    // Include both post authors AND reposters
+    const authorPubkeys = sortedResults.map(p => p.pubkey);
+    const reposterPubkeys = [...repostContextMap.values()].map(ctx => ctx.reposter);
+    const uniquePubkeys = [...new Set([...authorPubkeys, ...reposterPubkeys])];
     const pubkeysToFetch = uniquePubkeys.filter(pk => !State.profileCache[pk]);
     if (pubkeysToFetch.length > 0) {
         await fetchProfiles(pubkeysToFetch);
@@ -2387,7 +2441,7 @@ async function renderHomeFeedResults() {
 
     // 2. RENDER IMMEDIATELY with placeholder engagement data
     const renderedPosts = await Promise.all(
-        sortedResults.map(post => renderSinglePost(post, 'feed', null, null))
+        sortedResults.map(post => renderSinglePost(post, 'feed', null, null, repostContextMap.get(post.id) || null))
     );
     resultsEl.innerHTML = renderedPosts.join('');
     console.log('✅ Posts rendered instantly');
@@ -2404,7 +2458,7 @@ async function renderHomeFeedResults() {
 
         // Re-render posts with disclosed tips, parent posts, AND engagement data
         const renderedPostsComplete = sortedResults.map(post => {
-            return renderSinglePost(post, 'feed', engagementData, parentPostsMap);
+            return renderSinglePost(post, 'feed', engagementData, parentPostsMap, repostContextMap.get(post.id) || null);
         });
         Promise.all(renderedPostsComplete).then(posts => {
             resultsEl.innerHTML = posts.join('');
@@ -2613,12 +2667,12 @@ export async function renderFeed(loadMore = false) {
         }
         
         return `
-            <div class="post">
+            <div class="post" data-post-id="${post.id}" data-pubkey="${post.pubkey}">
                 ${parentHtml}
                 <div ${parentHtml ? 'style="border-left: 2px solid #444; padding-left: 12px;"' : ''}>
                 <div class="post-header">
-                    ${author.picture ? 
-                        `<img class="avatar" src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` : ''
+                    ${author.picture ?
+                        `<img class="avatar" src="${window.ThumbHashLoader?.getPlaceholder(author.picture) || author.picture}" data-thumbhash-src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;${window.ThumbHashLoader?.getPlaceholder(author.picture) ? ' filter: blur(4px); transition: filter 0.3s;' : ''}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)"/>` : ''
                     }
                     <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
                     <div class="post-info">
@@ -2804,7 +2858,7 @@ async function fetchMorePostsInBackground() {
     try {
         const feedSub = State.pool.subscribeMany(readRelays, [
             {
-                kinds: [1],
+                kinds: [1, 6], // Text notes and reposts
                 authors: followingArray,
                 until: oldestCachedTimestamp, // Older than what we have
                 limit: FETCH_LIMIT
@@ -2851,6 +2905,68 @@ async function fetchMorePostsInBackground() {
 }
 
 // ==================== POST UTILITIES ====================
+
+// ==================== REPOST UTILITIES ====================
+
+/**
+ * Check if event is a repost (kind 6)
+ */
+export function isRepost(event) {
+    return event.kind === 6;
+}
+
+/**
+ * Extract the original post from a kind 6 repost event
+ * @param {Object} event - The kind 6 repost event
+ * @returns {Object|null} - The original post or null if invalid
+ */
+export function extractRepostOriginal(event) {
+    if (event.kind !== 6) return null;
+
+    try {
+        // Kind 6 content should be JSON of original event
+        if (event.content && event.content.trim().startsWith('{')) {
+            const originalPost = JSON.parse(event.content);
+
+            // Validate required fields
+            if (originalPost.id && originalPost.pubkey && originalPost.content !== undefined) {
+                return originalPost;
+            }
+        }
+
+        // Fallback: empty content but has 'e' tag - can't display without fetching
+        return null;
+    } catch (error) {
+        console.warn('Failed to parse repost content:', error);
+        return null;
+    }
+}
+
+/**
+ * Normalize event for display - converts reposts to displayable format
+ * @param {Object} event - Nostr event (kind 1 or 6)
+ * @returns {Object} - { post, reposter, repostId, repostTimestamp } where reposter is null for kind 1
+ */
+export function normalizeEventForDisplay(event) {
+    if (event.kind !== 6) {
+        return { post: event, reposter: null, repostId: null, repostTimestamp: null };
+    }
+
+    const originalPost = extractRepostOriginal(event);
+    if (!originalPost) {
+        // Skip reposts we can't parse
+        return { post: null, reposter: event.pubkey, repostId: event.id, repostTimestamp: event.created_at };
+    }
+
+    return {
+        post: originalPost,
+        reposter: event.pubkey,
+        repostId: event.id,
+        repostTimestamp: event.created_at
+    };
+}
+
+// ==================== AUTHOR UTILITIES ====================
 
 // Get author info from cache or fallback
 export function getAuthorInfo(post) {
@@ -2964,7 +3080,10 @@ export async function likePost(postId) {
 
             const signedEvent = await Utils.signEvent(eventTemplate);
             await State.pool.publish(Relays.getWriteRelays(), signedEvent);
-            
+
+            // Track like event
+            trackClientEvent(7, State.publicKey, signedEvent.id);
+
             State.likedPosts.add(postId);
             updateLikeButton(postId, true);
             Utils.showNotification('Note liked!', 'success');
@@ -2986,13 +3105,16 @@ export function repostNote(postId) {
                State.eventCache[postId] ||
                currentHomeFeedResults.find(p => p.id === postId);
 
+    // Also check cachedTrendingPosts (structure: { note, score, engagement })
+    if (!post && cachedTrendingPosts.length > 0) {
+        const trendingMatch = cachedTrendingPosts.find(item => item.note?.id === postId);
+        if (trendingMatch) {
+            post = trendingMatch.note;
+        }
+    }
+
     if (!post) {
-        console.error('Note not found in any location:', {
-            postId,
-            statePostsCount: State.posts.length,
-            eventCacheKeys: Object.keys(State.eventCache).length,
-            homeFeedResultsCount: currentHomeFeedResults.length
-        });
+        console.error('Note not found:', postId);
         alert('Note not found');
         return;
     }
@@ -3130,7 +3252,15 @@ async function doQuickRepost() {
     };
 
     const signedEvent = await Utils.signEvent(eventTemplate);
-    await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+    const writeRelays = Relays.getWriteRelays();
+    console.log('📤 Publishing repost to relays:', writeRelays);
+    console.log('📤 Repost event ID:', signedEvent.id);
+
+    const results = await State.pool.publish(writeRelays, signedEvent);
+    console.log('✅ Repost published! Results:', results);
+
+    // Track repost event
+    trackClientEvent(6, State.publicKey, signedEvent.id);
 
     State.repostedPosts.add(currentRepostPost.id);
     updateRepostButton(currentRepostPost.id, true);
@@ -3164,6 +3294,9 @@ async function doQuoteRepost() {
     const signedEvent = await Utils.signEvent(eventTemplate);
     await State.pool.publish(Relays.getWriteRelays(), signedEvent);
 
+    // Track quote note event
+    trackClientEvent(1, State.publicKey, signedEvent.id);
+
     Utils.showNotification('Quote note published!', 'success');
 
     // Refresh feed to show new post (force fresh to bypass cache)
@@ -3185,7 +3318,16 @@ export function closeRepostModal() {
 
 // Reply to a post
 export function replyToPost(postId) {
-    const post = State.posts.find(p => p.id === postId) || State.eventCache[postId];
+    let post = State.posts.find(p => p.id === postId) || State.eventCache[postId];
+
+    // Also check cachedTrendingPosts (structure: { note, score, engagement })
+    if (!post && cachedTrendingPosts.length > 0) {
+        const trendingMatch = cachedTrendingPosts.find(item => item.note?.id === postId);
+        if (trendingMatch) {
+            post = trendingMatch.note;
+        }
+    }
+
     if (!post) {
         alert('Note not found');
         return;
@@ -3275,15 +3417,18 @@ export async function sendReply(replyToId) {
 
         const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
-        
+
+        // Track reply event
+        trackClientEvent(1, State.publicKey, signedEvent.id);
+
         Utils.showNotification('Reply published!', 'success');
         document.getElementById('replyModal').style.display = 'none';
         document.getElementById('replyContent').value = '';
         removeMedia('reply');
-        
+
         // Refresh feed to show new reply (force fresh to bypass cache)
         setTimeout(async () => await loadFeedRealtime(), 1000);
-        
+
     } catch (error) {
         console.error('Failed to post reply:', error);
         Utils.showNotification('Failed to publish reply: ' + error.message, 'error');
@@ -3917,7 +4062,7 @@ async function fetchMissingProfilesViaNIP65(missingPubkeys) {
 }
 
 // Render a single post (for thread view, search results, etc.)
-export async function renderSinglePost(post, context = 'feed', engagementData = null, parentPostsMap = null) {
+export async function renderSinglePost(post, context = 'feed', engagementData = null, parentPostsMap = null, repostContext = null) {
     try {
         const author = getAuthorInfo(post);
         const moneroAddress = getMoneroAddress(post);
@@ -3978,16 +4123,30 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                 `;
             }
         }
-        
+
         // Thread indicator removed per user request
-        
+
+        // Generate repost header if this is a repost
+        let repostHtml = '';
+        if (repostContext && repostContext.reposter) {
+            const reposterInfo = getAuthorInfo({ pubkey: repostContext.reposter });
+            repostHtml = `
+                <div class="repost-header" onclick="viewUserProfilePage('${repostContext.reposter}'); event.stopPropagation();">
+                    <span class="repost-icon">🔄</span>
+                    <span class="reposter-name">${reposterInfo.name}</span>
+                    <span class="repost-label">reposted</span>
+                </div>
+            `;
+        }
+
         return `
-            <div class="post" data-post-id="${post.id}">
+            ${repostHtml}
+            <div class="post" data-post-id="${post.id}" data-pubkey="${post.pubkey}" ${repostContext ? `data-repost-id="${repostContext.repostId}"` : ''}>
                 <div class="reply-context">${parentHtml}</div>
                 <div ${parentHtml ? 'style="border-left: 2px solid #444; padding-left: 12px;"' : ''}>
                 <div class="post-header">
                     ${author.picture ?
-                        `<img class="avatar" src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` : ''
+                        `<img class="avatar" src="${window.ThumbHashLoader?.getPlaceholder(author.picture) || author.picture}" data-thumbhash-src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;${window.ThumbHashLoader?.getPlaceholder(author.picture) ? ' filter: blur(4px); transition: filter 0.3s;' : ''}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)"/>` : ''
                     }
                     <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
                     <div class="post-info">
@@ -4415,7 +4574,10 @@ export async function sendPost() {
         } else {
             throw new Error('No write relays configured. Please check your relay settings.');
         }
-        
+
+        // Track note event
+        trackClientEvent(1, State.publicKey, signedEvent.id);
+
         // Add to local posts array and update feed
         State.posts.unshift(signedEvent);
         
@@ -4802,9 +4964,12 @@ export async function publishNewPost() {
         // Sign and publish event
         const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
-        
+
+        // Track post event
+        trackClientEvent(1, State.publicKey, signedEvent.id);
+
         Utils.showNotification('Note published!', 'success');
-        
+
         // Clear form and close modal
         document.getElementById('newPostContent').value = '';
         document.getElementById('modalMoneroAddress').value = '';
@@ -5552,10 +5717,11 @@ export function updateWidgetForAuthState() {
 }
 
 // Make functions globally available for HTML onclick handlers
-window.sendReply = sendReplyToCurrentPost; // Use the wrapper function
-window.sendReplyToCurrentPost = sendReplyToCurrentPost; // Also export directly
-window.replyToPost = replyToPost;
-window.handleMediaUpload = handleMediaUpload;
+// Only set if not already set by app.js (prevents module instance conflicts)
+if (!window.sendReply) window.sendReply = sendReplyToCurrentPost;
+if (!window.sendReplyToCurrentPost) window.sendReplyToCurrentPost = sendReplyToCurrentPost;
+if (!window.replyToPost) window.replyToPost = replyToPost;
+if (!window.handleMediaUpload) window.handleMediaUpload = handleMediaUpload;
 // Load Monero Notes feed (same as trending but clearer name)
 export async function loadMoneroNotesFeed() {
     return await loadTrendingFeed();
@@ -5729,7 +5895,7 @@ export async function loadTrendingAllFeed() {
         const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
 
         const notes = await State.pool.querySync(relays, {
-            kinds: [1],
+            kinds: [1, 6], // Text notes and reposts
             since: oneDayAgo,
             limit: 200
         });
@@ -5746,11 +5912,27 @@ export async function loadTrendingAllFeed() {
             return;
         }
 
+        // Normalize reposts and deduplicate
+        const seenIds = new Set();
+        const normalizedNotes = [];
+        for (const event of notes) {
+            const { post, reposter, repostId, repostTimestamp } = normalizeEventForDisplay(event);
+            if (!post || seenIds.has(post.id)) continue;
+            seenIds.add(post.id);
+            // Store repost context on the post object for later use
+            if (reposter) {
+                post._repostContext = { reposter, repostId, repostTimestamp };
+            }
+            normalizedNotes.push(post);
+        }
+
+        console.log(`Normalized to ${normalizedNotes.length} unique notes`);
+
         // Fetch engagement data (replies, reactions, zaps)
-        trendingAllEngagement = await fetchEngagementCounts(notes.map(n => n.id));
+        trendingAllEngagement = await fetchEngagementCounts(normalizedNotes.map(n => n.id));
 
         // Sort by total engagement
-        notes.sort((a, b) => {
+        normalizedNotes.sort((a, b) => {
             const engageA = (trendingAllEngagement[a.id]?.replies || 0) +
                            (trendingAllEngagement[a.id]?.reactions || 0) +
                            (trendingAllEngagement[a.id]?.zaps || 0);
@@ -5761,7 +5943,7 @@ export async function loadTrendingAllFeed() {
         });
 
         // Store all notes for pagination
-        trendingAllNotes = notes;
+        trendingAllNotes = normalizedNotes;
 
         // Show first page
         await showMoreTrendingAll();
@@ -5786,18 +5968,20 @@ async function showMoreTrendingAll() {
         return; // No more notes
     }
 
-    // Fetch profiles for authors
-    const authors = [...new Set(pagesToShow.map(n => n.pubkey))];
-    await fetchProfiles(authors);
+    // Fetch profiles for authors AND reposters
+    const authorPubkeys = pagesToShow.map(n => n.pubkey);
+    const reposterPubkeys = pagesToShow.filter(n => n._repostContext).map(n => n._repostContext.reposter);
+    const allPubkeys = [...new Set([...authorPubkeys, ...reposterPubkeys])];
+    await fetchProfiles(allPubkeys);
 
     // Fetch parent posts for replies
     const parentPostsMap = await fetchParentPosts(pagesToShow);
 
-    // Render notes
+    // Render notes with repost context
     const renderedNotes = await Promise.all(
         pagesToShow.map(async (note) => {
             try {
-                return await renderSinglePost(note, 'feed', trendingAllEngagement, parentPostsMap);
+                return await renderSinglePost(note, 'feed', trendingAllEngagement, parentPostsMap, note._repostContext || null);
             } catch (error) {
                 console.error('Error rendering note:', error);
                 return '';
@@ -5891,6 +6075,7 @@ window.setHomeFeedSortMode = (mode) => {
     setHomeFeedSortMode(mode).catch(error => console.error('Error setting sort mode:', error));
 };
 
-window.setRepostType = setRepostType;
-window.sendRepost = sendRepost;
-window.closeRepostModal = closeRepostModal;
+// Only set if not already set by app.js (prevents module instance conflicts)
+if (!window.setRepostType) window.setRepostType = setRepostType;
+if (!window.sendRepost) window.sendRepost = sendRepost;
+if (!window.closeRepostModal) window.closeRepostModal = closeRepostModal;

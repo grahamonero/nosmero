@@ -16,6 +16,7 @@ import * as Search from './search.js';
 import * as TrustBadges from './trust-badges.js?v=2.9.41';
 import * as Paywall from './paywall.js';
 import * as PaywallUI from './paywall-ui.js';
+import * as ThumbHashLoader from './thumbhash-loader.js';
 
 // WalletModal is loaded separately via index.html script tag
 
@@ -33,6 +34,15 @@ window.NostrAuth = Auth;
 window.NostrUI = UI;
 window.NostrMessages = Messages;
 window.NostrSearch = Search;
+
+// Ensure repost/reply functions use the same module instance as NostrPosts
+// (prevents issues from multiple module instances with different version strings)
+window.sendRepost = Posts.sendRepost;
+window.setRepostType = Posts.setRepostType;
+window.closeRepostModal = Posts.closeRepostModal;
+window.sendReply = Posts.sendReplyToCurrentPost;
+window.sendReplyToCurrentPost = Posts.sendReplyToCurrentPost;
+window.replyToPost = Posts.replyToPost;
 
 console.log('🚀 Starting Nosmero v0.95 - Modular Architecture');
 
