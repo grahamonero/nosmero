@@ -29,6 +29,76 @@ function getTimeAgo(timestamp) {
     return new Date(timestamp * 1000).toLocaleDateString();
 }
 
+/**
+ * Immediately remove posts from an unfollowed user from the Following feed
+ * @param {string} pubkey - The pubkey of the unfollowed user
+ */
+function purgeUnfollowedUserPosts(pubkey) {
+    try {
+        // Only purge if we're on the Following feed
+        const activeTab = document.querySelector('.feed-tab.active');
+        const isFollowingFeed = activeTab?.dataset?.feed === 'following';
+
+        if (!isFollowingFeed) {
+            console.log('Not on Following feed, skipping purge');
+            return;
+        }
+
+        // Find all posts from this user in the feed
+        const feed = document.getElementById('feed');
+        if (!feed) return;
+
+        // Posts have data-pubkey attribute or we can check the author info
+        const postsToRemove = [];
+        const allPosts = feed.querySelectorAll('.post');
+
+        allPosts.forEach(post => {
+            // Check data-pubkey attribute first
+            const postPubkey = post.dataset.pubkey;
+            if (postPubkey === pubkey) {
+                postsToRemove.push(post);
+                return;
+            }
+
+            // Also check for username element with data-pubkey
+            const usernameEl = post.querySelector('.username[data-pubkey]');
+            if (usernameEl?.dataset.pubkey === pubkey) {
+                postsToRemove.push(post);
+                return;
+            }
+
+            // Check avatar onclick for viewUserProfilePage call with this pubkey
+            const avatar = post.querySelector('.avatar');
+            if (avatar?.onclick?.toString().includes(pubkey)) {
+                postsToRemove.push(post);
+            }
+        });
+
+        // Remove posts with fade animation
+        postsToRemove.forEach(post => {
+            post.style.transition = 'opacity 0.3s, max-height 0.3s, margin 0.3s, padding 0.3s';
+            post.style.opacity = '0';
+            post.style.maxHeight = '0';
+            post.style.marginTop = '0';
+            post.style.marginBottom = '0';
+            post.style.paddingTop = '0';
+            post.style.paddingBottom = '0';
+            post.style.overflow = 'hidden';
+
+            setTimeout(() => {
+                post.remove();
+            }, 300);
+        });
+
+        if (postsToRemove.length > 0) {
+            console.log(`Purged ${postsToRemove.length} posts from unfollowed user ${pubkey.substring(0, 8)}...`);
+        }
+
+    } catch (error) {
+        console.error('Error purging unfollowed user posts:', error);
+    }
+}
+
 // ==================== PROFILE VIEWING ====================
 
 async function fetchUserPosts(pubkey) {
@@ -333,6 +403,13 @@ export async function loadMoreProfilePosts() {
 
 export async function viewUserProfilePage(pubkey) {
     try {
+        // Check if right panel is available and visible (desktop three-column layout)
+        if (window.RightPanel?.isVisible()) {
+            console.log('Opening profile in right panel:', pubkey);
+            window.RightPanel.openProfile(pubkey);
+            return;
+        }
+
         // Import required modules
         const [StateModule, Posts] = await Promise.all([
             import('../state.js'),
@@ -390,14 +467,15 @@ export async function viewUserProfilePage(pubkey) {
             };
         }
 
-        // Render profile page
+        // Render profile page with ThumbHash progressive loading
+        const profileAvatarPlaceholder = userProfile.picture ? window.ThumbHashLoader?.getPlaceholder(userProfile.picture) : null;
         profilePage.innerHTML = `
             <div style="max-width: 800px; margin: 0 auto; padding: 20px; word-wrap: break-word; overflow-wrap: break-word;">
                 <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid #333; border-radius: 16px; padding: 24px; margin-bottom: 24px;">
                     <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 16px;">
                         ${userProfile.picture ?
-                            `<img src="${userProfile.picture}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;"
-                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            `<img src="${profileAvatarPlaceholder || userProfile.picture}" data-thumbhash-src="${userProfile.picture}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;${profileAvatarPlaceholder ? ' filter: blur(4px); transition: filter 0.3s;' : ''}"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)">
                              <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>` :
                             `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>`
                         }
@@ -691,12 +769,14 @@ export async function toggleFollow(pubkey) {
         // Show toast notification
         showSuccessToast(`User ${action}!`, actionTitle);
 
-        // Refresh home feed if user is currently on home page
-        if (StateModule.currentPage === 'home') {
-            import('../posts.js').then(Posts => {
-                Posts.loadFeedRealtime().catch(error => console.error('Error refreshing home feed:', error));
-            });
+        // If unfollowing, immediately remove their posts from the Following feed
+        if (isCurrentlyFollowing) {
+            purgeUnfollowedUserPosts(pubkey);
         }
+
+        // Note: We don't reload the feed when following - their posts will appear
+        // in the Following feed naturally when user next loads it. This prevents
+        // unwanted feed switching (e.g., from Suggested Follows to Following).
 
     } catch (error) {
         console.error('Error toggling follow:', error);

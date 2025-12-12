@@ -1,0 +1,1271 @@
+/**
+ * Right Panel Module
+ * Manages the three-column layout's right panel for contextual content
+ * (threads, profiles, settings, wallet, compose, zap flow)
+ */
+
+// Panel state
+const RightPanel = {
+    currentView: 'default', // 'default', 'thread', 'profile', 'settings', 'wallet', 'compose', 'reply', 'zap'
+    currentData: null,      // Data for current view (e.g., noteId, pubkey)
+    isResizing: false,
+    startX: 0,
+    startWidth: 0,
+    minWidth: 320,
+    maxWidth: 600,
+
+    // Navigation history for back button
+    history: [], // Array of {view, data, title} objects
+
+    // Track the default feed title (set when content is loaded)
+    defaultFeedTitle: 'Popular Notes',
+
+    // DOM elements (cached on init)
+    panel: null,
+    header: null,
+    title: null,
+    closeBtn: null,
+    backBtn: null,
+    content: null,
+    defaultFeed: null,
+    resizeHandle: null,
+
+    /**
+     * Initialize the right panel
+     */
+    init() {
+        // Cache DOM elements
+        this.panel = document.getElementById('rightPanel');
+        this.header = this.panel?.querySelector('.right-panel-header');
+        this.title = document.getElementById('rightPanelTitle');
+        this.closeBtn = document.getElementById('rightPanelClose');
+        this.content = document.getElementById('rightPanelContent');
+        this.defaultFeed = document.getElementById('rightPanelDefaultFeed');
+        this.resizeHandle = document.getElementById('rightPanelResizeHandle');
+
+        if (!this.panel) {
+            console.warn('Right panel not found in DOM');
+            return;
+        }
+
+        // Verify content element exists
+        if (!this.content) {
+            console.error('Right panel content element not found!');
+            return;
+        }
+
+        // Create back button if it doesn't exist
+        this.setupBackButton();
+
+        // Setup resize functionality
+        this.setupResize();
+
+        // Setup URL routing
+        this.setupRouting();
+
+        // Load default content based on login state
+        this.loadDefaultContent();
+
+        // Listen for login state changes
+        window.addEventListener('nosmero:login', () => this.loadDefaultContent());
+        window.addEventListener('nosmero:logout', () => this.loadDefaultContent());
+
+        console.log('Right panel initialized');
+    },
+
+    /**
+     * Setup back button in header
+     */
+    setupBackButton() {
+        // Check if back button already exists
+        this.backBtn = document.getElementById('rightPanelBack');
+        if (!this.backBtn && this.header) {
+            // Create back button
+            this.backBtn = document.createElement('button');
+            this.backBtn.id = 'rightPanelBack';
+            this.backBtn.className = 'right-panel-back';
+            this.backBtn.innerHTML = '←';
+            this.backBtn.style.cssText = 'display: none; background: none; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 4px; margin-right: 8px; min-width: 32px; min-height: 32px;';
+            this.backBtn.onclick = () => this.goBack();
+
+            // Insert at beginning of header
+            this.header.insertBefore(this.backBtn, this.header.firstChild);
+        }
+    },
+
+    /**
+     * Go back to previous view in history
+     */
+    goBack() {
+        if (this.history.length === 0) {
+            this.close();
+            return;
+        }
+
+        const previous = this.history.pop();
+
+        // Don't push to history when going back
+        this.openView(previous.view, previous.data, false);
+
+        // Update back button visibility
+        this.updateBackButton();
+    },
+
+    /**
+     * Update back button visibility - show when in contextual mode (not default)
+     */
+    updateBackButton() {
+        if (this.backBtn) {
+            // Show back button whenever we're not on default view
+            this.backBtn.style.display = this.currentView !== 'default' ? 'block' : 'none';
+        }
+    },
+
+    /**
+     * Push current view to history before navigating
+     */
+    pushToHistory() {
+        if (this.currentView && this.currentView !== 'default') {
+            this.history.push({
+                view: this.currentView,
+                data: this.currentData,
+                title: this.title?.textContent || ''
+            });
+            // Limit history size
+            if (this.history.length > 20) {
+                this.history.shift();
+            }
+        }
+    },
+
+    /**
+     * Check if right panel is visible (desktop only)
+     */
+    isVisible() {
+        if (!this.panel) return false;
+        const style = window.getComputedStyle(this.panel);
+        return style.display !== 'none';
+    },
+
+    /**
+     * Setup panel resize functionality
+     */
+    setupResize() {
+        if (!this.resizeHandle) return;
+
+        this.resizeHandle.addEventListener('mousedown', (e) => {
+            this.isResizing = true;
+            this.startX = e.clientX;
+            this.startWidth = this.panel.offsetWidth;
+            this.resizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!this.isResizing) return;
+
+            // Calculate new width (dragging left = wider, right = narrower)
+            const diff = this.startX - e.clientX;
+            let newWidth = this.startWidth + diff;
+
+            // Clamp to min/max
+            newWidth = Math.max(this.minWidth, Math.min(this.maxWidth, newWidth));
+
+            this.panel.style.width = `${newWidth}px`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (this.isResizing) {
+                this.isResizing = false;
+                this.resizeHandle.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+
+                // Save width preference
+                localStorage.setItem('rightPanelWidth', this.panel.offsetWidth);
+            }
+        });
+
+        // Restore saved width
+        const savedWidth = localStorage.getItem('rightPanelWidth');
+        if (savedWidth) {
+            const width = parseInt(savedWidth, 10);
+            if (width >= this.minWidth && width <= this.maxWidth) {
+                this.panel.style.width = `${width}px`;
+            }
+        }
+    },
+
+    /**
+     * Setup URL routing for panel state
+     */
+    setupRouting() {
+        // Handle browser back/forward
+        window.addEventListener('popstate', (e) => {
+            if (e.state?.rightPanel) {
+                this.openView(e.state.rightPanel.view, e.state.rightPanel.data, false);
+            } else {
+                this.close(false);
+            }
+        });
+
+        // Check initial URL for panel state
+        const params = new URLSearchParams(window.location.search);
+        const thread = params.get('thread');
+        const profile = params.get('profile');
+        const panel = params.get('panel');
+
+        if (thread) {
+            this.openThread(thread, false);
+        } else if (profile) {
+            this.openProfile(profile, false);
+        } else if (panel) {
+            this.openView(panel, null, false);
+        }
+    },
+
+    /**
+     * Update URL to reflect panel state
+     */
+    updateURL(view, data, pushState = true) {
+        const url = new URL(window.location);
+
+        // Clear previous panel params
+        url.searchParams.delete('thread');
+        url.searchParams.delete('profile');
+        url.searchParams.delete('panel');
+
+        // Set new param based on view
+        if (view === 'thread' && data) {
+            url.searchParams.set('thread', data);
+        } else if (view === 'profile' && data) {
+            url.searchParams.set('profile', data);
+        } else if (view !== 'default') {
+            url.searchParams.set('panel', view);
+        }
+
+        const state = { rightPanel: { view, data } };
+
+        if (pushState) {
+            history.pushState(state, '', url);
+        } else {
+            history.replaceState(state, '', url);
+        }
+    },
+
+    /**
+     * Load default content based on login state
+     */
+    async loadDefaultContent() {
+        if (!this.defaultFeed) return;
+
+        const isLoggedIn = !!window.NostrState?.publicKey;
+
+        // Set and save title (so close() can restore it correctly)
+        this.defaultFeedTitle = isLoggedIn ? 'Trending Monero' : 'Popular Notes';
+        if (this.title) {
+            this.title.textContent = this.defaultFeedTitle;
+        }
+
+        // Show loading
+        this.defaultFeed.innerHTML = '<div class="loading">Loading...</div>';
+
+        // Wait a bit for relays to be ready
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        try {
+            // Load appropriate feed
+            if (isLoggedIn) {
+                await this.loadTrendingMoneroFeed();
+            } else {
+                await this.loadPopularNotesFeed();
+            }
+        } catch (error) {
+            console.error('Error loading default panel content:', error);
+            this.defaultFeed.innerHTML = '<div class="error" style="padding: 20px; color: var(--text-secondary);">Failed to load content</div>';
+        }
+    },
+
+    /**
+     * Load Trending Monero feed into default panel
+     */
+    async loadTrendingMoneroFeed() {
+        if (!window.loadTrendingMoneroFeed || !this.defaultFeed) return;
+
+        // Create a temporary container to capture the posts
+        const posts = await this.fetchTrendingMoneroPosts();
+        this.renderPostsToPanel(posts, 'Trending Monero');
+    },
+
+    /**
+     * Load Popular Notes feed into default panel
+     */
+    async loadPopularNotesFeed() {
+        if (!this.defaultFeed) return;
+
+        const posts = await this.fetchPopularPosts();
+        this.renderPostsToPanel(posts, 'Popular Notes');
+    },
+
+    /**
+     * Fetch trending Monero posts (uses existing logic)
+     */
+    async fetchTrendingMoneroPosts() {
+        // Use the existing relay pool and fetch logic
+        const pool = window.NostrState?.pool;
+        const relays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.getActiveRelays?.();
+
+        if (!pool || !relays?.length) {
+            console.warn('Right panel: No pool or relays available for Monero feed');
+            return [];
+        }
+
+        const moneroTerms = ['monero', 'xmr', '#monero', '#xmr'];
+        const since = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60; // Last 7 days
+
+        try {
+            const events = await pool.querySync(relays, {
+                kinds: [1],
+                limit: 50,
+                since
+            });
+
+            // Filter for Monero-related content
+            const moneroEvents = events.filter(event => {
+                const content = event.content.toLowerCase();
+                return moneroTerms.some(term => content.includes(term));
+            });
+
+            // Sort by engagement (reactions count if available, or recency)
+            moneroEvents.sort((a, b) => b.created_at - a.created_at);
+
+            return moneroEvents.slice(0, 20);
+        } catch (error) {
+            console.error('Error fetching trending Monero posts:', error);
+            return [];
+        }
+    },
+
+    /**
+     * Fetch popular posts - same logic as "Popular Notes" tab (loadTrendingAllFeed)
+     * Fetches recent notes and sorts by engagement (replies + reactions + zaps)
+     */
+    async fetchPopularPosts() {
+        const pool = window.NostrState?.pool;
+        const relays = window.NostrRelays?.DEFAULT_RELAYS || window.NostrRelays?.getReadRelays?.();
+
+        if (!pool || !relays?.length) {
+            console.warn('Right panel: No pool or relays available for popular feed');
+            return [];
+        }
+
+        try {
+            console.log('Right panel: Loading popular notes (last 24h, sorted by engagement)...');
+
+            // Query for recent notes from last 24 hours (same as loadTrendingAllFeed)
+            const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
+
+            const notes = await pool.querySync(relays, {
+                kinds: [1],
+                since: oneDayAgo,
+                limit: 200  // Same as loadTrendingAllFeed
+            });
+
+            console.log(`Right panel: Found ${notes.length} recent notes`);
+
+            if (!notes || notes.length === 0) {
+                return [];
+            }
+
+            // Fetch engagement data (replies, reactions, zaps)
+            let engagementData = {};
+            if (window.NostrPosts?.fetchEngagementCounts) {
+                engagementData = await window.NostrPosts.fetchEngagementCounts(notes.map(n => n.id));
+            }
+
+            // Sort by total engagement (same logic as loadTrendingAllFeed)
+            notes.sort((a, b) => {
+                const engageA = (engagementData[a.id]?.replies || 0) +
+                               (engagementData[a.id]?.reactions || 0) +
+                               (engagementData[a.id]?.zaps || 0);
+                const engageB = (engagementData[b.id]?.replies || 0) +
+                               (engagementData[b.id]?.reactions || 0) +
+                               (engagementData[b.id]?.zaps || 0);
+                return engageB - engageA;
+            });
+
+            // Return top 15 most engaged notes
+            return notes.slice(0, 15);
+        } catch (error) {
+            console.error('Error fetching popular posts:', error);
+            return [];
+        }
+    },
+
+    /**
+     * Render posts to the panel's default feed
+     */
+    async renderPostsToPanel(posts, title) {
+        if (!this.defaultFeed) return;
+
+        if (!posts || posts.length === 0) {
+            this.defaultFeed.innerHTML = `
+                <div style="padding: 20px; text-align: center; color: var(--text-secondary);">
+                    No posts found
+                </div>
+            `;
+            return;
+        }
+
+        // Fetch profiles for these posts first
+        const uniquePubkeys = [...new Set(posts.map(p => p.pubkey))];
+        const pubkeysToFetch = uniquePubkeys.filter(pk => !window.NostrState?.profileCache?.[pk]);
+        if (pubkeysToFetch.length > 0 && window.NostrPosts?.fetchProfiles) {
+            await window.NostrPosts.fetchProfiles(pubkeysToFetch);
+        }
+
+        // Use existing renderSinglePost function if available
+        if (window.NostrPosts?.renderSinglePost) {
+            try {
+                const renderedPosts = await Promise.all(
+                    posts.map(post => window.NostrPosts.renderSinglePost(post, 'feed'))
+                );
+                this.defaultFeed.innerHTML = renderedPosts.join('');
+
+                // Add trust badges after rendering (same as main feed)
+                try {
+                    if (window.NostrTrustBadges?.addFeedTrustBadges) {
+                        await window.NostrTrustBadges.addFeedTrustBadges(
+                            posts.map(p => ({ id: p.id, pubkey: p.pubkey })),
+                            '#rightPanelDefaultFeed'
+                        );
+                    }
+                } catch (badgeError) {
+                    console.error('Right panel: Error adding trust badges:', badgeError);
+                }
+            } catch (error) {
+                console.error('Error rendering posts with NostrPosts:', error);
+                // Fallback to basic rendering
+                this.renderPostsBasic(posts);
+            }
+        } else {
+            // Fallback: basic rendering
+            this.renderPostsBasic(posts);
+        }
+    },
+
+    /**
+     * Basic post rendering fallback
+     */
+    renderPostsBasic(posts) {
+        this.defaultFeed.innerHTML = posts.map(post => `
+            <div class="post" data-id="${post.id}" onclick="openThreadView('${post.id}')" style="cursor: pointer;">
+                <div class="post-content" style="padding: 12px;">
+                    ${this.escapeHtml(post.content.substring(0, 200))}${post.content.length > 200 ? '...' : ''}
+                </div>
+            </div>
+        `).join('');
+    },
+
+    /**
+     * Open a specific view in the right panel
+     */
+    openView(view, data = null, updateUrl = true) {
+        if (!this.isVisible()) {
+            // On mobile, fall back to modal/page behavior
+            return this.fallbackToModal(view, data);
+        }
+
+        // Verify content element exists
+        if (!this.content) {
+            this.content = document.getElementById('rightPanelContent');
+            if (!this.content) {
+                console.error('RightPanel: Cannot find content element');
+                return this.fallbackToModal(view, data);
+            }
+        }
+
+        // Push current view to history before navigating
+        // Push if: updateUrl is true, current view is not default, and either view type changed OR data changed
+        if (updateUrl && this.currentView !== 'default') {
+            const viewChanged = view !== this.currentView;
+            const dataChanged = data !== this.currentData;
+            if (viewChanged || dataChanged) {
+                this.pushToHistory();
+            }
+        }
+
+        this.currentView = view;
+        this.currentData = data;
+
+        // Add contextual class (shows close button, hides default feed)
+        if (view !== 'default') {
+            this.panel.classList.add('contextual');
+            // Deactivate all sections before showing the new one
+            const allSections = this.content.querySelectorAll('.right-panel-section');
+            allSections.forEach(section => section.classList.remove('active'));
+        } else {
+            this.panel.classList.remove('contextual');
+            // Clear history when returning to default
+            this.history = [];
+        }
+
+        // Update back button visibility
+        this.updateBackButton();
+
+        // Update URL
+        if (updateUrl) {
+            this.updateURL(view, data);
+        }
+
+        // Render the appropriate view
+        switch (view) {
+            case 'thread':
+                this.renderThread(data);
+                break;
+            case 'profile':
+                this.renderProfile(data);
+                break;
+            case 'settings':
+                this.renderSettings();
+                break;
+            case 'wallet':
+                this.renderWallet();
+                break;
+            case 'compose':
+                this.renderCompose();
+                break;
+            case 'reply':
+                this.renderReply(data);
+                break;
+            case 'zap':
+                this.renderZap(data);
+                break;
+            default:
+                this.loadDefaultContent();
+        }
+    },
+
+    /**
+     * Open thread view
+     */
+    openThread(noteId, updateUrl = true) {
+        this.openView('thread', noteId, updateUrl);
+    },
+
+    /**
+     * Open profile view
+     */
+    openProfile(pubkey, updateUrl = true) {
+        this.openView('profile', pubkey, updateUrl);
+    },
+
+    /**
+     * Open settings
+     */
+    openSettings(updateUrl = true) {
+        this.openView('settings', null, updateUrl);
+    },
+
+    /**
+     * Open wallet
+     */
+    openWallet(updateUrl = true) {
+        this.openView('wallet', null, updateUrl);
+    },
+
+    /**
+     * Open compose
+     */
+    openCompose(updateUrl = true) {
+        this.openView('compose', null, updateUrl);
+    },
+
+    /**
+     * Open reply
+     */
+    openReply(noteId, updateUrl = true) {
+        this.openView('reply', noteId, updateUrl);
+    },
+
+    /**
+     * Open zap/tip flow
+     */
+    openZap(data, updateUrl = true) {
+        this.openView('zap', data, updateUrl);
+    },
+
+    /**
+     * Close contextual view and return to default
+     */
+    close(updateUrl = true) {
+        this.currentView = 'default';
+        this.currentData = null;
+        this.panel?.classList.remove('contextual');
+
+        // Clear navigation history
+        this.history = [];
+        this.updateBackButton();
+
+        // Clear contextual content
+        const contextualSections = this.content?.querySelectorAll('.right-panel-section');
+        contextualSections?.forEach(section => {
+            section.classList.remove('active');
+            section.innerHTML = '';
+        });
+
+        // Show default feed
+        if (this.defaultFeed) {
+            this.defaultFeed.style.display = '';
+        }
+
+        // Restore the title that was set when default content was loaded
+        if (this.title) {
+            this.title.textContent = this.defaultFeedTitle;
+        }
+
+        // Update URL
+        if (updateUrl) {
+            this.updateURL('default', null);
+        }
+    },
+
+    /**
+     * Render thread in panel
+     */
+    async renderThread(noteId) {
+        if (!noteId) return;
+
+        // Ensure content element exists
+        if (!this.content) {
+            console.error('renderThread: content element not found');
+            return;
+        }
+
+        this.setTitle('Thread');
+
+        // Create or get thread section
+        let section = this.content.querySelector('.right-panel-thread');
+        if (!section) {
+            section = document.createElement('div');
+            section.className = 'right-panel-section right-panel-thread';
+            this.content.appendChild(section);
+        }
+
+        section.classList.add('active');
+        section.innerHTML = '<div class="loading" style="padding: 20px;">Loading thread...</div>';
+
+        // Hide default feed
+        if (this.defaultFeed) {
+            this.defaultFeed.style.display = 'none';
+        }
+
+        try {
+            // Fetch and render thread
+            await this.fetchAndRenderThread(noteId, section);
+        } catch (error) {
+            console.error('Error loading thread:', error);
+            section.innerHTML = '<div style="padding: 20px; color: var(--danger);">Failed to load thread</div>';
+        }
+    },
+
+    /**
+     * Fetch and render thread manually
+     */
+    async fetchAndRenderThread(noteId, container) {
+        const pool = window.NostrState?.pool;
+        const relays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.getActiveRelays?.();
+
+        if (!pool || !relays?.length) {
+            container.innerHTML = '<div style="padding: 20px;">Cannot load thread - no relay connection</div>';
+            return;
+        }
+
+        try {
+            // Fetch the main note
+            const events = await pool.querySync(relays, {
+                ids: [noteId]
+            });
+
+            if (!events || events.length === 0) {
+                container.innerHTML = '<div style="padding: 20px;">Note not found</div>';
+                return;
+            }
+
+            const mainNote = events[0];
+
+            // Add to event cache
+            if (window.NostrState?.eventCache) {
+                window.NostrState.eventCache[mainNote.id] = mainNote;
+            }
+
+            // Fetch replies
+            const replies = await pool.querySync(relays, {
+                kinds: [1],
+                '#e': [noteId],
+                limit: 50
+            });
+
+            // Add replies to cache
+            replies.forEach(reply => {
+                if (window.NostrState?.eventCache) {
+                    window.NostrState.eventCache[reply.id] = reply;
+                }
+            });
+
+            // Fetch profiles for all authors
+            const allPosts = [mainNote, ...replies];
+            const uniquePubkeys = [...new Set(allPosts.map(p => p.pubkey))];
+            const pubkeysToFetch = uniquePubkeys.filter(pk => !window.NostrState?.profileCache?.[pk]);
+            if (pubkeysToFetch.length > 0 && window.NostrPosts?.fetchProfiles) {
+                await window.NostrPosts.fetchProfiles(pubkeysToFetch);
+            }
+
+            // Render using NostrPosts.renderSinglePost
+            let html = '';
+
+            // Main note
+            if (window.NostrPosts?.renderSinglePost) {
+                html += await window.NostrPosts.renderSinglePost(mainNote, 'thread');
+            } else {
+                html += `<div class="post" style="padding: 16px; border-bottom: 1px solid var(--border-color);">
+                    ${this.escapeHtml(mainNote.content)}
+                </div>`;
+            }
+
+            // Replies
+            if (replies && replies.length > 0) {
+                replies.sort((a, b) => a.created_at - b.created_at);
+                for (const reply of replies) {
+                    if (window.NostrPosts?.renderSinglePost) {
+                        html += await window.NostrPosts.renderSinglePost(reply, 'thread');
+                    } else {
+                        html += `<div class="post reply" style="padding: 16px; border-bottom: 1px solid var(--border-color); margin-left: 20px;">
+                            ${this.escapeHtml(reply.content)}
+                        </div>`;
+                    }
+                }
+            }
+
+            container.innerHTML = html;
+
+            // Add trust badges
+            try {
+                if (window.NostrTrustBadges?.addFeedTrustBadges) {
+                    await window.NostrTrustBadges.addFeedTrustBadges(
+                        allPosts.map(p => ({ id: p.id, pubkey: p.pubkey })),
+                        '.right-panel-thread'
+                    );
+                }
+            } catch (badgeError) {
+                console.error('Right panel thread: Error adding trust badges:', badgeError);
+            }
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    /**
+     * Render profile in panel
+     */
+    async renderProfile(pubkey) {
+        if (!pubkey) return;
+
+        // Ensure content element exists
+        if (!this.content) {
+            this.content = document.getElementById('rightPanelContent');
+            if (!this.content) {
+                console.error('RightPanel: Cannot find content element');
+                return;
+            }
+        }
+
+        this.setTitle('Profile');
+
+        let section = this.content.querySelector('.right-panel-profile');
+        if (!section) {
+            section = document.createElement('div');
+            section.className = 'right-panel-section right-panel-profile';
+            this.content.appendChild(section);
+        }
+
+        section.classList.add('active');
+        section.innerHTML = '<div class="loading" style="padding: 20px; text-align: center;">Loading profile...</div>';
+
+        if (this.defaultFeed) {
+            this.defaultFeed.style.display = 'none';
+        }
+
+        try {
+            // Fetch profile
+            if (window.NostrPosts?.fetchProfiles) {
+                await window.NostrPosts.fetchProfiles([pubkey]);
+            }
+
+            let userProfile = window.NostrState?.profileCache?.[pubkey];
+            if (!userProfile) {
+                userProfile = {
+                    pubkey: pubkey,
+                    name: 'Anonymous',
+                    picture: null,
+                    about: 'No profile information available'
+                };
+            }
+
+            // Render profile header with ThumbHash progressive loading
+            const avatarPlaceholder = userProfile.picture ? window.ThumbHashLoader?.getPlaceholder(userProfile.picture) : null;
+            section.innerHTML = `
+                <div style="padding: 16px;">
+                    <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
+                        ${userProfile.picture ?
+                            `<img src="${avatarPlaceholder || userProfile.picture}" data-thumbhash-src="${userProfile.picture}" style="width: 64px; height: 64px; border-radius: 50%; object-fit: cover;${avatarPlaceholder ? ' filter: blur(4px); transition: filter 0.3s;' : ''}"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)">
+                             <div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>` :
+                            `<div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>`
+                        }
+                        <div style="flex: 1; min-width: 0;">
+                            <h2 class="profile-name" data-pubkey="${pubkey}" style="color: #fff; font-size: 18px; margin: 0 0 4px 0; word-wrap: break-word;">${userProfile.name || 'Anonymous'}</h2>
+                            <p style="margin: 0; color: #888; font-family: monospace; font-size: 12px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
+                            ${userProfile.nip05 ? `<div style="color: #10B981; font-size: 12px; margin-top: 4px;">✅ ${userProfile.nip05}</div>` : ''}
+                        </div>
+                    </div>
+                    ${userProfile.about ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 12px; word-wrap: break-word;">${this.escapeHtml(userProfile.about)}</div>` : ''}
+                    ${userProfile.website ? `<div style="margin-bottom: 8px;"><a href="${userProfile.website.startsWith('http') ? userProfile.website : 'https://' + userProfile.website}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 13px;">🔗 ${userProfile.website}</a></div>` : ''}
+                    <div id="panelProfileMoneroAddress"></div>
+                    <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+                        <button id="panelFollowBtn_${pubkey}" onclick="toggleFollow('${pubkey}')" style="background: #6B73FF; border: none; border-radius: 6px; color: #fff; padding: 6px 12px; cursor: pointer; font-size: 13px; font-weight: bold;">
+                            Follow
+                        </button>
+                        <button onclick="copyUserNpub('${pubkey}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 6px; color: #8B5CF6; padding: 6px 12px; cursor: pointer; font-size: 13px;">📋 Copy npub</button>
+                        <button onclick="viewUserProfilePage('${pubkey}')" style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; border-radius: 6px; color: #FF6600; padding: 6px 12px; cursor: pointer; font-size: 13px;">View Full Profile</button>
+                    </div>
+                </div>
+                <div style="border-top: 1px solid var(--border-color); padding: 8px 16px; background: rgba(0,0,0,0.2);">
+                    <span style="color: #888; font-size: 13px;">Recent Posts</span>
+                </div>
+                <div id="panelProfilePosts" style="padding: 0;">
+                    <div class="loading" style="padding: 20px; text-align: center;">Loading posts...</div>
+                </div>
+            `;
+
+            // Update follow button state
+            this.updatePanelFollowButton(pubkey);
+
+            // Load Monero address
+            this.loadPanelMoneroAddress(pubkey);
+
+            // Add trust badge
+            try {
+                if (window.NostrTrustBadges?.addProfileTrustBadge) {
+                    setTimeout(() => {
+                        window.NostrTrustBadges.addProfileTrustBadge(pubkey, '.right-panel-profile');
+                    }, 100);
+                }
+            } catch (e) {
+                console.error('Error adding trust badge:', e);
+            }
+
+            // Fetch and display user's posts
+            await this.fetchPanelProfilePosts(pubkey);
+
+        } catch (error) {
+            console.error('Error loading profile:', error);
+            section.innerHTML = '<div style="padding: 20px; color: var(--danger);">Failed to load profile</div>';
+        }
+    },
+
+    /**
+     * Update follow button in panel
+     */
+    async updatePanelFollowButton(pubkey) {
+        const btn = document.getElementById(`panelFollowBtn_${pubkey}`);
+        if (!btn) return;
+
+        const isFollowing = window.NostrState?.followingUsers?.has(pubkey);
+        if (isFollowing) {
+            btn.textContent = 'Following';
+            btn.style.background = 'rgba(107, 115, 255, 0.2)';
+            btn.style.border = '1px solid #6B73FF';
+        } else {
+            btn.textContent = 'Follow';
+            btn.style.background = '#6B73FF';
+            btn.style.border = 'none';
+        }
+    },
+
+    /**
+     * Load Monero address for panel profile
+     */
+    async loadPanelMoneroAddress(pubkey) {
+        const container = document.getElementById('panelProfileMoneroAddress');
+        if (!container) return;
+
+        try {
+            let moneroAddress = null;
+            if (window.getUserMoneroAddress) {
+                moneroAddress = await window.getUserMoneroAddress(pubkey);
+            }
+
+            if (moneroAddress && moneroAddress.trim()) {
+                const shortAddress = `${moneroAddress.substring(0, 8)}...${moneroAddress.substring(moneroAddress.length - 8)}`;
+                container.innerHTML = `
+                    <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid #FF6600; border-radius: 6px; padding: 8px; margin-top: 8px;">
+                        <div style="color: #FF6600; font-size: 11px; font-weight: bold; margin-bottom: 2px; display: flex; align-items: center; justify-content: space-between;">
+                            <span>💰 MONERO</span>
+                            <button onclick="navigator.clipboard.writeText('${moneroAddress}'); window.NostrUtils?.showNotification?.('Copied!', 'success')"
+                                    style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 1px 4px; border-radius: 3px; cursor: pointer; font-size: 9px;">
+                                Copy
+                            </button>
+                        </div>
+                        <div style="color: #fff; font-family: monospace; font-size: 12px;">${shortAddress}</div>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading Monero address:', error);
+        }
+    },
+
+    /**
+     * Fetch and display user posts in panel
+     */
+    async fetchPanelProfilePosts(pubkey) {
+        const container = document.getElementById('panelProfilePosts');
+        if (!container) return;
+
+        const pool = window.NostrState?.pool;
+        const relays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.getActiveRelays?.();
+
+        if (!pool || !relays?.length) {
+            container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No relay connection</div>';
+            return;
+        }
+
+        try {
+            const posts = await pool.querySync(relays, {
+                kinds: [1],
+                authors: [pubkey],
+                limit: 10
+            });
+
+            if (!posts || posts.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No posts found</div>';
+                return;
+            }
+
+            // Sort by date
+            posts.sort((a, b) => b.created_at - a.created_at);
+
+            // Add to cache
+            posts.forEach(post => {
+                if (window.NostrState?.eventCache) {
+                    window.NostrState.eventCache[post.id] = post;
+                }
+            });
+
+            // Render posts
+            if (window.NostrPosts?.renderSinglePost) {
+                const rendered = await Promise.all(
+                    posts.map(post => window.NostrPosts.renderSinglePost(post, 'feed'))
+                );
+                container.innerHTML = rendered.join('');
+            } else {
+                container.innerHTML = posts.map(post => `
+                    <div class="post" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
+                        ${this.escapeHtml(post.content.substring(0, 200))}${post.content.length > 200 ? '...' : ''}
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            console.error('Error fetching profile posts:', error);
+            container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">Failed to load posts</div>';
+        }
+    },
+
+    /**
+     * Render settings in panel
+     * For now, settings is too complex - fall back to the full page
+     */
+    renderSettings() {
+        // Settings has too many interactive elements - use the full page for now
+        this.close(false);
+        if (window.loadSettings) {
+            window.loadSettings();
+        }
+    },
+
+    /**
+     * Render wallet in panel
+     * For now, wallet is too complex - fall back to the modal
+     */
+    renderWallet() {
+        // Wallet has complex state management - use the modal for now
+        this.close(false);
+        // Call the original modal function directly, bypassing the right panel check
+        const modal = document.getElementById('walletModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+            // Trigger wallet initialization
+            if (window.NostrState?.publicKey) {
+                import('/js/wallet-modal.js').then(module => {
+                    if (module.initWalletView) {
+                        module.initWalletView();
+                    }
+                });
+            }
+        }
+    },
+
+    /**
+     * Render compose in panel
+     */
+    renderCompose(replyTo = null) {
+        this.setTitle(replyTo ? 'Reply' : 'Create Note');
+
+        let section = this.content.querySelector('.right-panel-compose');
+        if (!section) {
+            section = document.createElement('div');
+            section.className = 'right-panel-section right-panel-compose';
+            this.content.appendChild(section);
+        }
+
+        section.classList.add('active');
+
+        if (this.defaultFeed) {
+            this.defaultFeed.style.display = 'none';
+        }
+
+        section.innerHTML = `
+            ${replyTo ? `<div class="reply-context" style="padding: 12px; background: var(--card-bg); border-radius: 8px; margin-bottom: 12px; font-size: 14px; color: var(--text-secondary);">
+                Replying to: <span id="replyToPreview">Loading...</span>
+            </div>` : ''}
+            <textarea class="compose-textarea" id="panelComposeText" placeholder="${replyTo ? 'Write your reply...' : 'What\'s happening?'}" maxlength="4000"></textarea>
+            <div style="text-align: right; color: var(--text-muted); font-size: 12px; margin-top: 4px;">
+                <span id="panelCharCount">0/4000</span>
+            </div>
+            <div class="compose-actions" style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <button class="media-btn" onclick="document.getElementById('panelMediaInput').click()">📎 Media</button>
+                    <input type="file" id="panelMediaInput" accept="image/*,video/*" style="display: none;">
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button class="cancel-btn" onclick="RightPanel.close()">Cancel</button>
+                    <button class="send-btn" onclick="RightPanel.submitCompose(${replyTo ? `'${replyTo}'` : 'null'})">${replyTo ? 'Reply' : 'Publish'}</button>
+                </div>
+            </div>
+        `;
+
+        // Setup character count
+        const textarea = section.querySelector('#panelComposeText');
+        const charCount = section.querySelector('#panelCharCount');
+        textarea?.addEventListener('input', () => {
+            charCount.textContent = `${textarea.value.length}/4000`;
+        });
+
+        // Focus textarea
+        textarea?.focus();
+
+        // Load reply context if replying
+        if (replyTo) {
+            this.loadReplyContext(replyTo);
+        }
+    },
+
+    /**
+     * Render reply (alias for compose with reply context)
+     */
+    renderReply(noteId) {
+        this.renderCompose(noteId);
+    },
+
+    /**
+     * Load reply context (the note being replied to)
+     */
+    async loadReplyContext(noteId) {
+        const preview = document.getElementById('replyToPreview');
+        if (!preview) return;
+
+        try {
+            const pool = window.NostrState?.pool;
+            const relays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.getActiveRelays?.();
+
+            if (pool && relays?.length) {
+                const events = await pool.querySync(relays, {
+                    ids: [noteId]
+                });
+
+                if (events && events.length > 0) {
+                    const note = events[0];
+                    preview.textContent = note.content.substring(0, 100) + (note.content.length > 100 ? '...' : '');
+                } else {
+                    preview.textContent = 'Note not found';
+                }
+            }
+        } catch (error) {
+            preview.textContent = 'Failed to load context';
+        }
+    },
+
+    /**
+     * Submit compose/reply from panel
+     */
+    async submitCompose(replyToId = null) {
+        const textarea = document.getElementById('panelComposeText');
+        if (!textarea || !textarea.value.trim()) {
+            window.NostrUtils?.showNotification?.('Please enter some text', 'error');
+            return;
+        }
+
+        const content = textarea.value.trim();
+
+        try {
+            if (replyToId && window.sendReplyDirect) {
+                await window.sendReplyDirect(replyToId, content);
+            } else if (window.sendPostDirect) {
+                await window.sendPostDirect(content);
+            } else {
+                throw new Error('Post function not available');
+            }
+
+            this.close();
+        } catch (error) {
+            console.error('Error submitting:', error);
+            // Error notification already shown by the send functions
+        }
+    },
+
+    /**
+     * Render zap/tip flow in panel
+     */
+    renderZap(data) {
+        this.setTitle('Tip with Monero');
+
+        let section = this.content.querySelector('.right-panel-zap');
+        if (!section) {
+            section = document.createElement('div');
+            section.className = 'right-panel-section right-panel-zap';
+            this.content.appendChild(section);
+        }
+
+        section.classList.add('active');
+
+        if (this.defaultFeed) {
+            this.defaultFeed.style.display = 'none';
+        }
+
+        // data should contain { address, noteId, authorName, authorPubkey }
+        if (!data?.address) {
+            section.innerHTML = '<div style="padding: 20px;">No Monero address available for this user</div>';
+            return;
+        }
+
+        section.innerHTML = `
+            <div style="margin-bottom: 16px;">
+                <div style="color: var(--text-secondary); font-size: 14px; margin-bottom: 8px;">
+                    Tipping ${data.authorName || 'this user'}
+                </div>
+                <div style="font-family: monospace; font-size: 12px; word-break: break-all; padding: 12px; background: var(--card-bg); border-radius: 8px; color: var(--text-primary);">
+                    ${data.address}
+                </div>
+            </div>
+            <div class="qr-container" id="panelQrCode" style="margin: 20px auto;"></div>
+            <div style="margin-top: 16px;">
+                <button class="send-btn" style="width: 100%;" onclick="navigator.clipboard.writeText('${data.address}'); window.showToast?.('Address copied!', 'success');">
+                    📋 Copy Address
+                </button>
+            </div>
+            <div style="margin-top: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">
+                Scan with your Monero wallet
+            </div>
+        `;
+
+        // Generate QR code
+        if (window.QRCode) {
+            const qrContainer = section.querySelector('#panelQrCode');
+            new QRCode(qrContainer, {
+                text: `monero:${data.address}`,
+                width: 200,
+                height: 200,
+                colorDark: '#FF6600',
+                colorLight: '#000000'
+            });
+        }
+    },
+
+    /**
+     * Set panel title
+     */
+    setTitle(title) {
+        if (this.title) {
+            this.title.textContent = title;
+        }
+    },
+
+    /**
+     * Fallback to modal/page when panel not visible (mobile)
+     */
+    fallbackToModal(view, data) {
+        switch (view) {
+            case 'thread':
+                if (window.openThreadModal) {
+                    window.openThreadModal(data);
+                } else if (window.viewThread) {
+                    window.viewThread(data);
+                }
+                break;
+            case 'profile':
+                if (window.openProfileModal) {
+                    window.openProfileModal(data);
+                } else if (window.viewProfile) {
+                    window.viewProfile(data);
+                }
+                break;
+            case 'settings':
+                if (window.handleNavItemClick) {
+                    window.handleNavItemClick('settings');
+                }
+                break;
+            case 'wallet':
+                if (window.openWalletModal) {
+                    window.openWalletModal();
+                }
+                break;
+            case 'compose':
+                if (window.toggleCompose) {
+                    window.toggleCompose();
+                }
+                break;
+            case 'reply':
+                if (window.openReplyModal) {
+                    window.openReplyModal(data);
+                }
+                break;
+            case 'zap':
+                if (window.openZapModal) {
+                    window.openZapModal(data);
+                }
+                break;
+        }
+    },
+
+    /**
+     * Escape HTML for safe rendering
+     */
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+};
+
+// Global functions for onclick
+window.closeRightPanel = () => RightPanel.close();
+window.rightPanelGoBack = () => RightPanel.goBack();
+
+// Export for module usage
+window.RightPanel = RightPanel;
+
+export default RightPanel;

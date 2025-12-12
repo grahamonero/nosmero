@@ -15,6 +15,8 @@ import * as Search from './search.js';
 import * as TrustBadges from './trust-badges.js';
 import * as Paywall from './paywall.js';
 import * as PaywallUI from './paywall-ui.js';
+import RightPanel from './right-panel.js';
+import * as ThumbHashLoader from './thumbhash-loader.js';
 
 // Make modules available globally
 window.NostrState = State;
@@ -85,6 +87,10 @@ async function initializeApp() {
         // Set up navigation
         setupNavigation();
         console.log('✓ Navigation setup complete');
+
+        // Initialize right panel (three-column layout)
+        RightPanel.init();
+        console.log('✓ Right panel initialized');
 
         // Initialize theme toggle
         initializeThemeToggle();
@@ -586,6 +592,7 @@ async function handleNavigation(event) {
             await loadUserProfile();
             break;
         case 'settings':
+            // Settings is complex - always use full page
             await window.loadSettings();
             break;
         default:
@@ -3306,6 +3313,11 @@ function navigateTo(page, skipHistory = false) {
 
 // Handle browser back/forward buttons
 window.addEventListener('popstate', async (event) => {
+    // Skip if this is a right panel navigation event (handled by right-panel.js)
+    if (event.state?.rightPanel) {
+        return;
+    }
+
     if (event.state && event.state.page) {
         if (event.state.page === 'thread' && event.state.eventId) {
             // Restore thread view without pushing to history again
@@ -3323,10 +3335,12 @@ window.addEventListener('popstate', async (event) => {
             // User clicked back/forward - navigate without creating new history
             navigateTo(event.state.page, true);
         }
-    } else {
-        // No state (initial page load or external link) - go to home
+    } else if (!event.state) {
+        // No state at all (initial page load or external link) - go to home
         navigateTo('home', true);
     }
+    // If event.state exists but no page property and no rightPanel, do nothing
+    // (could be some other state we don't handle)
 });
 
 // Initialize history state on page load
