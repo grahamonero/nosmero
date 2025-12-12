@@ -7,6 +7,7 @@ import { showNotification, escapeHtml, parseContent, signEvent } from './utils.j
 import { encryptMessage, decryptMessage, wrapGiftMessage, wrapGiftMessageWithRecipient, unwrapGiftMessage } from './crypto.js';
 import * as State from './state.js';
 import * as Relays from './relays.js';
+import * as FollowerBaseline from './follower-baseline.js';
 
 const {
     profileCache,
@@ -1165,48 +1166,60 @@ export async function fetchNotifications() {
 async function processNotifications(events) {
     console.log('Processing', events.length, 'notification events');
 
-    // Sort events by timestamp (newest first)
-    const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
+    // Separate follow events (kind 3) from other notification events
+    const followEvents = events.filter(e => e.kind === 3);
+    const otherEvents = events.filter(e => e.kind !== 3);
+
+    // Sort non-follow events by timestamp (newest first)
+    const sortedEvents = otherEvents.sort((a, b) => b.created_at - a.created_at);
 
     // Separate follows from note-based notifications
     const followNotifications = [];
     const interactionsByNote = new Map();
     const originalNoteIds = new Set();
 
-    // First pass: separate follows and group other events by original note ID
+    // Process follow events using baseline comparison
+    // This ensures we only show NEW + RECENT followers, not all existing followers
+    if (followEvents.length > 0) {
+        console.log('Processing', followEvents.length, 'follow events via baseline');
+        try {
+            const { newFollowers, recentFollowers, isFirstTime } = await FollowerBaseline.processFollowersWithBaseline(followEvents);
+
+            if (isFirstTime) {
+                console.log('First time user - follower baseline created, no follow notifications shown');
+            } else {
+                // Combine new followers (just discovered) with recent followers (added in last 7 days)
+                const allFollowersToShow = [...newFollowers, ...recentFollowers];
+
+                if (allFollowersToShow.length > 0) {
+                    console.log('Found', newFollowers.length, 'new +', recentFollowers.length, 'recent followers to show');
+
+                    // Create notifications for new + recent followers
+                    for (const { pubkey, timestamp } of allFollowersToShow) {
+                        // Find the original event for this follower (for event ID)
+                        const originalEvent = followEvents.find(e => e.pubkey === pubkey);
+
+                        followNotifications.push({
+                            id: originalEvent?.id || `follow-${pubkey}`,
+                            type: 'follow',
+                            timestamp: timestamp,
+                            pubkey: pubkey,
+                            profile: State.profileCache[pubkey] || null,
+                            isLegacy: false  // All followers now have accurate timestamps
+                        });
+                    }
+                } else {
+                    console.log('No new or recent followers to show');
+                }
+            }
+        } catch (error) {
+            console.error('Error processing follow baseline:', error);
+        }
+    }
+
+    // First pass: group other events by original note ID
     for (const event of sortedEvents.slice(0, 100)) { // Limit to 100 most recent
         try {
-            // Handle follows separately (they don't have original notes)
-            if (event.kind === 3) {
-                // Track follow timestamps locally (accurate for new follows)
-                const followTimestamps = JSON.parse(localStorage.getItem('followTimestamps') || '{}');
-                let followTimestamp = null;
-                let isLegacy = false;
-
-                if (followTimestamps[event.pubkey]) {
-                    // We've seen this follow before - use stored timestamp (accurate)
-                    followTimestamp = followTimestamps[event.pubkey];
-                    isLegacy = false; // Has accurate timestamp, sort chronologically
-                } else {
-                    // First time seeing this follow - store current time
-                    followTimestamp = Math.floor(Date.now() / 1000);
-                    followTimestamps[event.pubkey] = followTimestamp;
-                    localStorage.setItem('followTimestamps', JSON.stringify(followTimestamps));
-                    isLegacy = true; // No accurate timestamp, show at bottom
-                    console.log('Legacy follow detected from', event.pubkey.substring(0, 8), '- timestamp stored for future');
-                }
-
-                followNotifications.push({
-                    id: event.id,
-                    type: 'follow',
-                    timestamp: followTimestamp,
-                    pubkey: event.pubkey,
-                    profile: State.profileCache[event.pubkey] || null,
-                    isLegacy: isLegacy
-                });
-                continue;
-            }
-
             const originalNoteId = event.originalNoteId;
 
             if (!originalNoteId) {
@@ -1610,10 +1623,7 @@ export function renderNotifications(groupedNotifications = [], followNotificatio
         return;
     }
 
-    // Separate legacy follows (no accurate timestamp) from new follows
-    const legacyFollows = filteredFollowNotifications.filter(f => f.isLegacy);
-    const newFollows = filteredFollowNotifications.filter(f => !f.isLegacy);
-
+    // All follow notifications now have accurate timestamps (no legacy sorting needed)
     // Helper function to render a follow notification
     const renderFollow = (follow) => {
         const profile = follow.profile || {};
@@ -1657,7 +1667,7 @@ export function renderNotifications(groupedNotifications = [], followNotificatio
     // Note groups use latestTimestamp, follows use timestamp
     const chronologicalItems = [
         ...filteredNoteNotifications.map(n => ({ type: 'note', data: n, timestamp: n.latestTimestamp })),
-        ...newFollows.map(f => ({ type: 'follow', data: f, timestamp: f.timestamp }))
+        ...filteredFollowNotifications.map(f => ({ type: 'follow', data: f, timestamp: f.timestamp }))
     ];
 
     // Sort by timestamp (newest first)
@@ -1773,20 +1783,14 @@ export function renderNotifications(groupedNotifications = [], followNotificatio
         `;
     };
 
-    // Render chronological items (notes + new follows interleaved by timestamp)
-    const chronologicalHtml = chronologicalItems.map(item => {
+    // Render chronological items (notes + follows interleaved by timestamp)
+    notificationsList.innerHTML = chronologicalItems.map(item => {
         if (item.type === 'follow') {
             return renderFollow(item.data);
         } else {
             return renderNote(item.data);
         }
     }).join('');
-
-    // Render legacy follows at the bottom
-    const legacyFollowsHtml = legacyFollows.map(renderFollow).join('');
-
-    // Combine: chronological first, legacy follows at bottom
-    notificationsList.innerHTML = chronologicalHtml + legacyFollowsHtml;
 }
 
 // Refresh notifications
