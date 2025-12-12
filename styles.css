@@ -3591,6 +3591,157 @@
     background: var(--monero-orange);
 }
 
+/* Dashboard styles */
+.dashboard {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.dashboard-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.dashboard-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 500;
+}
+
+.dashboard-icon {
+    font-size: 16px;
+}
+
+.dashboard-section-title {
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.dashboard-section-content {
+    padding: 12px;
+}
+
+.dashboard-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+}
+
+.dashboard-row:first-child {
+    padding-top: 0;
+}
+
+.dashboard-row:last-child {
+    padding-bottom: 0;
+}
+
+.dashboard-label {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.dashboard-value {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.dashboard-value.muted {
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+.dashboard-value.success {
+    color: #4ade80;
+}
+
+.dashboard-value.error {
+    color: #ef4444;
+}
+
+.dashboard-action-btn {
+    width: 100%;
+    margin-top: 12px;
+    padding: 8px 16px;
+    background: var(--monero-orange);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.dashboard-action-btn:hover {
+    background: #e86a10;
+}
+
+/* Relay list in dashboard */
+.dashboard-relay-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dashboard-relay-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    padding: 4px 0;
+}
+
+.relay-status {
+    width: 16px;
+    text-align: center;
+    font-weight: 600;
+}
+
+.relay-status.success {
+    color: #4ade80;
+}
+
+.relay-status.error {
+    color: #ef4444;
+}
+
+.relay-url {
+    flex: 1;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.relay-latency {
+    color: var(--text-secondary);
+    min-width: 45px;
+    text-align: right;
+}
+
+.dashboard-more {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: center;
+    padding-top: 8px;
+}
+
+.loading-small {
+    color: var(--text-secondary);
+    font-size: 13px;
+    padding: 8px 0;
+}
+
 /* Right panel contextual - when showing non-default content */
 .right-panel.contextual .right-panel-close {
     display: block;

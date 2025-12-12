@@ -20,6 +20,9 @@ const RightPanel = {
     // Track the default feed title (set when content is loaded)
     defaultFeedTitle: 'Popular Notes',
 
+    // Guard against race conditions in async content loading
+    loadContentId: 0,
+
     // DOM elements (cached on init)
     panel: null,
     header: null,
@@ -261,10 +264,13 @@ const RightPanel = {
     async loadDefaultContent() {
         if (!this.defaultFeed) return;
 
+        // Increment load ID to invalidate any in-flight async operations
+        const thisLoadId = ++this.loadContentId;
+
         const isLoggedIn = !!window.NostrState?.publicKey;
 
         // Set and save title (so close() can restore it correctly)
-        this.defaultFeedTitle = isLoggedIn ? 'Trending Monero' : 'Popular Notes';
+        this.defaultFeedTitle = isLoggedIn ? 'Dashboard' : 'Popular Notes';
         if (this.title) {
             this.title.textContent = this.defaultFeedTitle;
         }
@@ -275,16 +281,25 @@ const RightPanel = {
         // Wait a bit for relays to be ready
         await new Promise(resolve => setTimeout(resolve, 500));
 
+        // Check if this load is still current (not superseded by another call)
+        if (thisLoadId !== this.loadContentId) {
+            console.log('Right panel: Skipping stale load operation');
+            return;
+        }
+
         try {
             // Load appropriate feed
             if (isLoggedIn) {
-                await this.loadTrendingMoneroFeed();
+                await this.loadDashboard();
             } else {
                 await this.loadPopularNotesFeed();
             }
         } catch (error) {
-            console.error('Error loading default panel content:', error);
-            this.defaultFeed.innerHTML = '<div class="error" style="padding: 20px; color: var(--text-secondary);">Failed to load content</div>';
+            // Only show error if this is still the current load
+            if (thisLoadId === this.loadContentId) {
+                console.error('Error loading default panel content:', error);
+                this.defaultFeed.innerHTML = '<div class="error" style="padding: 20px; color: var(--text-secondary);">Failed to load content</div>';
+            }
         }
     },
 
@@ -294,9 +309,11 @@ const RightPanel = {
     async loadTrendingMoneroFeed() {
         if (!window.loadTrendingMoneroFeed || !this.defaultFeed) return;
 
-        // Create a temporary container to capture the posts
+        // Capture current load ID to detect if superseded
+        const loadId = this.loadContentId;
+
         const posts = await this.fetchTrendingMoneroPosts();
-        this.renderPostsToPanel(posts, 'Trending Monero');
+        this.renderPostsToPanel(posts, 'Trending Monero', loadId);
     },
 
     /**
@@ -305,8 +322,11 @@ const RightPanel = {
     async loadPopularNotesFeed() {
         if (!this.defaultFeed) return;
 
+        // Capture current load ID to detect if superseded
+        const loadId = this.loadContentId;
+
         const posts = await this.fetchPopularPosts();
-        this.renderPostsToPanel(posts, 'Popular Notes');
+        this.renderPostsToPanel(posts, 'Popular Notes', loadId);
     },
 
     /**
@@ -406,9 +426,18 @@ const RightPanel = {
 
     /**
      * Render posts to the panel's default feed
+     * @param {Array} posts - Posts to render
+     * @param {string} title - Feed title
+     * @param {number} loadId - Optional load ID to check for stale operations
      */
-    async renderPostsToPanel(posts, title) {
+    async renderPostsToPanel(posts, title, loadId = null) {
         if (!this.defaultFeed) return;
+
+        // Check if this render is stale (another load has started)
+        if (loadId !== null && loadId !== this.loadContentId) {
+            console.log('Right panel: Skipping stale render for', title);
+            return;
+        }
 
         if (!posts || posts.length === 0) {
             this.defaultFeed.innerHTML = `
@@ -426,12 +455,25 @@ const RightPanel = {
             await window.NostrPosts.fetchProfiles(pubkeysToFetch);
         }
 
+        // Check again after async profile fetch
+        if (loadId !== null && loadId !== this.loadContentId) {
+            console.log('Right panel: Skipping stale render for', title);
+            return;
+        }
+
         // Use existing renderSinglePost function if available
         if (window.NostrPosts?.renderSinglePost) {
             try {
                 const renderedPosts = await Promise.all(
                     posts.map(post => window.NostrPosts.renderSinglePost(post, 'feed'))
                 );
+
+                // Final check before DOM update
+                if (loadId !== null && loadId !== this.loadContentId) {
+                    console.log('Right panel: Skipping stale render for', title);
+                    return;
+                }
+
                 this.defaultFeed.innerHTML = renderedPosts.join('');
 
                 // Add trust badges after rendering (same as main feed)
@@ -448,7 +490,9 @@ const RightPanel = {
             } catch (error) {
                 console.error('Error rendering posts with NostrPosts:', error);
                 // Fallback to basic rendering
-                this.renderPostsBasic(posts);
+                if (loadId === null || loadId === this.loadContentId) {
+                    this.renderPostsBasic(posts);
+                }
             }
         } else {
             // Fallback: basic rendering
@@ -467,6 +511,420 @@ const RightPanel = {
                 </div>
             </div>
         `).join('');
+    },
+
+    // ==================== DASHBOARD ====================
+
+    /**
+     * Load the user dashboard with Wallet, Relays, and Engagement sections
+     */
+    async loadDashboard() {
+        if (!this.defaultFeed) return;
+
+        // Render initial structure with loading states
+        this.defaultFeed.innerHTML = `
+            <div class="dashboard">
+                <div class="dashboard-section" id="dashboardWallet">
+                    <div class="dashboard-section-header">
+                        <span class="dashboard-icon">💰</span>
+                        <span class="dashboard-section-title">Wallet</span>
+                    </div>
+                    <div class="dashboard-section-content">
+                        <div class="loading-small">Loading...</div>
+                    </div>
+                </div>
+                <div class="dashboard-section" id="dashboardRelays">
+                    <div class="dashboard-section-header">
+                        <span class="dashboard-icon">📡</span>
+                        <span class="dashboard-section-title">Relays</span>
+                    </div>
+                    <div class="dashboard-section-content">
+                        <div class="loading-small">Loading...</div>
+                    </div>
+                </div>
+                <div class="dashboard-section" id="dashboardEngagement">
+                    <div class="dashboard-section-header">
+                        <span class="dashboard-icon">📊</span>
+                        <span class="dashboard-section-title">Engagement (7 days)</span>
+                    </div>
+                    <div class="dashboard-section-content">
+                        <div class="loading-small">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Load each section in parallel
+        await Promise.all([
+            this.loadWalletSection(),
+            this.loadRelaySection(),
+            this.loadEngagementSection()
+        ]);
+    },
+
+    /**
+     * Load wallet section content
+     */
+    async loadWalletSection() {
+        const container = document.querySelector('#dashboardWallet .dashboard-section-content');
+        if (!container) return;
+
+        try {
+            // Dynamically import wallet module
+            let walletModule;
+            try {
+                walletModule = await import('./wallet/index.js');
+            } catch (e) {
+                console.warn('Could not load wallet module:', e);
+                container.innerHTML = `
+                    <div class="dashboard-row">
+                        <span class="dashboard-label">Status</span>
+                        <span class="dashboard-value muted">Not available</span>
+                    </div>
+                `;
+                return;
+            }
+
+            const hasWallet = await walletModule.hasWallet?.();
+
+            if (!hasWallet) {
+                container.innerHTML = `
+                    <div class="dashboard-row">
+                        <span class="dashboard-label">Status</span>
+                        <span class="dashboard-value muted">No wallet created</span>
+                    </div>
+                    <button class="dashboard-action-btn" onclick="openWalletModal()">Create Wallet</button>
+                `;
+                return;
+            }
+
+            const isUnlocked = walletModule.isWalletUnlocked?.();
+
+            if (!isUnlocked) {
+                container.innerHTML = `
+                    <div class="dashboard-row">
+                        <span class="dashboard-label">Status</span>
+                        <span class="dashboard-value">🔒 Locked</span>
+                    </div>
+                    <button class="dashboard-action-btn" onclick="openWalletModal()">Unlock Wallet</button>
+                `;
+                return;
+            }
+
+            // Wallet is unlocked - get balance
+            let balanceHtml = '<span class="dashboard-value muted">--</span>';
+            try {
+                const balance = await walletModule.getBalance?.();
+                if (balance !== undefined) {
+                    const formatted = walletModule.formatXMR?.(balance) || (Number(balance) / 1e12).toFixed(4);
+                    balanceHtml = `<span class="dashboard-value">${formatted} XMR</span>`;
+                }
+            } catch (e) {
+                console.error('Error getting balance:', e);
+            }
+
+            // Get tips received (query kind 9736 events where user is tagged)
+            const tipsReceived = await this.fetchTipsReceived();
+
+            container.innerHTML = `
+                <div class="dashboard-row">
+                    <span class="dashboard-label">Balance</span>
+                    ${balanceHtml}
+                </div>
+                <div class="dashboard-row">
+                    <span class="dashboard-label">Status</span>
+                    <span class="dashboard-value success">🔓 Unlocked</span>
+                </div>
+                <div class="dashboard-row">
+                    <span class="dashboard-label">Tips received</span>
+                    <span class="dashboard-value">${tipsReceived.count} ${tipsReceived.total ? `(${tipsReceived.total})` : ''}</span>
+                </div>
+                <button class="dashboard-action-btn" onclick="openWalletModal()">Open Wallet</button>
+            `;
+        } catch (error) {
+            console.error('Error loading wallet section:', error);
+            container.innerHTML = `
+                <div class="dashboard-row">
+                    <span class="dashboard-value muted">Error loading wallet</span>
+                </div>
+            `;
+        }
+    },
+
+    /**
+     * Fetch tips received by current user (kind 9736 events)
+     */
+    async fetchTipsReceived() {
+        try {
+            const pool = window.NostrState?.pool;
+            const pubkey = window.NostrState?.publicKey;
+            if (!pool || !pubkey) return { count: 0, total: '' };
+
+            // Query Nosmero relay for tips where user is tagged
+            const relays = ['wss://relay.nosmero.com'];
+            const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+
+            const events = await pool.querySync(relays, {
+                kinds: [9736],
+                '#p': [pubkey],
+                since: sevenDaysAgo,
+                limit: 100
+            });
+
+            // Sum up amounts if available
+            let totalPiconero = 0n;
+            for (const event of events) {
+                const amountTag = event.tags.find(t => t[0] === 'amount');
+                if (amountTag && amountTag[1]) {
+                    try {
+                        totalPiconero += BigInt(amountTag[1]);
+                    } catch (e) {}
+                }
+            }
+
+            const totalXMR = totalPiconero > 0n
+                ? (Number(totalPiconero) / 1e12).toFixed(4) + ' XMR'
+                : '';
+
+            return { count: events.length, total: totalXMR };
+        } catch (error) {
+            console.error('Error fetching tips received:', error);
+            return { count: 0, total: '' };
+        }
+    },
+
+    /**
+     * Load relay section content
+     */
+    async loadRelaySection() {
+        const container = document.querySelector('#dashboardRelays .dashboard-section-content');
+        if (!container) return;
+
+        try {
+            const relayModule = window.NostrRelays;
+            if (!relayModule) {
+                container.innerHTML = '<div class="dashboard-row"><span class="dashboard-value muted">Not available</span></div>';
+                return;
+            }
+
+            // Get active relays and performance data
+            const activeRelays = relayModule.getActiveRelays?.() || relayModule.DEFAULT_RELAYS || [];
+            const performance = relayModule.getRelayPerformance?.() || {};
+
+            // Test connectivity for each relay
+            const relayStatuses = await this.testRelayConnections(activeRelays, performance);
+
+            const connectedCount = relayStatuses.filter(r => r.connected).length;
+            const totalCount = relayStatuses.length;
+
+            // Build relay list HTML
+            const relayListHtml = relayStatuses.slice(0, 5).map(relay => {
+                const statusIcon = relay.connected ? '✓' : '✗';
+                const statusClass = relay.connected ? 'success' : 'error';
+                const latencyText = relay.connected && relay.latency ? `${relay.latency}ms` : '--';
+                const displayUrl = relay.url.replace('wss://', '').replace('ws://', '');
+
+                return `
+                    <div class="dashboard-relay-row">
+                        <span class="relay-status ${statusClass}">${statusIcon}</span>
+                        <span class="relay-url">${displayUrl}</span>
+                        <span class="relay-latency">${latencyText}</span>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="dashboard-row" style="margin-bottom: 8px;">
+                    <span class="dashboard-label">Connected</span>
+                    <span class="dashboard-value">${connectedCount}/${totalCount}</span>
+                </div>
+                <div class="dashboard-relay-list">
+                    ${relayListHtml}
+                </div>
+                ${totalCount > 5 ? `<div class="dashboard-more">+${totalCount - 5} more</div>` : ''}
+            `;
+        } catch (error) {
+            console.error('Error loading relay section:', error);
+            container.innerHTML = '<div class="dashboard-row"><span class="dashboard-value muted">Error loading relays</span></div>';
+        }
+    },
+
+    /**
+     * Test relay connections and get latency by actually pinging each relay
+     */
+    async testRelayConnections(relays, cachedPerformance) {
+        // Ping all relays in parallel
+        const pingPromises = relays.map(url => this.pingRelay(url));
+        const results = await Promise.all(pingPromises);
+        return results;
+    },
+
+    /**
+     * Ping a single relay to check connection and measure latency
+     */
+    async pingRelay(url) {
+        const startTime = performance.now();
+
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                resolve({ url, connected: false, latency: null });
+            }, 5000); // 5 second timeout
+
+            try {
+                const ws = new WebSocket(url);
+
+                ws.onopen = () => {
+                    const latency = Math.round(performance.now() - startTime);
+                    clearTimeout(timeout);
+                    ws.close();
+                    resolve({ url, connected: true, latency });
+                };
+
+                ws.onerror = () => {
+                    clearTimeout(timeout);
+                    resolve({ url, connected: false, latency: null });
+                };
+
+                ws.onclose = (event) => {
+                    // If closed before we resolved, it failed
+                    clearTimeout(timeout);
+                };
+            } catch (e) {
+                clearTimeout(timeout);
+                resolve({ url, connected: false, latency: null });
+            }
+        });
+    },
+
+    /**
+     * Load engagement section content
+     */
+    async loadEngagementSection() {
+        const container = document.querySelector('#dashboardEngagement .dashboard-section-content');
+        if (!container) return;
+
+        try {
+            const pool = window.NostrState?.pool;
+            const pubkey = window.NostrState?.publicKey;
+
+            if (!pool || !pubkey) {
+                container.innerHTML = '<div class="dashboard-row"><span class="dashboard-value muted">Not available</span></div>';
+                return;
+            }
+
+            const relays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.DEFAULT_RELAYS || [];
+            const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+
+            // Fetch engagement data in parallel
+            const [reactions, mentions, reposts, followers] = await Promise.all([
+                // Reactions to user's posts (kind 7 with p-tag)
+                this.fetchReactionsReceived(pool, relays, pubkey, sevenDaysAgo),
+                // Replies/mentions (kind 1 with p-tag)
+                this.fetchMentions(pool, relays, pubkey, sevenDaysAgo),
+                // Reposts of user's posts (kind 6 with p-tag)
+                this.fetchRepostsReceived(pool, relays, pubkey, sevenDaysAgo),
+                // New followers (kind 3 contact lists)
+                this.fetchNewFollowers(pool, relays, pubkey, sevenDaysAgo)
+            ]);
+
+            container.innerHTML = `
+                <div class="dashboard-row">
+                    <span class="dashboard-label">New followers</span>
+                    <span class="dashboard-value">${followers >= 0 ? '+' + followers : '--'}</span>
+                </div>
+                <div class="dashboard-row">
+                    <span class="dashboard-label">Reactions received</span>
+                    <span class="dashboard-value">${reactions}</span>
+                </div>
+                <div class="dashboard-row">
+                    <span class="dashboard-label">Replies & mentions</span>
+                    <span class="dashboard-value">${mentions}</span>
+                </div>
+                <div class="dashboard-row">
+                    <span class="dashboard-label">Reposts</span>
+                    <span class="dashboard-value">${reposts}</span>
+                </div>
+            `;
+        } catch (error) {
+            console.error('Error loading engagement section:', error);
+            container.innerHTML = '<div class="dashboard-row"><span class="dashboard-value muted">Error loading engagement</span></div>';
+        }
+    },
+
+    /**
+     * Fetch reactions received (kind 7)
+     */
+    async fetchReactionsReceived(pool, relays, pubkey, since) {
+        try {
+            const events = await pool.querySync(relays, {
+                kinds: [7],
+                '#p': [pubkey],
+                since,
+                limit: 500
+            });
+            return events.length;
+        } catch (e) {
+            console.error('Error fetching reactions:', e);
+            return 0;
+        }
+    },
+
+    /**
+     * Fetch mentions/replies (kind 1 with p-tag)
+     */
+    async fetchMentions(pool, relays, pubkey, since) {
+        try {
+            const events = await pool.querySync(relays, {
+                kinds: [1],
+                '#p': [pubkey],
+                since,
+                limit: 500
+            });
+            // Filter out own posts
+            return events.filter(e => e.pubkey !== pubkey).length;
+        } catch (e) {
+            console.error('Error fetching mentions:', e);
+            return 0;
+        }
+    },
+
+    /**
+     * Fetch reposts received (kind 6 with p-tag)
+     */
+    async fetchRepostsReceived(pool, relays, pubkey, since) {
+        try {
+            const events = await pool.querySync(relays, {
+                kinds: [6],
+                '#p': [pubkey],
+                since,
+                limit: 200
+            });
+            return events.length;
+        } catch (e) {
+            console.error('Error fetching reposts:', e);
+            return 0;
+        }
+    },
+
+    /**
+     * Fetch new followers (simplified - count recent kind 3 events that include user)
+     */
+    async fetchNewFollowers(pool, relays, pubkey, since) {
+        try {
+            // This is approximate - we query contact lists that include this user
+            const events = await pool.querySync(relays, {
+                kinds: [3],
+                '#p': [pubkey],
+                since,
+                limit: 200
+            });
+            // Count unique pubkeys who added user to their follow list
+            const uniqueFollowers = new Set(events.map(e => e.pubkey));
+            return uniqueFollowers.size;
+        } catch (e) {
+            console.error('Error fetching followers:', e);
+            return -1; // Return -1 to indicate error
+        }
     },
 
     /**
