@@ -1496,6 +1496,30 @@ const RightPanel = {
             this.defaultFeed.style.display = 'none';
         }
 
+        // Only show paywall option for new notes (not replies)
+        const paywallToggleHtml = !replyTo ? `
+            <div class="panel-paywall-toggle" style="margin-top: 12px; padding: 10px; background: var(--card-bg); border-radius: 8px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+                        <input type="checkbox" id="panelPaywallEnabled" onchange="RightPanel.togglePaywall(this.checked)">
+                        <span>🔒 Paywall this note</span>
+                    </label>
+                    <div id="panelPaywallPrice" style="display: none; align-items: center; gap: 4px;">
+                        <input type="number" id="panelPaywallPriceInput" placeholder="0.00015" step="0.00001" min="0.00001" value="0.00015" style="width: 80px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); font-size: 12px;">
+                        <span style="font-size: 12px; color: var(--text-secondary);">XMR</span>
+                    </div>
+                </div>
+                <div id="panelPaywallAddress" style="display: none; margin-top: 10px;">
+                    <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Payment address:</label>
+                    <input type="text" id="panelPaywallAddressInput" placeholder="Your XMR address (4...)" style="width: 100%; padding: 8px; font-family: monospace; font-size: 11px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;">
+                </div>
+                <div id="panelPaywallPreview" style="display: none; margin-top: 10px;">
+                    <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Preview text (visible to non-payers):</label>
+                    <textarea id="panelPaywallPreviewText" placeholder="Leave empty to auto-generate from first paragraph..." rows="3" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; resize: vertical; box-sizing: border-box;"></textarea>
+                </div>
+            </div>
+        ` : '';
+
         section.innerHTML = `
             ${replyTo ? `<div class="reply-context" style="padding: 12px; background: var(--card-bg); border-radius: 8px; margin-bottom: 12px; font-size: 14px; color: var(--text-secondary);">
                 Replying to: <span id="replyToPreview">Loading...</span>
@@ -1504,6 +1528,7 @@ const RightPanel = {
             <div style="text-align: right; color: var(--text-muted); font-size: 12px; margin-top: 4px;">
                 <span id="panelCharCount">0/4000</span>
             </div>
+            ${paywallToggleHtml}
             <div class="compose-actions" style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <button class="media-btn" onclick="document.getElementById('panelMediaInput').click()">📎 Media</button>
@@ -1529,6 +1554,57 @@ const RightPanel = {
         // Load reply context if replying
         if (replyTo) {
             this.loadReplyContext(replyTo);
+        }
+    },
+
+    /**
+     * Toggle paywall options visibility in panel compose
+     */
+    async togglePaywall(enabled) {
+        const priceDiv = document.getElementById('panelPaywallPrice');
+        const previewDiv = document.getElementById('panelPaywallPreview');
+        const addressDiv = document.getElementById('panelPaywallAddress');
+        const addressInput = document.getElementById('panelPaywallAddressInput');
+        const checkbox = document.getElementById('panelPaywallEnabled');
+
+        if (!enabled) {
+            if (priceDiv) priceDiv.style.display = 'none';
+            if (previewDiv) previewDiv.style.display = 'none';
+            if (addressDiv) addressDiv.style.display = 'none';
+            return;
+        }
+
+        // Show UI immediately
+        if (priceDiv) priceDiv.style.display = 'flex';
+        if (previewDiv) previewDiv.style.display = 'block';
+        if (addressDiv) addressDiv.style.display = 'block';
+
+        // Try to find and pre-fill address
+        let address = null;
+
+        // Check localStorage first
+        const storedAddress = localStorage.getItem('user-monero-address');
+        if (storedAddress?.startsWith('4')) {
+            address = storedAddress;
+        }
+
+        // Check wallet address
+        if (!address) {
+            try {
+                const MoneroClient = await import('./wallet/monero-client.js');
+                const walletAddress = await MoneroClient.getPrimaryAddress();
+                if (walletAddress?.startsWith('4')) {
+                    address = walletAddress;
+                    localStorage.setItem('user-monero-address', walletAddress);
+                }
+            } catch (e) {
+                // Wallet not available
+            }
+        }
+
+        // Pre-fill input if address found
+        if (address && addressInput) {
+            addressInput.value = address;
         }
     },
 
@@ -1580,7 +1656,14 @@ const RightPanel = {
         const content = textarea.value.trim();
 
         try {
-            if (replyToId && window.sendReplyDirect) {
+            // Check if paywall is enabled (only for new posts, not replies)
+            const paywallCheckbox = document.getElementById('panelPaywallEnabled');
+            const isPaywalled = !replyToId && paywallCheckbox?.checked;
+
+            if (isPaywalled) {
+                // Handle paywalled post
+                await this.submitPaywalledPost(content);
+            } else if (replyToId && window.sendReplyDirect) {
                 await window.sendReplyDirect(replyToId, content);
             } else if (window.sendPostDirect) {
                 await window.sendPostDirect(content);
@@ -1593,6 +1676,85 @@ const RightPanel = {
             console.error('Error submitting:', error);
             // Error notification already shown by the send functions
         }
+    },
+
+    /**
+     * Submit a paywalled post from the panel
+     */
+    async submitPaywalledPost(content) {
+        const priceInput = document.getElementById('panelPaywallPriceInput');
+        const previewInput = document.getElementById('panelPaywallPreviewText');
+        const addressInput = document.getElementById('panelPaywallAddressInput');
+
+        const priceXmr = parseFloat(priceInput?.value) || 0.00015;
+        const customPreview = previewInput?.value?.trim() || null;
+        const paymentAddress = addressInput?.value?.trim();
+
+        if (!paymentAddress?.startsWith('4')) {
+            window.NostrUtils?.showNotification?.('Please enter a valid Monero address', 'error');
+            throw new Error('No Monero address set');
+        }
+
+        // Save address for future use
+        localStorage.setItem('user-monero-address', paymentAddress);
+
+        if (!window.NostrPaywall?.createPaywalledContent) {
+            throw new Error('Paywall module not available');
+        }
+
+        // Create encrypted content
+        const paywallData = await window.NostrPaywall.createPaywalledContent({
+            content: content,
+            preview: customPreview,
+            priceXmr: priceXmr,
+            paymentAddress: paymentAddress
+        });
+
+        // Create event with paywall tags
+        const event = {
+            kind: 1,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ['client', 'nosmero'],
+                ['monero_address', paymentAddress]
+            ],
+            content: paywallData.publicContent
+        };
+
+        // Add paywall tags
+        const paywallTags = window.NostrPaywall.createPaywallTags({
+            priceXmr: paywallData.priceXmr,
+            paymentAddress: paywallData.paymentAddress,
+            preview: paywallData.preview,
+            encryptedContent: paywallData.encryptedContent
+        });
+        event.tags.push(...paywallTags);
+
+        // Sign the event
+        const signedEvent = await window.NostrUtils?.signEvent?.(event);
+        if (!signedEvent) {
+            throw new Error('Failed to sign event');
+        }
+
+        // Register paywall with backend
+        await window.NostrPaywall.registerPaywall({
+            noteId: signedEvent.id,
+            encryptedContent: paywallData.encryptedContent,
+            decryptionKey: paywallData.decryptionKey,
+            preview: paywallData.preview,
+            priceXmr: paywallData.priceXmr,
+            paymentAddress: paywallData.paymentAddress
+        });
+
+        // Publish to relays
+        const relays = window.NostrRelays?.getWriteRelays?.() || [];
+        await window.NostrState?.pool?.publish(relays, signedEvent);
+
+        window.NostrUtils?.showNotification?.('Paywalled note published!', 'success');
+        window.NostrUI?.showSuccessToast?.('Paywalled note published!');
+
+        // Refresh feed
+        setTimeout(() => window.loadFeedRealtime?.(), 1000);
     },
 
     /**
