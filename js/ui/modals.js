@@ -353,6 +353,7 @@ export function closeKeyModal() {
 
 // Open modal with QR code for sending Monero tips (zaps) to post authors
 export function openZapModal(postId, authorName, moneroAddress, mode = 'choose', customAmount = null, recipientPubkey = null) {
+    // Zap modal has complex interactions - always use modal
     const modal = document.getElementById('zapModal');
     const details = document.getElementById('zapDetails');
 

@@ -74,6 +74,13 @@ export async function openThreadView(eventId, skipHistory = false) {
             return;
         }
 
+        // Check if right panel is available and visible (desktop three-column layout)
+        if (window.RightPanel?.isVisible()) {
+            console.log('Opening thread in right panel:', eventId);
+            window.RightPanel.openThread(eventId);
+            return;
+        }
+
         // Import required modules first
         const [Posts, StateModule] = await Promise.all([
             import('../posts.js'),

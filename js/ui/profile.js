@@ -135,24 +135,45 @@ async function fetchUserPosts(pubkey) {
 
         const sub = StateModule.pool.subscribeMany(RelaysModule.getActiveRelays(), [
             {
-                kinds: [1], // Text notes
+                kinds: [1, 6], // Text notes and reposts
                 authors: [pubkey],
-                limit: 100 // Get user's last 100 posts
+                limit: 100 // Get user's last 100 posts/reposts
             }
         ], {
-            onevent(event) {
+            async onevent(event) {
                 hasReceivedPosts = true;
                 clearTimeout(timeout);
 
-                // Add new event to user posts
-                if (!userPosts.find(p => p.id === event.id)) {
-                    userPosts.push(event);
-                    // ALSO add to global event cache so repost/reply can find it
-                    StateModule.eventCache[event.id] = event;
+                // Import posts module for repost normalization
+                const PostsModule = await import('../posts.js');
+
+                // Normalize reposts (kind 6) to extract original post
+                const { post, reposter, repostId, repostTimestamp } = PostsModule.normalizeEventForDisplay(event);
+
+                if (!post) {
+                    // Skip unparseable reposts
+                    return;
                 }
 
-                // Sort by creation time (newest first)
-                userPosts.sort((a, b) => b.created_at - a.created_at);
+                // Check for duplicates by original post ID
+                if (userPosts.find(p => p.id === post.id)) {
+                    return;
+                }
+
+                // Store repost context on the post for later rendering
+                if (reposter) {
+                    post._repostContext = { reposter, repostId, repostTimestamp };
+                    post._sortTimestamp = repostTimestamp;
+                } else {
+                    post._sortTimestamp = post.created_at;
+                }
+
+                userPosts.push(post);
+                // ALSO add to global event cache so repost/reply can find it
+                StateModule.eventCache[post.id] = post;
+
+                // Sort by sort timestamp (repost time or original post time)
+                userPosts.sort((a, b) => (b._sortTimestamp || b.created_at) - (a._sortTimestamp || a.created_at));
 
                 // Just collect events - don't render until oneose
             },
@@ -211,9 +232,11 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
             StateModule.eventCache[post.id] = post;
         });
 
-        // Fetch profiles for posts and any parent posts they might reference
-        const allAuthors = [...new Set(posts.map(post => post.pubkey))];
-        await PostsModule.fetchProfiles(allAuthors);
+        // Fetch profiles for posts, any parent posts they might reference, AND reposters
+        const allAuthors = posts.map(post => post.pubkey);
+        const reposterPubkeys = posts.filter(p => p._repostContext).map(p => p._repostContext.reposter);
+        const allPubkeys = [...new Set([...allAuthors, ...reposterPubkeys])];
+        await PostsModule.fetchProfiles(allPubkeys);
 
         // Fetch Monero addresses for all post authors (only once, after all posts loaded)
         if (fetchMoneroAddresses && window.getUserMoneroAddress) {
@@ -248,10 +271,10 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
         // Cache disclosed tips data for later access
         Object.assign(PostsModule.disclosedTipsCache, disclosedTipsData);
 
-        // Render each post with engagement data, parent context, and disclosed tips
+        // Render each post with engagement data, parent context, disclosed tips, AND repost context
         const renderedPosts = await Promise.all(posts.map(async post => {
             try {
-                return await PostsModule.renderSinglePost(post, 'feed', engagementData, parentPostsMap);
+                return await PostsModule.renderSinglePost(post, 'feed', engagementData, parentPostsMap, post._repostContext || null);
             } catch (error) {
                 console.error('Error rendering profile post:', error);
                 // Fallback to basic rendering if renderSinglePost fails

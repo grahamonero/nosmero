@@ -1065,11 +1065,10 @@ function buildNip50SearchString(query, options) {
         searchString += ` language:${options.language}`;
     }
 
-    // Add NSFW filter (NIP-50 extension)
-    // Note: Different relays may use different syntax (-nsfw or nsfw:false)
-    if (options.hideNsfw) {
-        searchString += ` -nsfw`;
-    }
+    // NOTE: We no longer add -nsfw to relay queries because relay.nostr.band's
+    // implementation is too aggressive and filters out legitimate content.
+    // NSFW filtering is now handled client-side only (see isNsfwContent function)
+    // which provides more accurate results.
 
     return searchString;
 }
@@ -1140,8 +1139,8 @@ export async function performStreamingContentSearch(query) {
 
     const searchFilters = [];
 
-    // Calculate since timestamp (default to 30 days if "all" selected for relay efficiency)
-    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+    // Calculate since timestamp (use 0 for "all time" to get all results)
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : 0;
 
     // NIP-50 search if query is simple enough
     if (parsedQuery.terms.length === 1 && parsedQuery.exactPhrases.length === 0) {
@@ -1149,7 +1148,7 @@ export async function performStreamingContentSearch(query) {
         searchFilters.push({
             kinds: [1],
             search: nip50Query,
-            limit: 50,
+            limit: 200,
             since: sinceTimestamp
         });
     }
@@ -1234,7 +1233,7 @@ export async function performStreamingHashtagSearch(hashtag) {
     updateSearchStatus('Searching relays for hashtag...');
 
     // Calculate since timestamp for relay filter
-    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : 0;
 
     // Search network-wide relays and stream results
     const hashtagSub = pool.subscribeMany(SEARCH_RELAYS, [
@@ -1267,7 +1266,7 @@ export async function performStreamingUserSearch(query) {
     const cleanQuery = query.replace('@', '').trim();
     const searchOptions = getSearchOptions();
     const timeLimit = getTimeLimit(searchOptions.timeRange);
-    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : 0;
 
     // Check if it's an npub or hex pubkey
     if (cleanQuery.startsWith('npub')) {
@@ -1422,7 +1421,7 @@ export async function performStreamingThreadsSearch(query) {
     const parsedQuery = parseAdvancedQuery(query);
     const searchOptions = getSearchOptions();
     const timeLimit = getTimeLimit(searchOptions.timeRange);
-    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : 0;
 
     updateSearchStatus('Searching threads...');
 
@@ -1491,7 +1490,7 @@ export async function performStreamingArticlesSearch(query) {
     const parsedQuery = parseAdvancedQuery(query);
     const searchOptions = getSearchOptions();
     const timeLimit = getTimeLimit(searchOptions.timeRange);
-    const sinceTimestamp = timeLimit > 0 ? timeLimit : Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+    const sinceTimestamp = timeLimit > 0 ? timeLimit : 0;
 
     updateSearchStatus('Searching articles...');
 

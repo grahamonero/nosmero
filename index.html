@@ -5,14 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>nosmero - Nostr + Monero</title>
     <script src="/lib/qrcode.min.js"></script>
-    <link rel="stylesheet" href="/styles.css?v=1.8.5-settings-scroll">
+    <link rel="stylesheet" href="/styles.css?v=1.9.0-three-column">
 
-    <!-- Eruda mobile debugging console (DEV ONLY - REMOVE BEFORE PRODUCTION) -->
-    <!-- SRI hash ensures CDN hasn't been tampered with -->
-    <script src="https://cdn.jsdelivr.net/npm/eruda"
-            integrity="sha384-F7xQBvh3l6dG/mMD6QPIeVmXtzWT4Ce3ZDu8ysPuzMWMx9bFOIMGnRPUhLuQipss"
-            crossorigin="anonymous"></script>
-    <script>eruda.init();</script>
 </head>
 <body>
     <!-- ==================================
@@ -146,6 +140,9 @@
     <!-- ==================================
          END NEW HEADER & MENU
          ================================== -->
+
+    <!-- App Container for Three-Column Layout -->
+    <div class="app-container">
 
     <!-- LEGACY: Keep existing sidebar hidden for backward compatibility -->
     <div class="sidebar" style="display: none;">
@@ -579,6 +576,24 @@
             </div>
         </div>
     </div>
+
+    <!-- Right Panel (Three-Column Layout) -->
+    <aside class="right-panel" id="rightPanel">
+        <div class="right-panel-resize-handle" id="rightPanelResizeHandle"></div>
+        <div class="right-panel-header">
+            <h3 id="rightPanelTitle">Loading...</h3>
+            <button class="right-panel-close" id="rightPanelClose" onclick="closeRightPanel()" style="display: none;">✕</button>
+        </div>
+        <div class="right-panel-content" id="rightPanelContent">
+            <!-- Default: Trending Monero (logged in) or Popular Notes (logged out) -->
+            <div id="rightPanelDefaultFeed" class="right-panel-feed">
+                <div class="loading">Loading...</div>
+            </div>
+            <!-- Contextual content (thread, profile, settings, etc.) will be injected here -->
+        </div>
+    </aside>
+
+    </div><!-- End .app-container -->
 
     <!-- Login Modal -->
     <div class="modal" id="loginModal">
@@ -1038,9 +1053,9 @@
     <script src="/lib/monero-wallet.iife.js" integrity="sha384-gNGdgKHQok1SRL9i3qj4OuKW4FXf10WXAOiIqym1kzo7WLwIaXoRGCNOcxK5wLfe" crossorigin="anonymous"></script>
 
     <!-- Load the modular v2 application (UI modules consolidated into /js/ui/) -->
-    <script type="module" src="/js/app.js?v=3.0.8-wallet-modal"></script>
+    <script type="module" src="/js/app.js?v=3.1.0-three-column"></script>
 
     <!-- XMR Wallet Modal (replaces wallet.html) -->
-    <script type="module" src="/js/wallet-modal.js?v=1.0.1"></script>
+    <script type="module" src="/js/wallet-modal.js?v=1.0.2-three-column"></script>
 </body>
 </html>

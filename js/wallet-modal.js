@@ -141,7 +141,6 @@ function showLockButton(show) {
  * @param {Object} options - Optional tip metadata
  */
 export async function openWalletModal(options = {}) {
-
     // Store tip metadata if provided
     if (options.tipMeta) {
         tipMeta = options.tipMeta;
