@@ -119,7 +119,7 @@ export async function loadFeedWithSubscription() {
 
         const sub = State.pool.subscribeMany(Relays.getReadRelays(), [
             {
-                kinds: [1], // Text notes
+                kinds: [1, 6], // Text notes and reposts
                 authors: feedAuthors,
                 limit: 100
             }
@@ -2016,7 +2016,7 @@ export async function loadWebOfTrustFeed() {
         await new Promise((resolve) => {
             const sub = State.pool.subscribeMany(readRelays, [
                 {
-                    kinds: [1], // Text notes only
+                    kinds: [1, 6], // Text notes and reposts
                     authors: followYsArray,
                     since: oneDayAgo, // Only posts from past 24 hours
                     limit: followYsArray.length * 2 // Get up to 2 posts per user
@@ -2177,7 +2177,7 @@ export async function loadMoreWebOfTrustPosts() {
         await new Promise((resolve) => {
             const sub = State.pool.subscribeMany(readRelays, [
                 {
-                    kinds: [1],
+                    kinds: [1, 6], // Text notes and reposts
                     authors: followYsArray,
                     since: oneDayAgo,
                     limit: followYsArray.length * 2 // Up to 2 posts per user
@@ -2356,7 +2356,7 @@ async function streamRelayPosts() {
     try {
         feedSub = State.pool.subscribeMany(readRelays, [
             {
-                kinds: [1], // Text notes
+                kinds: [1, 6], // Text notes and reposts
                 authors: followingArray,
                 limit: INITIAL_LIMIT
             }
@@ -2607,7 +2607,7 @@ async function renderHomeFeedResults() {
     console.log(`🎨 Rendering ${currentHomeFeedResults.length} notes to homeFeedList`);
 
     // Filter out posts from muted users
-    let sortedResults = currentHomeFeedResults.filter(post => {
+    let filteredResults = currentHomeFeedResults.filter(post => {
         if (State.mutedUsers?.has(post.pubkey)) {
             console.log('🔇 Filtered out post from muted user:', post.pubkey.substring(0, 16) + '...');
             return false;
@@ -2615,14 +2615,48 @@ async function renderHomeFeedResults() {
         return true;
     });
 
-    if (sortedResults.length < currentHomeFeedResults.length) {
-        console.log(`🔇 Filtered out ${currentHomeFeedResults.length - sortedResults.length} posts from muted users`);
+    if (filteredResults.length < currentHomeFeedResults.length) {
+        console.log(`🔇 Filtered out ${currentHomeFeedResults.length - filteredResults.length} posts from muted users`);
     }
 
-    // Apply sorting based on mode
+    // Normalize events: extract original posts from reposts (kind 6)
+    // De-duplicate by original post ID
+    const seenOriginalIds = new Set();
+    const repostContextMap = new Map(); // originalPostId -> { reposter, repostId, repostTimestamp }
+    const normalizedResults = [];
+
+    for (const event of filteredResults) {
+        const { post, reposter, repostId, repostTimestamp } = normalizeEventForDisplay(event);
+
+        if (!post) {
+            // Skip reposts we couldn't parse
+            continue;
+        }
+
+        // De-duplicate: skip if we've already seen this original post
+        if (seenOriginalIds.has(post.id)) {
+            continue;
+        }
+        seenOriginalIds.add(post.id);
+
+        // Store repost context if this is a repost
+        if (reposter) {
+            repostContextMap.set(post.id, { reposter, repostId, repostTimestamp });
+        }
+
+        // Use repost timestamp for sorting if available
+        normalizedResults.push({
+            ...post,
+            _sortTimestamp: repostTimestamp || post.created_at
+        });
+    }
+
+    let sortedResults = normalizedResults;
+
+    // Apply sorting based on mode (use _sortTimestamp for reposts)
     switch (currentHomeFeedSortMode) {
         case 'date':
-            sortedResults.sort((a, b) => b.created_at - a.created_at);
+            sortedResults.sort((a, b) => (b._sortTimestamp || b.created_at) - (a._sortTimestamp || a.created_at));
             break;
         case 'engagement':
             // Simple engagement score based on content length and recency
@@ -2642,7 +2676,10 @@ async function renderHomeFeedResults() {
     console.log('🚀 Rendering notes immediately with placeholders...');
 
     // 1. Deduplicate and batch fetch profiles (fast, keep this blocking)
-    const uniquePubkeys = [...new Set(sortedResults.map(p => p.pubkey))];
+    // Include both post authors AND reposters
+    const authorPubkeys = sortedResults.map(p => p.pubkey);
+    const reposterPubkeys = [...repostContextMap.values()].map(ctx => ctx.reposter);
+    const uniquePubkeys = [...new Set([...authorPubkeys, ...reposterPubkeys])];
     const pubkeysToFetch = uniquePubkeys.filter(pk => !State.profileCache[pk]);
     if (pubkeysToFetch.length > 0) {
         await fetchProfiles(pubkeysToFetch);
@@ -2650,7 +2687,7 @@ async function renderHomeFeedResults() {
 
     // 2. RENDER IMMEDIATELY with placeholder engagement data
     const renderedPosts = await Promise.all(
-        sortedResults.map(post => renderSinglePost(post, 'feed', null, null))
+        sortedResults.map(post => renderSinglePost(post, 'feed', null, null, repostContextMap.get(post.id) || null))
     );
     resultsEl.innerHTML = renderedPosts.join('');
     console.log('✅ Posts rendered instantly');
@@ -2667,7 +2704,7 @@ async function renderHomeFeedResults() {
 
         // Re-render posts with disclosed tips, parent posts, AND engagement data
         const renderedPostsComplete = sortedResults.map(post => {
-            return renderSinglePost(post, 'feed', engagementData, parentPostsMap);
+            return renderSinglePost(post, 'feed', engagementData, parentPostsMap, repostContextMap.get(post.id) || null);
         });
         Promise.all(renderedPostsComplete).then(async posts => {
             resultsEl.innerHTML = posts.join('');
@@ -3089,7 +3126,7 @@ async function fetchMorePostsInBackground() {
     try {
         const feedSub = State.pool.subscribeMany(readRelays, [
             {
-                kinds: [1],
+                kinds: [1, 6], // Text notes and reposts
                 authors: followingArray,
                 until: oldestCachedTimestamp, // Older than what we have
                 limit: FETCH_LIMIT
@@ -3136,6 +3173,68 @@ async function fetchMorePostsInBackground() {
 }
 
 // ==================== POST UTILITIES ====================
+
+// ==================== REPOST UTILITIES ====================
+
+/**
+ * Check if event is a repost (kind 6)
+ */
+export function isRepost(event) {
+    return event.kind === 6;
+}
+
+/**
+ * Extract the original post from a kind 6 repost event
+ * @param {Object} event - The kind 6 repost event
+ * @returns {Object|null} - The original post or null if invalid
+ */
+export function extractRepostOriginal(event) {
+    if (event.kind !== 6) return null;
+
+    try {
+        // Kind 6 content should be JSON of original event
+        if (event.content && event.content.trim().startsWith('{')) {
+            const originalPost = JSON.parse(event.content);
+
+            // Validate required fields
+            if (originalPost.id && originalPost.pubkey && originalPost.content !== undefined) {
+                return originalPost;
+            }
+        }
+
+        // Fallback: empty content but has 'e' tag - can't display without fetching
+        return null;
+    } catch (error) {
+        console.warn('Failed to parse repost content:', error);
+        return null;
+    }
+}
+
+/**
+ * Normalize event for display - converts reposts to displayable format
+ * @param {Object} event - Nostr event (kind 1 or 6)
+ * @returns {Object} - { post, reposter, repostId, repostTimestamp } where reposter is null for kind 1
+ */
+export function normalizeEventForDisplay(event) {
+    if (event.kind !== 6) {
+        return { post: event, reposter: null, repostId: null, repostTimestamp: null };
+    }
+
+    const originalPost = extractRepostOriginal(event);
+    if (!originalPost) {
+        // Skip reposts we can't parse
+        return { post: null, reposter: event.pubkey, repostId: event.id, repostTimestamp: event.created_at };
+    }
+
+    return {
+        post: originalPost,
+        reposter: event.pubkey,
+        repostId: event.id,
+        repostTimestamp: event.created_at
+    };
+}
+
+// ==================== AUTHOR UTILITIES ====================
 
 // Get author info from cache or fallback
 export function getAuthorInfo(post) {
@@ -4222,7 +4321,7 @@ async function fetchMissingProfilesViaNIP65(missingPubkeys) {
 }
 
 // Render a single post (for thread view, search results, etc.)
-export async function renderSinglePost(post, context = 'feed', engagementData = null, parentPostsMap = null) {
+export async function renderSinglePost(post, context = 'feed', engagementData = null, parentPostsMap = null, repostContext = null) {
     try {
         const author = getAuthorInfo(post);
         const moneroAddress = getMoneroAddress(post);
@@ -4283,11 +4382,25 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                 `;
             }
         }
-        
+
         // Thread indicator removed per user request
-        
+
+        // Generate repost header if this is a repost
+        let repostHtml = '';
+        if (repostContext && repostContext.reposter) {
+            const reposterInfo = getAuthorInfo({ pubkey: repostContext.reposter });
+            repostHtml = `
+                <div class="repost-header" onclick="viewUserProfilePage('${repostContext.reposter}'); event.stopPropagation();">
+                    <span class="repost-icon">🔄</span>
+                    <span class="reposter-name">${reposterInfo.name}</span>
+                    <span class="repost-label">reposted</span>
+                </div>
+            `;
+        }
+
         return `
-            <div class="post" data-post-id="${post.id}" data-pubkey="${post.pubkey}">
+            ${repostHtml}
+            <div class="post" data-post-id="${post.id}" data-pubkey="${post.pubkey}" ${repostContext ? `data-repost-id="${repostContext.repostId}"` : ''}>
                 <div class="reply-context">${parentHtml}</div>
                 <div ${parentHtml ? 'style="border-left: 2px solid #444; padding-left: 12px;"' : ''}>
                 <div class="post-header">
@@ -6123,7 +6236,7 @@ export async function loadTrendingAllFeed() {
         const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
 
         const notes = await State.pool.querySync(relays, {
-            kinds: [1],
+            kinds: [1, 6], // Text notes and reposts
             since: oneDayAgo,
             limit: 200
         });
@@ -6140,11 +6253,27 @@ export async function loadTrendingAllFeed() {
             return;
         }
 
+        // Normalize reposts and deduplicate
+        const seenIds = new Set();
+        const normalizedNotes = [];
+        for (const event of notes) {
+            const { post, reposter, repostId, repostTimestamp } = normalizeEventForDisplay(event);
+            if (!post || seenIds.has(post.id)) continue;
+            seenIds.add(post.id);
+            // Store repost context on the post object for later use
+            if (reposter) {
+                post._repostContext = { reposter, repostId, repostTimestamp };
+            }
+            normalizedNotes.push(post);
+        }
+
+        console.log(`Normalized to ${normalizedNotes.length} unique notes`);
+
         // Fetch engagement data (replies, reactions, zaps)
-        trendingAllEngagement = await fetchEngagementCounts(notes.map(n => n.id));
+        trendingAllEngagement = await fetchEngagementCounts(normalizedNotes.map(n => n.id));
 
         // Sort by total engagement
-        notes.sort((a, b) => {
+        normalizedNotes.sort((a, b) => {
             const engageA = (trendingAllEngagement[a.id]?.replies || 0) +
                            (trendingAllEngagement[a.id]?.reactions || 0) +
                            (trendingAllEngagement[a.id]?.zaps || 0);
@@ -6155,7 +6284,7 @@ export async function loadTrendingAllFeed() {
         });
 
         // Store all notes for pagination
-        trendingAllNotes = notes;
+        trendingAllNotes = normalizedNotes;
 
         // Show first page
         await showMoreTrendingAll();
@@ -6180,18 +6309,20 @@ async function showMoreTrendingAll() {
         return; // No more notes
     }
 
-    // Fetch profiles for authors
-    const authors = [...new Set(pagesToShow.map(n => n.pubkey))];
-    await fetchProfiles(authors);
+    // Fetch profiles for authors AND reposters
+    const authorPubkeys = pagesToShow.map(n => n.pubkey);
+    const reposterPubkeys = pagesToShow.filter(n => n._repostContext).map(n => n._repostContext.reposter);
+    const allPubkeys = [...new Set([...authorPubkeys, ...reposterPubkeys])];
+    await fetchProfiles(allPubkeys);
 
     // Fetch parent posts for replies
     const parentPostsMap = await fetchParentPosts(pagesToShow);
 
-    // Render notes
+    // Render notes with repost context
     const renderedNotes = await Promise.all(
         pagesToShow.map(async (note) => {
             try {
-                return await renderSinglePost(note, 'feed', trendingAllEngagement, parentPostsMap);
+                return await renderSinglePost(note, 'feed', trendingAllEngagement, parentPostsMap, note._repostContext || null);
             } catch (error) {
                 console.error('Error rendering note:', error);
                 return '';
@@ -6295,7 +6426,7 @@ export async function loadDiscoverFeed() {
         const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
 
         const notes = await State.pool.querySync(relays, {
-            kinds: [1],
+            kinds: [1, 6], // Text notes and reposts
             since: oneDayAgo,
             limit: 300 // Get more notes for better randomization
         });
@@ -6312,8 +6443,23 @@ export async function loadDiscoverFeed() {
             return;
         }
 
-        // Get unique authors
-        const authors = [...new Set(notes.map(n => n.pubkey))];
+        // Normalize reposts and deduplicate
+        const seenIds = new Set();
+        const normalizedNotes = [];
+        for (const event of notes) {
+            const { post, reposter, repostId, repostTimestamp } = normalizeEventForDisplay(event);
+            if (!post || seenIds.has(post.id)) continue;
+            seenIds.add(post.id);
+            if (reposter) {
+                post._repostContext = { reposter, repostId, repostTimestamp };
+            }
+            normalizedNotes.push(post);
+        }
+
+        console.log(`Normalized to ${normalizedNotes.length} unique notes`);
+
+        // Get unique authors (original post authors)
+        const authors = [...new Set(normalizedNotes.map(n => n.pubkey))];
         console.log(`Found ${authors.length} unique authors`);
 
         // Fetch trust scores for authors
@@ -6345,7 +6491,7 @@ export async function loadDiscoverFeed() {
         console.log(`Found ${qualityAuthors.size} quality authors (score ≥70)`);
 
         // Filter notes to only quality authors
-        const qualityNotes = notes.filter(n => qualityAuthors.has(n.pubkey));
+        const qualityNotes = normalizedNotes.filter(n => qualityAuthors.has(n.pubkey));
 
         if (qualityNotes.length === 0) {
             feed.innerHTML = `
@@ -6366,18 +6512,20 @@ export async function loadDiscoverFeed() {
         // Take first 20
         const displayNotes = qualityNotes.slice(0, 20);
 
-        // Fetch profiles for authors
-        await fetchProfiles([...qualityAuthors]);
+        // Fetch profiles for authors AND reposters
+        const reposterPubkeys = displayNotes.filter(n => n._repostContext).map(n => n._repostContext.reposter);
+        const allPubkeys = [...new Set([...qualityAuthors, ...reposterPubkeys])];
+        await fetchProfiles([...allPubkeys]);
 
         // Fetch engagement and parent posts
         const engagementData = await fetchEngagementCounts(displayNotes.map(n => n.id));
         const parentPostsMap = await fetchParentPosts(displayNotes);
 
-        // Render notes
+        // Render notes with repost context
         const renderedNotes = await Promise.all(
             displayNotes.map(async (note) => {
                 try {
-                    return await renderSinglePost(note, 'feed', engagementData, parentPostsMap);
+                    return await renderSinglePost(note, 'feed', engagementData, parentPostsMap, note._repostContext || null);
                 } catch (error) {
                     console.error('Error rendering note:', error);
                     return '';

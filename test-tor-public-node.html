@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tor Public Node Test - Nosmero</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            padding: 20px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 { color: #ff6600; }
+        h2 { color: #8b5cf6; margin-top: 30px; }
+        .test-section {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        button {
+            background: linear-gradient(135deg, #ff6600, #8b5cf6);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        button:hover { opacity: 0.9; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        pre {
+            background: #111;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .status { padding: 10px; border-radius: 4px; margin: 10px 0; }
+        .status.success { background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; }
+        .status.error { background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; }
+        .status.info { background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; }
+        .status.warning { background: rgba(245, 158, 11, 0.2); border: 1px solid #f59e0b; }
+        .node-list { font-family: monospace; font-size: 11px; }
+        select {
+            width: 100%;
+            padding: 10px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #fff;
+            margin: 10px 0;
+            font-family: monospace;
+        }
+        .log-entry { border-bottom: 1px solid #333; padding: 5px 0; }
+        .log-entry.error { color: #ef4444; }
+        .log-entry.success { color: #10b981; }
+        .log-entry.info { color: #3b82f6; }
+    </style>
+</head>
+<body>
+    <h1>Tor Public Node Test</h1>
+    <p>Testing whether monero-ts Web Worker can reach PUBLIC .onion nodes directly.</p>
+    <p><strong>Hypothesis:</strong> If this also fails, we've confirmed the Worker isolation is universal.</p>
+
+    <div class="status warning">
+        <strong>Access this page via Tor:</strong><br>
+        <code>http://nosmeroix3mixibdzzkjncxa4pp4ovvwp7xgaxtucx2roskv52w3hpyd.onion/test-tor-public-node.html</code>
+    </div>
+
+    <!-- Test 1: Environment Check -->
+    <div class="test-section">
+        <h2>1. Environment Check</h2>
+        <div id="envCheck">Checking...</div>
+    </div>
+
+    <!-- Test 2: Main Thread Fetch to Public Nodes -->
+    <div class="test-section">
+        <h2>2. Main Thread Fetch (Control Test)</h2>
+        <p>This should WORK - proves the node is reachable from main thread.</p>
+        <select id="nodeSelect">
+            <option value="http://doggett7s4q4tilfcmonxtj6jz3rzqkwwmu6xwlb7jrtszojm4kpkdid.onion:18089">doggett...onion:18089 (99.8% uptime, CORS)</option>
+            <option value="http://un4yrhwq4d53caoiaadeiur5e5wgkgp74zw3p3twqh3nxh6ztz347dad.onion:18081">un4yrhwq...onion:18081 (Triplebit, 97.9% uptime, CORS)</option>
+            <option value="http://gi4hbj7rvubid5csijhl3xrvxjbaoadccegqaei6ej4hhajlvxuospqd.onion:18089">gi4hbj7...onion:18089 (91.1% uptime, CORS)</option>
+        </select>
+        <button onclick="testMainThreadFetch()">Test Main Thread Fetch</button>
+        <div id="mainThreadResult"></div>
+    </div>
+
+    <!-- Test 3: monero-ts connectToDaemonRpc (Main Thread) -->
+    <div class="test-section">
+        <h2>3. monero-ts Main Thread Daemon Connection</h2>
+        <p>Uses MoneroTS.connectToDaemonRpc() - runs in main thread.</p>
+        <button onclick="testMoneroTsDaemonMain()">Test monero-ts Daemon (Main Thread)</button>
+        <div id="moneroTsMainResult"></div>
+    </div>
+
+    <!-- Test 4: monero-ts createWalletFull with Public Node -->
+    <div class="test-section">
+        <h2>4. monero-ts Full Wallet Sync (Web Worker)</h2>
+        <p>Uses createWalletFull() with proxyToWorker:true - this is where sync happens.</p>
+        <p><strong>This is the critical test.</strong> If it fails, Workers can't reach .onion nodes.</p>
+        <button onclick="testMoneroTsWorkerSync()">Test Worker Sync to Public Node</button>
+        <div id="workerSyncResult"></div>
+    </div>
+
+    <!-- Log Output -->
+    <div class="test-section">
+        <h2>Console Log</h2>
+        <pre id="logOutput"></pre>
+    </div>
+
+    <!-- Load monero-ts -->
+    <script src="/lib/monero-wallet.iife.js"></script>
+
+    <script>
+        // Logging helper
+        function log(msg, type = 'info') {
+            const logEl = document.getElementById('logOutput');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${time}] ${msg}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(`[${type.toUpperCase()}]`, msg);
+        }
+
+        function getSelectedNode() {
+            return document.getElementById('nodeSelect').value;
+        }
+
+        // Test 1: Environment check
+        function checkEnvironment() {
+            const envEl = document.getElementById('envCheck');
+            const isTor = window.location.hostname.endsWith('.onion');
+            const hasMoneroTS = typeof MoneroTS !== 'undefined';
+
+            let html = `
+                <div class="status ${isTor ? 'success' : 'error'}">
+                    <strong>Tor Access:</strong> ${isTor ? 'YES - .onion detected' : 'NO - Access via .onion for valid test!'}
+                </div>
+                <div class="status ${hasMoneroTS ? 'success' : 'error'}">
+                    <strong>MoneroTS Loaded:</strong> ${hasMoneroTS ? 'YES' : 'NO - Library failed to load'}
+                </div>
+            `;
+
+            if (hasMoneroTS) {
+                html += `
+                    <div class="status info">
+                        <strong>Bundle Version:</strong> ${MoneroTS._bundleVersion || 'unknown'}<br>
+                        <strong>monero-ts Version:</strong> ${MoneroTS._moneroTsVersion || 'unknown'}
+                    </div>
+                `;
+            }
+
+            envEl.innerHTML = html;
+            log(`Environment: Tor=${isTor}, MoneroTS=${hasMoneroTS}`);
+        }
+
+        // Test 2: Main thread fetch
+        async function testMainThreadFetch() {
+            const resultEl = document.getElementById('mainThreadResult');
+            const nodeUri = getSelectedNode();
+
+            resultEl.innerHTML = '<div class="status info">Testing main thread fetch...</div>';
+            log(`Main thread fetch to: ${nodeUri}/get_height`);
+
+            try {
+                const startTime = Date.now();
+                const response = await fetch(`${nodeUri}/get_height`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+
+                const elapsed = Date.now() - startTime;
+                const data = await response.json();
+
+                log(`Main thread SUCCESS: height=${data.height}, took ${elapsed}ms`, 'success');
+                resultEl.innerHTML = `
+                    <div class="status success">
+                        <strong>SUCCESS!</strong><br>
+                        Height: ${data.height}<br>
+                        Time: ${elapsed}ms<br>
+                        Status: ${data.status}
+                    </div>
+                `;
+            } catch (err) {
+                log(`Main thread FAILED: ${err.message}`, 'error');
+                resultEl.innerHTML = `
+                    <div class="status error">
+                        <strong>FAILED:</strong> ${err.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Test 3: monero-ts daemon connection (main thread)
+        async function testMoneroTsDaemonMain() {
+            const resultEl = document.getElementById('moneroTsMainResult');
+            const nodeUri = getSelectedNode();
+
+            resultEl.innerHTML = '<div class="status info">Connecting via monero-ts (main thread)...</div>';
+            log(`monero-ts connectToDaemonRpc: ${nodeUri}`);
+
+            try {
+                const startTime = Date.now();
+                const daemon = await MoneroTS.connectToDaemonRpc(nodeUri);
+                const height = await daemon.getHeight();
+                const elapsed = Date.now() - startTime;
+
+                log(`monero-ts main thread SUCCESS: height=${height}, took ${elapsed}ms`, 'success');
+                resultEl.innerHTML = `
+                    <div class="status success">
+                        <strong>SUCCESS!</strong><br>
+                        Daemon Height: ${height}<br>
+                        Time: ${elapsed}ms
+                    </div>
+                `;
+            } catch (err) {
+                log(`monero-ts main thread FAILED: ${err.message}`, 'error');
+                resultEl.innerHTML = `
+                    <div class="status error">
+                        <strong>FAILED:</strong> ${err.message}<br>
+                        <pre>${err.stack}</pre>
+                    </div>
+                `;
+            }
+        }
+
+        // Test 4: Full wallet sync in Worker
+        async function testMoneroTsWorkerSync() {
+            const resultEl = document.getElementById('workerSyncResult');
+            const nodeUri = getSelectedNode();
+
+            resultEl.innerHTML = '<div class="status info">Creating wallet and attempting sync via Worker...</div>';
+            log(`Creating full wallet with server: ${nodeUri}`);
+            log('This uses proxyToWorker:true - Worker will make RPC calls directly');
+
+            try {
+                const startTime = Date.now();
+
+                // Create a new wallet
+                log('Step 1: Creating wallet keys...');
+                const wallet = await MoneroTS.createWalletFull({
+                    networkType: MoneroTS.MoneroNetworkType.MAINNET,
+                    server: nodeUri,
+                    proxyToWorker: true
+                });
+
+                log('Step 2: Wallet created, checking daemon connection...');
+                const isConnected = await wallet.isConnectedToDaemon();
+                log(`Daemon connected: ${isConnected}`);
+
+                if (!isConnected) {
+                    throw new Error('Wallet reports NOT connected to daemon - Worker cannot reach .onion!');
+                }
+
+                log('Step 3: Getting wallet height (from Worker)...');
+                const walletHeight = await wallet.getHeight();
+                log(`Wallet height: ${walletHeight}`);
+
+                log('Step 4: Attempting short sync...');
+                await wallet.sync({
+                    onProgress: (progress) => {
+                        log(`Sync progress: ${(progress.percentDone * 100).toFixed(1)}%`);
+                    }
+                });
+
+                const elapsed = Date.now() - startTime;
+                const finalHeight = await wallet.getHeight();
+
+                await wallet.close();
+
+                log(`Worker sync SUCCESS! Final height: ${finalHeight}, took ${elapsed}ms`, 'success');
+                resultEl.innerHTML = `
+                    <div class="status success">
+                        <strong>SUCCESS - Worker CAN reach .onion!</strong><br>
+                        This disproves our hypothesis.<br>
+                        Synced Height: ${finalHeight}<br>
+                        Time: ${elapsed}ms
+                    </div>
+                `;
+
+            } catch (err) {
+                const elapsed = Date.now() - startTime;
+                log(`Worker sync FAILED: ${err.message}`, 'error');
+
+                let analysis = '';
+                if (err.message.includes('not connected to daemon')) {
+                    analysis = `
+                        <div class="status warning" style="margin-top: 10px;">
+                            <strong>CONFIRMED:</strong> Web Worker cannot reach .onion nodes!<br><br>
+                            Main thread fetch works, but Worker fetch fails.<br>
+                            This proves the issue is Worker isolation, not the node or CORS.
+                        </div>
+                    `;
+                }
+
+                resultEl.innerHTML = `
+                    <div class="status error">
+                        <strong>FAILED:</strong> ${err.message}<br>
+                        Time: ${elapsed}ms
+                    </div>
+                    ${analysis}
+                    <pre>${err.stack}</pre>
+                `;
+            }
+        }
+
+        // Initialize
+        checkEnvironment();
+        log('Test page loaded. Run tests in order.');
+    </script>
+</body>
+</html>

@@ -645,6 +645,181 @@ app.get('/api/trending', (req, res) => {
   }
 });
 
+// ==================== CLIENT ANALYTICS ====================
+
+const ANALYTICS_DATA_FILE = path.join(__dirname, 'data', 'client-analytics.json');
+
+// Initialize analytics data file if it doesn't exist
+if (!fs.existsSync(ANALYTICS_DATA_FILE)) {
+  fs.writeFileSync(ANALYTICS_DATA_FILE, JSON.stringify({
+    events: [],
+    dailyStats: {},
+    lastCleanup: Date.now()
+  }));
+}
+
+// Helper: Clean up old analytics data (keep 30 days)
+function cleanupOldAnalytics(data) {
+  const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000); // 30 days ago
+
+  // Remove old events (keep last 10000 for recent activity display)
+  data.events = (data.events || [])
+    .filter(e => e.timestamp > cutoff)
+    .slice(-10000);
+
+  // Remove old daily stats
+  for (const date in data.dailyStats) {
+    if (new Date(date).getTime() < cutoff) {
+      delete data.dailyStats[date];
+    }
+  }
+
+  data.lastCleanup = Date.now();
+  return data;
+}
+
+// Rate limiter for analytics (lenient - fire and forget from client)
+const analyticsLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60, // 60 events per minute per IP
+  message: { success: false, error: 'Rate limited' }
+});
+
+// POST /api/analytics/event - Log a client event
+app.post('/api/analytics/event', analyticsLimiter, (req, res) => {
+  try {
+    const { kind, pubkey, event_id } = req.body;
+
+    // Validate required fields
+    if (!kind || !pubkey) {
+      return res.status(400).json({ success: false, error: 'kind and pubkey required' });
+    }
+
+    // Validate kind is a number we track
+    const validKinds = [1, 6, 7]; // Notes, reposts, reactions
+    if (!validKinds.includes(Number(kind))) {
+      return res.status(400).json({ success: false, error: 'Invalid event kind' });
+    }
+
+    // Validate pubkey format (64 hex chars)
+    if (!/^[0-9a-f]{64}$/i.test(pubkey)) {
+      return res.status(400).json({ success: false, error: 'Invalid pubkey format' });
+    }
+
+    // Load data
+    let data = JSON.parse(fs.readFileSync(ANALYTICS_DATA_FILE, 'utf8'));
+
+    // Cleanup if needed (daily)
+    if ((data.lastCleanup || 0) < Date.now() - 86400000) {
+      data = cleanupOldAnalytics(data);
+    }
+
+    // Add event
+    const timestamp = Date.now();
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+    data.events.push({
+      kind: Number(kind),
+      pubkey: pubkey.substring(0, 16), // Store truncated pubkey for privacy
+      event_id: event_id ? event_id.substring(0, 16) : null,
+      timestamp
+    });
+
+    // Update daily stats
+    if (!data.dailyStats[today]) {
+      data.dailyStats[today] = {
+        notes: 0,
+        reposts: 0,
+        reactions: 0,
+        uniqueUsers: []
+      };
+    }
+
+    if (Number(kind) === 1) data.dailyStats[today].notes++;
+    else if (Number(kind) === 6) data.dailyStats[today].reposts++;
+    else if (Number(kind) === 7) data.dailyStats[today].reactions++;
+
+    // Track unique users (truncated)
+    const truncatedPubkey = pubkey.substring(0, 16);
+    if (!data.dailyStats[today].uniqueUsers.includes(truncatedPubkey)) {
+      data.dailyStats[today].uniqueUsers.push(truncatedPubkey);
+    }
+
+    // Save data
+    fs.writeFileSync(ANALYTICS_DATA_FILE, JSON.stringify(data));
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Analytics] Error logging event:', error);
+    res.status(500).json({ success: false, error: 'Failed to log event' });
+  }
+});
+
+// GET /api/analytics - Get analytics summary
+app.get('/api/analytics', (req, res) => {
+  try {
+    let data = JSON.parse(fs.readFileSync(ANALYTICS_DATA_FILE, 'utf8'));
+
+    // Cleanup if needed
+    if ((data.lastCleanup || 0) < Date.now() - 86400000) {
+      data = cleanupOldAnalytics(data);
+      fs.writeFileSync(ANALYTICS_DATA_FILE, JSON.stringify(data));
+    }
+
+    const now = Date.now();
+    const oneDayAgo = now - 86400000;
+    const sevenDaysAgo = now - (7 * 86400000);
+    const thirtyDaysAgo = now - (30 * 86400000);
+
+    // Calculate stats for different time periods
+    const recentEvents = data.events || [];
+
+    const last24h = recentEvents.filter(e => e.timestamp > oneDayAgo);
+    const last7d = recentEvents.filter(e => e.timestamp > sevenDaysAgo);
+    const last30d = recentEvents.filter(e => e.timestamp > thirtyDaysAgo);
+
+    const calcStats = (events) => ({
+      total: events.length,
+      notes: events.filter(e => e.kind === 1).length,
+      reposts: events.filter(e => e.kind === 6).length,
+      reactions: events.filter(e => e.kind === 7).length,
+      uniqueUsers: new Set(events.map(e => e.pubkey)).size
+    });
+
+    // Get recent events for display (last 50)
+    const recentForDisplay = recentEvents
+      .slice(-50)
+      .reverse()
+      .map(e => ({
+        kind: e.kind,
+        pubkey: e.pubkey,
+        timestamp: e.timestamp,
+        timeAgo: getTimeAgo(e.timestamp)
+      }));
+
+    res.json({
+      success: true,
+      last24h: calcStats(last24h),
+      last7d: calcStats(last7d),
+      last30d: calcStats(last30d),
+      recentEvents: recentForDisplay,
+      dailyStats: data.dailyStats
+    });
+  } catch (error) {
+    console.error('[Analytics] Error getting analytics:', error);
+    res.status(500).json({ success: false, error: 'Failed to get analytics' });
+  }
+});
+
+// Helper for time ago
+function getTimeAgo(timestamp) {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+  if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+  return Math.floor(seconds / 86400) + 'd ago';
+}
+
 // ==================== MONERO RPC PROXY ====================
 
 // Monero daemon configuration
