@@ -58,7 +58,16 @@ export const RELAY_TIMEOUT = 2000;  // 2 second timeout for individual relay res
 // State setters for external modules to update state
 export function setPool(newPool) { pool = newPool; }
 export function setPrivateKey(key) { privateKey = key; }
-export function setPublicKey(key) { publicKey = key; }
+export function setPublicKey(key) {
+    const wasLoggedIn = !!publicKey;
+    publicKey = key;
+    // Dispatch login/logout events for components to react
+    if (key && !wasLoggedIn) {
+        window.dispatchEvent(new CustomEvent('nosmero:login', { detail: { pubkey: key } }));
+    } else if (!key && wasLoggedIn) {
+        window.dispatchEvent(new CustomEvent('nosmero:logout'));
+    }
+}
 export function setPosts(newPosts) { posts = newPosts; }
 export function setUserMoneroAddress(address) { userMoneroAddress = address; }
 export function setCurrentSubscription(subscription) { currentSubscription = subscription; }
