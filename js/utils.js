@@ -147,8 +147,15 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     parsed = parsed.replace(/(\r\n|\r|\n)/g, '<br>');
 
     // Parse image URLs (stop at whitespace or < to avoid grabbing <br> tags)
+    // Uses ThumbHash for progressive loading if available
     const imageRegex = /(https?:\/\/[^\s<]+\.(jpg|jpeg|png|gif|webp|svg)(\?[^\s<]*)?)/gi;
-    parsed = parsed.replace(imageRegex, '<img src="$1" alt="Image" />');
+    parsed = parsed.replace(imageRegex, (match, url) => {
+        const placeholder = window.ThumbHashLoader?.getPlaceholder(url);
+        if (placeholder) {
+            return `<img src="${placeholder}" data-thumbhash-src="${url}" alt="Image" style="filter: blur(8px); transition: filter 0.3s; max-width: 100%;" onload="window.ThumbHashLoader?.onImageLoad(this)" />`;
+        }
+        return `<img src="${url}" data-thumbhash-src="${url}" alt="Image" style="max-width: 100%;" onload="window.ThumbHashLoader?.onImageLoad(this)" />`;
+    });
 
     // Parse video URLs (stop at whitespace or < to avoid grabbing <br> tags)
     const videoRegex = /(https?:\/\/[^\s<]+\.(mp4|webm|ogg)(\?[^\s<]*)?)/gi;

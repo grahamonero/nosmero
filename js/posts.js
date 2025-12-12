@@ -34,6 +34,25 @@ let cachedTrendingPosts = [];
 let displayedTrendingPostCount = 0;
 const TRENDING_POSTS_PER_PAGE = 30;
 
+// ==================== CLIENT ANALYTICS ====================
+
+// Track event to server-side analytics (fire and forget)
+function trackClientEvent(kind, pubkey, eventId = null) {
+    // Don't block on analytics - fire and forget
+    fetch('/api/analytics/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            kind: kind,
+            pubkey: pubkey,
+            event_id: eventId
+        })
+    }).catch(err => {
+        // Silent fail - analytics shouldn't break the app
+        console.debug('[Analytics] Failed to track event:', err.message);
+    });
+}
+
 // Clear all home feed state (used when switching users)
 export function clearHomeFeedState() {
     console.log('🧹 Clearing home feed state');
@@ -2877,12 +2896,12 @@ export async function renderFeed(loadMore = false) {
         }
         
         return `
-            <div class="post">
+            <div class="post" data-post-id="${post.id}" data-pubkey="${post.pubkey}">
                 ${parentHtml}
                 <div ${parentHtml ? 'style="border-left: 2px solid #444; padding-left: 12px;"' : ''}>
                 <div class="post-header">
-                    ${author.picture ? 
-                        `<img class="avatar" src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` : ''
+                    ${author.picture ?
+                        `<img class="avatar" src="${window.ThumbHashLoader?.getPlaceholder(author.picture) || author.picture}" data-thumbhash-src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;${window.ThumbHashLoader?.getPlaceholder(author.picture) ? ' filter: blur(4px); transition: filter 0.3s;' : ''}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)"/>` : ''
                     }
                     <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
                     <div class="post-info">
@@ -3230,7 +3249,10 @@ export async function likePost(postId) {
 
             const signedEvent = await Utils.signEvent(eventTemplate);
             await State.pool.publish(Relays.getWriteRelays(), signedEvent);
-            
+
+            // Track like event
+            trackClientEvent(7, State.publicKey, signedEvent.id);
+
             State.likedPosts.add(postId);
             updateLikeButton(postId, true);
             Utils.showNotification('Note liked!', 'success');
@@ -3398,6 +3420,9 @@ async function doQuickRepost() {
     const signedEvent = await Utils.signEvent(eventTemplate);
     await State.pool.publish(Relays.getWriteRelays(), signedEvent);
 
+    // Track repost event
+    trackClientEvent(6, State.publicKey, signedEvent.id);
+
     State.repostedPosts.add(currentRepostPost.id);
     updateRepostButton(currentRepostPost.id, true);
     Utils.showNotification('Note reposted!', 'success');
@@ -3430,6 +3455,9 @@ async function doQuoteRepost() {
     const signedEvent = await Utils.signEvent(eventTemplate);
     await State.pool.publish(Relays.getWriteRelays(), signedEvent);
 
+    // Track quote note event
+    trackClientEvent(1, State.publicKey, signedEvent.id);
+
     Utils.showNotification('Quote note published!', 'success');
 
     // Refresh feed to show new post (force fresh to bypass cache)
@@ -3454,6 +3482,13 @@ export function replyToPost(postId) {
     const post = State.posts.find(p => p.id === postId) || State.eventCache[postId];
     if (!post) {
         alert('Note not found');
+        return;
+    }
+
+    // Check if right panel is available and visible (desktop three-column layout)
+    if (window.RightPanel?.isVisible()) {
+        console.log('Opening reply in right panel:', postId);
+        window.RightPanel.openReply(postId);
         return;
     }
 
@@ -3542,7 +3577,10 @@ export async function sendReply(replyToId) {
 
         const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
-        
+
+        // Track reply event
+        trackClientEvent(1, State.publicKey, signedEvent.id);
+
         Utils.showNotification('Reply published!', 'success');
         document.getElementById('replyModal').style.display = 'none';
         document.getElementById('replyContent').value = '';
@@ -4249,12 +4287,12 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
         // Thread indicator removed per user request
         
         return `
-            <div class="post" data-post-id="${post.id}">
+            <div class="post" data-post-id="${post.id}" data-pubkey="${post.pubkey}">
                 <div class="reply-context">${parentHtml}</div>
                 <div ${parentHtml ? 'style="border-left: 2px solid #444; padding-left: 12px;"' : ''}>
                 <div class="post-header">
                     ${author.picture ?
-                        `<img class="avatar" src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` : ''
+                        `<img class="avatar" src="${window.ThumbHashLoader?.getPlaceholder(author.picture) || author.picture}" data-thumbhash-src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;${window.ThumbHashLoader?.getPlaceholder(author.picture) ? ' filter: blur(4px); transition: filter 0.3s;' : ''}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)"/>` : ''
                     }
                     <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
                     <div class="post-info">
@@ -4431,6 +4469,13 @@ export function toggleCompose() {
         if (window.showAuthUI) {
             window.showAuthUI();
         }
+        return;
+    }
+
+    // Check if right panel is available and visible (desktop three-column layout)
+    if (window.RightPanel?.isVisible()) {
+        console.log('Opening compose in right panel');
+        window.RightPanel.openCompose();
         return;
     }
 
@@ -4690,6 +4735,9 @@ export async function sendPost() {
         } else {
             throw new Error('No write relays configured. Please check your relay settings.');
         }
+
+        // Track note event
+        trackClientEvent(1, State.publicKey, signedEvent.id);
 
         // Add to local posts array and update feed
         State.posts.unshift(signedEvent);
@@ -5078,9 +5126,12 @@ export async function publishNewPost() {
         // Sign and publish event
         const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
-        
+
+        // Track note event
+        trackClientEvent(1, State.publicKey, signedEvent.id);
+
         Utils.showNotification('Note published!', 'success');
-        
+
         // Clear form and close modal
         document.getElementById('newPostContent').value = '';
         document.getElementById('modalMoneroAddress').value = '';
@@ -5816,9 +5867,101 @@ export function updateWidgetForAuthState() {
     }
 }
 
+// Send a reply with content parameter (for right panel)
+export async function sendReplyDirect(replyToId, content) {
+    if (!content?.trim()) {
+        Utils.showNotification('Please enter a reply', 'error');
+        return;
+    }
+
+    const originalPost = State.posts.find(p => p.id === replyToId) || State.eventCache[replyToId];
+    if (!originalPost) {
+        Utils.showNotification('Original note not found', 'error');
+        return;
+    }
+
+    try {
+        // Create reply event
+        const eventTemplate = {
+            kind: 1,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ['e', replyToId, '', 'reply'],
+                ['p', originalPost.pubkey],
+                ['client', 'nosmero']
+            ],
+            content: content.trim()
+        };
+
+        // Add Monero address if set
+        if (State.userMoneroAddress) {
+            eventTemplate.tags.push(['monero', State.userMoneroAddress]);
+        }
+
+        const signedEvent = await Utils.signEvent(eventTemplate);
+        await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+
+        // Track reply event
+        trackClientEvent(1, State.publicKey, signedEvent.id);
+
+        Utils.showNotification('Reply published!', 'success');
+
+        // Refresh feed to show new reply
+        setTimeout(async () => await loadFeedRealtime(), 1000);
+
+        return signedEvent;
+    } catch (error) {
+        console.error('Failed to post reply:', error);
+        Utils.showNotification('Failed to publish reply: ' + error.message, 'error');
+        throw error;
+    }
+}
+
+// Send a post with content parameter (for right panel)
+export async function sendPostDirect(content) {
+    if (!content?.trim()) {
+        Utils.showNotification('Please enter some content', 'error');
+        return;
+    }
+
+    try {
+        // Create note event
+        const eventTemplate = {
+            kind: 1,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [['client', 'nosmero']],
+            content: content.trim()
+        };
+
+        // Add Monero address if set
+        if (State.userMoneroAddress) {
+            eventTemplate.tags.push(['monero', State.userMoneroAddress]);
+        }
+
+        const signedEvent = await Utils.signEvent(eventTemplate);
+        await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+
+        // Track post event
+        trackClientEvent(1, State.publicKey, signedEvent.id);
+
+        Utils.showNotification('Note published!', 'success');
+
+        // Refresh feed to show new post
+        setTimeout(async () => await loadFeedRealtime(), 1000);
+
+        return signedEvent;
+    } catch (error) {
+        console.error('Failed to post:', error);
+        Utils.showNotification('Failed to publish: ' + error.message, 'error');
+        throw error;
+    }
+}
+
 // Make functions globally available for HTML onclick handlers
 window.sendReply = sendReplyToCurrentPost; // Use the wrapper function
 window.sendReplyToCurrentPost = sendReplyToCurrentPost; // Also export directly
+window.sendReplyDirect = sendReplyDirect; // For right panel
+window.sendPostDirect = sendPostDirect; // For right panel
 window.replyToPost = replyToPost;
 window.handleMediaUpload = handleMediaUpload;
 // Load Monero Notes feed (same as trending but clearer name)
