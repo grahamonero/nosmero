@@ -509,25 +509,63 @@ export async function getFullWallet() {
         currentDaemonUri = serverUri;
         console.log('[MoneroClient] Creating wallet with server:', serverUri);
 
-        // Create wallet with server parameter (can be string URI or MoneroRpcConnection)
-        // Per https://woodser.github.io/monero-ts/typedocs/classes/MoneroWalletConfig.html
-        // IMPORTANT: restoreHeight for wallet creation must ALWAYS be the original wallet creation height.
-        // Using a later sync height would skip all transactions before that point!
-        // Delta sync (resuming from last synced block) happens in sync() method, not here.
-        const restoreHeight = walletData.restore_height || 0;
+        // Check for cached wallet data (enables delta sync)
+        let cachedWalletData = null;
+        try {
+            const walletCache = await storage.loadWalletCache(currentPubkey);
+            if (walletCache && walletCache.encrypted_data) {
+                const decryptedBytes = await walletCrypto.decryptWalletCache(
+                    decryptedKeys.privateViewKey,
+                    walletCache.encrypted_data,
+                    walletCache.iv,
+                    walletCache.salt
+                );
+                if (decryptedBytes && decryptedBytes.length > 4) {
+                    // Deserialize: [4 bytes: keys length] [keys data] [cache data]
+                    const view = new DataView(decryptedBytes.buffer, decryptedBytes.byteOffset, decryptedBytes.byteLength);
+                    const keysLength = view.getUint32(0, true); // little-endian
+                    const keysData = decryptedBytes.slice(4, 4 + keysLength);
+                    const cacheData = decryptedBytes.slice(4 + keysLength);
+                    cachedWalletData = [keysData, cacheData];
+                }
+            }
+        } catch (e) {
+            console.warn('[MoneroClient] Failed to load wallet cache:', e.message);
+        }
 
         // Always use Worker thread (proxyToWorker: true) for better performance and stability
         // Same-origin requests work fine from Workers - the old "Workers can't resolve .onion" was a myth
         // Main-thread WASM (proxyToWorker: false) causes crashes after tx signing due to Asyncify fragility
-        currentWallet = await MoneroTS.createWalletFull({
-            networkType: MoneroTS.MoneroNetworkType.MAINNET,
-            primaryAddress: walletData.primary_address,
-            privateViewKey: decryptedKeys.privateViewKey,
-            privateSpendKey: decryptedKeys.privateSpendKey,
-            restoreHeight: restoreHeight,
-            server: serverUri,
-            proxyToWorker: true
-        });
+
+        // If we have cached wallet data, use openWalletData to restore full state
+        if (cachedWalletData && Array.isArray(cachedWalletData) && cachedWalletData.length === 2) {
+            const [keysData, cacheData] = cachedWalletData;
+
+            // openWalletData expects a MoneroWalletConfig instance, not a plain object
+            // Password is empty string since keys aren't password-protected in our storage format
+            const walletConfig = new MoneroTS.MoneroWalletConfig({
+                password: '',
+                networkType: MoneroTS.MoneroNetworkType.MAINNET,
+                keysData: keysData,
+                cacheData: cacheData,
+                server: serverUri,
+                proxyToWorker: true
+            });
+            currentWallet = await MoneroTS.MoneroWalletFull.openWalletData(walletConfig);
+        } else {
+            // No cache - create from keys with restoreHeight
+            const restoreHeight = walletData.restore_height || 0;
+            const walletConfig = {
+                networkType: MoneroTS.MoneroNetworkType.MAINNET,
+                primaryAddress: walletData.primary_address,
+                privateViewKey: decryptedKeys.privateViewKey,
+                privateSpendKey: decryptedKeys.privateSpendKey,
+                restoreHeight: restoreHeight,
+                server: serverUri,
+                proxyToWorker: true
+            };
+            currentWallet = await MoneroTS.createWalletFull(walletConfig);
+        }
 
         // Verify connection by forcing an actual RPC call
         // isConnectedToDaemon() is just a state check - doesn't probe the daemon
@@ -595,6 +633,7 @@ export async function getBalance() {
     const wallet = await getFullWallet();
     const balance = await wallet.getBalance();
     const unlockedBalance = await wallet.getUnlockedBalance();
+    console.log('[MoneroClient] getBalance() - balance:', balance, 'unlocked:', unlockedBalance);
 
     // Check for recent cached outgoing txs that are NOT yet confirmed on chain
     let pendingOutgoing = 0n;
@@ -1169,7 +1208,9 @@ export async function getTransactions(limit = 50) {
     let txs = [];
     try {
         txs = await wallet.getTxs();
+        console.log('[MoneroClient] getTransactions() - raw txs count:', txs?.length || 0);
     } catch (e) {
+        console.log('[MoneroClient] getTransactions() - error:', e.message);
         txs = [];
     }
 
@@ -1279,22 +1320,16 @@ export async function getTransactions(limit = 50) {
  */
 export async function sync(onProgress) {
     const wallet = await getFullWallet();
+    const currentPubkey = await getNostrPubkey();
 
     // Ensure daemon connection before sync (Tor mode may have lost it)
     await ensureDaemonConnection(wallet);
 
-    const currentPubkey = await getNostrPubkey();
-
-    // Delta sync: Load last synced height to resume from where we left off
-    // This avoids re-scanning the entire blockchain on every unlock
-    let startHeight = undefined;
-    if (currentPubkey) {
-        const syncState = await storage.loadSyncState(currentPubkey);
-        if (syncState?.height) {
-            // Go back a few blocks for safety (reorgs, missed blocks)
-            startHeight = Math.max(0, syncState.height - 10);
-        }
-    }
+    // Delta sync is now supported via wallet cache:
+    // - On first sync (or if cache is missing), wallet syncs from restoreHeight
+    // - After sync, we save wallet state via getData() to IndexedDB
+    // - On next unlock, we restore from cache and only sync new blocks
+    // The wallet's internal state knows where it left off when restored from cache.
 
     // Create a proper listener that extends MoneroWalletListener
     // monero-ts checks instanceof MoneroWalletListener, so plain objects don't work
@@ -1322,19 +1357,66 @@ export async function sync(onProgress) {
     const listener = new SyncListener(onProgress);
 
     try {
-        // Pass listener as first param and startHeight as second param
+        // Wallet syncs from its internal state (restored from cache) or restoreHeight (first sync)
         // monero-ts sync() signature: sync(listenerOrStartHeight?, startHeight?, allowConcurrentCalls?)
-        // The listener MUST be an instance of MoneroWalletListener for this to work correctly
-        await wallet.sync(listener, startHeight);
+        await wallet.sync(listener);
     } catch (e) {
         console.error('[MoneroClient] Sync error:', e);
         throw e;
     }
 
-    // Save sync state
     const height = await wallet.getHeight();
-    if (currentPubkey) {
-        await storage.saveSyncState(currentPubkey, { height });
+
+    // Save wallet state for delta sync on next unlock
+    // getData() exports full wallet state including transaction cache
+    if (currentPubkey && decryptedKeys) {
+        try {
+            console.log('[MoneroClient] Saving wallet cache for delta sync...');
+            const walletDataArrays = await wallet.getData();
+
+            // getData() returns [keysData, cacheData] - two Uint8Arrays
+            // We need to serialize them into a single buffer for storage
+            // Format: [4 bytes: keys length] [keys data] [cache data]
+            let walletDataBytes;
+            if (Array.isArray(walletDataArrays) && walletDataArrays.length === 2) {
+                const keysData = walletDataArrays[0];
+                const cacheData = walletDataArrays[1];
+                console.log('[MoneroClient] Keys data:', keysData.length, 'bytes, Cache data:', cacheData.length, 'bytes');
+
+                // Combine into single buffer with length prefix
+                walletDataBytes = new Uint8Array(4 + keysData.length + cacheData.length);
+                const view = new DataView(walletDataBytes.buffer);
+                view.setUint32(0, keysData.length, true); // little-endian
+                walletDataBytes.set(keysData, 4);
+                walletDataBytes.set(cacheData, 4 + keysData.length);
+            } else if (walletDataArrays instanceof Uint8Array) {
+                // Single Uint8Array (unexpected but handle it)
+                walletDataBytes = walletDataArrays;
+            } else {
+                throw new Error('Unexpected getData() format: ' + typeof walletDataArrays);
+            }
+
+            console.log('[MoneroClient] Total wallet data size:', walletDataBytes.length, 'bytes');
+
+            // Encrypt with privateViewKey
+            const encryptedCache = await walletCrypto.encryptWalletCache(
+                decryptedKeys.privateViewKey,
+                walletDataBytes
+            );
+
+            // Save to IndexedDB
+            await storage.saveWalletCache(currentPubkey, {
+                encrypted_data: encryptedCache.encrypted_data,
+                iv: encryptedCache.iv,
+                salt: encryptedCache.salt,
+                height: height
+            });
+
+            console.log('[MoneroClient] Wallet cache saved at height:', height);
+        } catch (e) {
+            // Non-fatal - delta sync just won't work next time
+            console.warn('[MoneroClient] Failed to save wallet cache:', e.message);
+        }
     }
 
     return { height };
