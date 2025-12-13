@@ -23,7 +23,15 @@ export const SEARCH_RELAYS = [
     'wss://purplepag.es',
     'wss://nostr.wine',
     'wss://relay.snort.social',
-    'wss://nostr-pub.wellorder.net'
+    'wss://nostr-pub.wellorder.net',
+    'wss://relay.wellorder.net',
+    'wss://nostr.rocks',
+    'wss://relay.nostr.pub',
+    'wss://nostr.bitcoiner.social',
+    'wss://nostr.oxtr.dev',
+    'wss://eden.nostr.land',
+    'wss://relay.current.fyi',
+    'wss://nostr.mom'
 ];
 
 // Current active relays array (imported from state)

@@ -1167,22 +1167,67 @@ const RightPanel = {
                 window.NostrState.eventCache[mainNote.id] = mainNote;
             }
 
-            // Fetch replies
+            // Find the root of the thread by following 'e' tags
+            let rootId = noteId;
+            const eTags = mainNote.tags.filter(t => t[0] === 'e');
+            // Look for root marker first
+            for (const tag of eTags) {
+                if (tag[3] === 'root') {
+                    rootId = tag[1];
+                    break;
+                }
+            }
+            // If no root marker, use first 'e' tag (oldest ancestor reference)
+            if (rootId === noteId && eTags.length > 0) {
+                rootId = eTags[0][1];
+            }
+
+            // Fetch the root note if different from clicked note
+            let rootNote = mainNote;
+            if (rootId !== noteId) {
+                const rootEvents = await pool.querySync(relays, { ids: [rootId] });
+                if (rootEvents?.length > 0) {
+                    rootNote = rootEvents[0];
+                    if (window.NostrState?.eventCache) {
+                        window.NostrState.eventCache[rootNote.id] = rootNote;
+                    }
+                }
+            }
+
+            // Fetch all replies to the root (this gets the entire thread)
             const replies = await pool.querySync(relays, {
                 kinds: [1],
-                '#e': [noteId],
-                limit: 50
+                '#e': [rootId],
+                limit: 100
             });
 
-            // Add replies to cache
-            replies.forEach(reply => {
+            // Also fetch replies to the clicked note if it's not the root
+            let clickedReplies = [];
+            if (noteId !== rootId) {
+                clickedReplies = await pool.querySync(relays, {
+                    kinds: [1],
+                    '#e': [noteId],
+                    limit: 50
+                });
+            }
+
+            // Combine all posts, deduplicating
+            const allPostsMap = new Map();
+            allPostsMap.set(rootNote.id, rootNote);
+            allPostsMap.set(mainNote.id, mainNote);
+            replies.forEach(r => allPostsMap.set(r.id, r));
+            clickedReplies.forEach(r => allPostsMap.set(r.id, r));
+
+            // Add all to cache
+            allPostsMap.forEach((post, id) => {
                 if (window.NostrState?.eventCache) {
-                    window.NostrState.eventCache[reply.id] = reply;
+                    window.NostrState.eventCache[id] = post;
                 }
             });
 
+            const allPosts = Array.from(allPostsMap.values());
+
             // Fetch profiles for all authors
-            const allPosts = [mainNote, ...replies];
             const uniquePubkeys = [...new Set(allPosts.map(p => p.pubkey))];
             const pubkeysToFetch = uniquePubkeys.filter(pk => !window.NostrState?.profileCache?.[pk]);
             if (pubkeysToFetch.length > 0 && window.NostrPosts?.fetchProfiles) {
@@ -1191,8 +1236,7 @@ const RightPanel = {
 
             // Build a map of posts by ID for quick lookup
             const postMap = new Map();
-            postMap.set(mainNote.id, mainNote);
-            replies.forEach(reply => postMap.set(reply.id, reply));
+            allPosts.forEach(post => postMap.set(post.id, post));
 
             // Build thread tree
             const buildTree = (posts, rootId) => {
@@ -1241,14 +1285,16 @@ const RightPanel = {
                 return { roots, nodes };
             };
 
-            const { roots, nodes } = buildTree([mainNote, ...replies], noteId);
+            const { roots, nodes } = buildTree(allPosts, rootId);
 
             // Render using NostrPosts.renderSinglePost with hierarchy
             let html = '';
+            const clickedNoteId = noteId; // Remember which note was clicked for highlighting
 
             const renderNode = async (node, depth = 0, parentNode = null) => {
                 const indent = Math.min(depth * 16, 80); // Smaller indent for right panel
                 let nodeHtml = '';
+                const isClickedNote = node.post.id === clickedNoteId;
 
                 // Add "Replying to" indicator for replies
                 if (parentNode && depth > 0) {
@@ -1260,9 +1306,11 @@ const RightPanel = {
                     </div>`;
                 }
 
-                nodeHtml += `<div style="margin-left: ${indent}px; ${depth > 0 ? 'border-left: 2px solid #333; padding-left: 8px;' : ''}">`;
+                // Highlight the clicked note with a border
+                const highlightStyle = isClickedNote ? 'border: 2px solid #FF6600; border-radius: 8px;' : '';
+                nodeHtml += `<div style="margin-left: ${indent}px; ${depth > 0 ? 'border-left: 2px solid #333; padding-left: 8px;' : ''} ${highlightStyle}">`;
                 if (window.NostrPosts?.renderSinglePost) {
-                    nodeHtml += await window.NostrPosts.renderSinglePost(node.post, depth === 0 ? 'highlight' : 'thread');
+                    nodeHtml += await window.NostrPosts.renderSinglePost(node.post, isClickedNote ? 'highlight' : 'thread');
                 } else {
                     nodeHtml += `<div class="post" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
                         ${this.escapeHtml(node.post.content)}
