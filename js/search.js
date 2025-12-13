@@ -21,6 +21,10 @@ export let savedSearches = JSON.parse(localStorage.getItem('savedSearches') || '
 export let searchResultsCache = {};
 export const SEARCH_CACHE_DURATION = 3 * 60 * 1000; // 3 minutes
 
+// Search relay health tracking
+const searchRelayHealth = {};
+const SEARCH_RELAY_SLOW_THRESHOLD = 5000; // 5 seconds = considered slow
+
 // ==================== SEARCH INTERFACE ====================
 
 // Load the search interface
@@ -61,9 +65,9 @@ export async function loadSearch() {
                                 style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; cursor: pointer; font-size: 14px;">
                             All
                         </button>
-                        <button id="searchTypeContent" class="search-type-btn" onclick="setSearchType('content')" 
+                        <button id="searchTypeContent" class="search-type-btn" onclick="setSearchType('content')"
                                 style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
-                            Posts
+                            Notes
                         </button>
                         <button id="searchTypeThreads" class="search-type-btn" onclick="setSearchType('threads')" 
                                 style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
@@ -87,15 +91,9 @@ export async function loadSearch() {
                         </button>
                     </div>
                     
-                    <!-- Advanced Search Options -->
+                    <!-- Search Options -->
                     <div style="margin-bottom: 20px; padding: 12px; background: #1a1a1a; border-radius: 8px; border: 1px solid #333;">
                         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap;">
-                            <label style="color: #ccc; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                                <input type="checkbox" id="includeMedia" style="margin: 0;"> Include Media
-                            </label>
-                            <label style="color: #ccc; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                                <input type="checkbox" id="threadsOnly" style="margin: 0;"> Threads Only
-                            </label>
                             <label style="color: #ccc; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                                 <input type="checkbox" id="hideNsfw" style="margin: 0;" checked> Hide NSFW
                             </label>
@@ -105,23 +103,9 @@ export async function loadSearch() {
                                 <option value="7d">Last 7 Days</option>
                                 <option value="30d">Last 30 Days</option>
                             </select>
-                            <select id="languageFilter" style="padding: 4px 8px; background: #000; color: #fff; border: 1px solid #333; border-radius: 4px;">
-                                <option value="">Any Language</option>
-                                <option value="en">English</option>
-                                <option value="es">Spanish</option>
-                                <option value="pt">Portuguese</option>
-                                <option value="de">German</option>
-                                <option value="fr">French</option>
-                                <option value="ja">Japanese</option>
-                                <option value="zh">Chinese</option>
-                                <option value="ru">Russian</option>
-                            </select>
                         </div>
                         <div style="font-size: 12px; color: #666;">
-                            💡 Use quotes for "exact phrases", minus for -excluded words, # for hashtags, @ for users
-                        </div>
-                        <div style="font-size: 11px; color: #555; margin-top: 6px;">
-                            ⚠️ Language/NSFW filters depend on relay support (NIP-50 extensions)
+                            Use quotes for "exact phrases", minus for -excluded words, # for hashtags, @ for users
                         </div>
                     </div>
                 </div>
@@ -1050,34 +1034,20 @@ function isThread(post) {
 // Get search options from UI
 function getSearchOptions() {
     return {
-        includeMedia: document.getElementById('includeMedia')?.checked || false,
-        threadsOnly: document.getElementById('threadsOnly')?.checked || false,
         timeRange: document.getElementById('timeRange')?.value || 'all',
-        hideNsfw: document.getElementById('hideNsfw')?.checked ?? true,
-        language: document.getElementById('languageFilter')?.value || ''
+        hideNsfw: document.getElementById('hideNsfw')?.checked ?? true
     };
 }
 
 /**
- * Build NIP-50 search string with extensions
+ * Build NIP-50 search string
  * @param {string} query - Base search query
  * @param {Object} options - Search options from getSearchOptions()
- * @returns {string} - Search string with NIP-50 extensions
+ * @returns {string} - Search string for NIP-50
  */
 function buildNip50SearchString(query, options) {
-    let searchString = query;
-
-    // Add language filter (NIP-50 extension)
-    if (options.language) {
-        searchString += ` language:${options.language}`;
-    }
-
-    // NOTE: We no longer add -nsfw to relay queries because relay.nostr.band's
-    // implementation is too aggressive and filters out legitimate content.
-    // NSFW filtering is now handled client-side only (see isNsfwContent function)
-    // which provides more accurate results.
-
-    return searchString;
+    // Return query as-is - NSFW filtering is handled client-side
+    return query;
 }
 
 /**
@@ -1117,6 +1087,38 @@ function getTimeLimit(timeRange) {
 
 // ==================== STREAMING SEARCH FUNCTIONS ====================
 
+// Get healthy relays sorted by response time (fastest first)
+function getHealthySearchRelays() {
+    return [...SEARCH_RELAYS].sort((a, b) => {
+        const healthA = searchRelayHealth[a] || { avgTime: 1000, failures: 0 };
+        const healthB = searchRelayHealth[b] || { avgTime: 1000, failures: 0 };
+
+        // Deprioritize relays with many failures
+        if (healthA.failures > 3 && healthB.failures <= 3) return 1;
+        if (healthB.failures > 3 && healthA.failures <= 3) return -1;
+
+        // Sort by average response time
+        return healthA.avgTime - healthB.avgTime;
+    });
+}
+
+// Update relay health after a search
+function updateSearchRelayHealth(relayUrl, responseTime, success) {
+    if (!searchRelayHealth[relayUrl]) {
+        searchRelayHealth[relayUrl] = { avgTime: responseTime, failures: 0, successes: 0 };
+    }
+
+    const health = searchRelayHealth[relayUrl];
+    if (success) {
+        health.successes++;
+        // Rolling average of response times
+        health.avgTime = Math.round((health.avgTime * 0.7) + (responseTime * 0.3));
+    } else {
+        health.failures++;
+        health.avgTime = SEARCH_RELAY_SLOW_THRESHOLD; // Mark as slow on failure
+    }
+}
+
 // Streaming content search
 export async function performStreamingContentSearch(query) {
     const parsedQuery = parseAdvancedQuery(query);
@@ -1144,56 +1146,67 @@ export async function performStreamingContentSearch(query) {
     // Then search relays and stream results as they come in
     updateSearchStatus('Searching relays...');
 
-    const searchFilters = [];
-
-    // Calculate since timestamp (default to 30 days if "all" selected for relay efficiency)
+    // Calculate since timestamp
     const sinceTimestamp = timeLimit > 0 ? timeLimit : 0;
 
-    // NIP-50 search if query is simple enough
-    if (parsedQuery.terms.length === 1 && parsedQuery.exactPhrases.length === 0) {
-        const nip50Query = buildNip50SearchString(parsedQuery.terms[0], searchOptions);
-        searchFilters.push({
-            kinds: [1],
-            search: nip50Query,
-            limit: 200,
-            since: sinceTimestamp
-        });
-    }
+    // Build NIP-50 search query (works for any query)
+    const searchTerms = [...parsedQuery.terms, ...parsedQuery.exactPhrases].join(' ');
+    const nip50Query = buildNip50SearchString(searchTerms || query, searchOptions);
 
-    // Broad content search without author restrictions
-    searchFilters.push({
+    // Single efficient NIP-50 search filter with increased limit
+    const searchFilter = {
         kinds: [1],
-        limit: 100,
+        search: nip50Query,
+        limit: 500, // Increased limit - NIP-50 is server-side efficient
         since: sinceTimestamp
+    };
+
+    // Get relays sorted by health (fastest first)
+    const healthyRelays = getHealthySearchRelays();
+
+    // Create parallel search subscriptions for each relay
+    const searchPromises = healthyRelays.map(relayUrl => {
+        return new Promise((resolve) => {
+            const startTime = Date.now();
+            let resultCount = 0;
+
+            const searchSub = pool.subscribeMany([relayUrl], [searchFilter], {
+                onevent(event) {
+                    // Client-side NSFW filter
+                    if (searchOptions.hideNsfw && isNsfwContent(event)) {
+                        return;
+                    }
+
+                    // Client-side time filter
+                    if (timeLimit > 0 && event.created_at < timeLimit) {
+                        return;
+                    }
+
+                    if (matchesQuery(event, parsedQuery, true)) { // Use fuzzy matching
+                        resultCount++;
+                        addSearchResult(event);
+                    }
+                },
+                oneose() {
+                    const responseTime = Date.now() - startTime;
+                    updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
+                    searchSub.close();
+                    resolve({ relay: relayUrl, count: resultCount, time: responseTime });
+                }
+            });
+
+            // Timeout after 5 seconds per relay
+            setTimeout(() => {
+                const responseTime = Date.now() - startTime;
+                updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
+                searchSub.close();
+                resolve({ relay: relayUrl, count: resultCount, time: responseTime, timeout: true });
+            }, 5000);
+        });
     });
 
-    // Use SEARCH_RELAYS for network-wide search
-    for (const filter of searchFilters) {
-        const searchSub = pool.subscribeMany(SEARCH_RELAYS, [filter], {
-            onevent(event) {
-                // Client-side NSFW filter (fallback for relays that don't support NIP-50 extensions)
-                if (searchOptions.hideNsfw && isNsfwContent(event)) {
-                    return;
-                }
-
-                // Client-side time filter (fallback for relays that ignore since parameter)
-                if (timeLimit > 0 && event.created_at < timeLimit) {
-                    return;
-                }
-
-                if (matchesQuery(event, parsedQuery, true)) { // Use fuzzy matching
-                    addSearchResult(event);
-                }
-            },
-            oneose() {
-                searchSub.close();
-            }
-        });
-
-        // Let this search run for a bit
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        searchSub.close();
-    }
+    // Wait for all relays in parallel
+    await Promise.all(searchPromises);
 }
 
 // Streaming hashtag search
@@ -1227,29 +1240,58 @@ export async function performStreamingHashtagSearch(hashtag) {
     // Calculate since timestamp for relay filter
     const sinceTimestamp = timeLimit > 0 ? timeLimit : 0;
 
-    // Search network-wide relays and stream results
-    const hashtagSub = pool.subscribeMany(SEARCH_RELAYS, [
-        {
-            kinds: [1],
-            '#t': [cleanTag],
-            limit: 50,
-            since: sinceTimestamp
-        }
-    ], {
-        onevent(event) {
-            // Client-side time filter (fallback for relays that ignore since parameter)
-            if (timeLimit > 0 && event.created_at < timeLimit) {
-                return;
-            }
-            addSearchResult(event);
-        },
-        oneose() {
-            hashtagSub.close();
-        }
+    // Hashtag filter with increased limit
+    const hashtagFilter = {
+        kinds: [1],
+        '#t': [cleanTag],
+        limit: 200, // Increased from 50
+        since: sinceTimestamp
+    };
+
+    // Get healthy relays and search in parallel
+    const healthyRelays = getHealthySearchRelays();
+
+    const searchPromises = healthyRelays.map(relayUrl => {
+        return new Promise((resolve) => {
+            const startTime = Date.now();
+            let resultCount = 0;
+
+            let resolved = false;
+            const hashtagSub = pool.subscribeMany([relayUrl], [hashtagFilter], {
+                onevent(event) {
+                    // Client-side time filter
+                    if (timeLimit > 0 && event.created_at < timeLimit) {
+                        return;
+                    }
+
+                    resultCount++;
+                    addSearchResult(event);
+                },
+                oneose() {
+                    if (!resolved) {
+                        resolved = true;
+                        const responseTime = Date.now() - startTime;
+                        updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
+                        hashtagSub.close();
+                        resolve({ relay: relayUrl, count: resultCount, time: responseTime });
+                    }
+                }
+            });
+
+            // Timeout after 5 seconds
+            setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    const responseTime = Date.now() - startTime;
+                    updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
+                    hashtagSub.close();
+                    resolve({ relay: relayUrl, count: resultCount, time: responseTime, timeout: true });
+                }
+            }, 5000);
+        });
     });
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    hashtagSub.close();
+    await Promise.all(searchPromises);
 }
 
 // Streaming user search
@@ -1521,11 +1563,6 @@ export async function performStreamingAllSearch(query) {
         performStreamingHashtagSearch(query)
     ];
 
-    const searchOptions = getSearchOptions();
-    if (searchOptions.includeMedia) {
-        searchPromises.push(performStreamingMediaSearch(query));
-    }
-
     await Promise.all(searchPromises);
 }
 
@@ -1722,6 +1759,8 @@ let currentSearchResults = [];
 let currentSearchQuery = '';
 let currentSortMode = 'engagement'; // 'stream', 'date', 'engagement'
 let searchEngagementData = {}; // Stores engagement counts for search results
+let displayedResultsCount = 0; // How many results are currently displayed
+const RESULTS_PER_PAGE = 50; // Show 50 results at a time
 
 // Initialize search results container with header and controls
 export function initializeSearchResults(query) {
@@ -1729,6 +1768,7 @@ export function initializeSearchResults(query) {
     currentSearchQuery = query;
     currentSortMode = 'engagement';
     searchEngagementData = {}; // Reset engagement data for new search
+    displayedResultsCount = RESULTS_PER_PAGE; // Reset to first page
 
     const searchResults = document.getElementById('searchResults');
     if (!searchResults) return;
@@ -1866,13 +1906,29 @@ async function renderSearchResults() {
             break;
     }
 
-    resultsEl.innerHTML = sortedResults.map(post => {
+    // Only display up to displayedResultsCount
+    const resultsToShow = sortedResults.slice(0, displayedResultsCount);
+    const hasMoreResults = sortedResults.length > displayedResultsCount;
+
+    resultsEl.innerHTML = resultsToShow.map(post => {
         const engagement = searchEngagementData[post.id] || { reactions: 0, reposts: 0, replies: 0 };
         return renderSingleResult(post, engagement);
     }).join('');
 
+    // Add "Load More" button if there are more results
+    if (hasMoreResults) {
+        const remainingCount = sortedResults.length - displayedResultsCount;
+        resultsEl.innerHTML += `
+            <div id="loadMoreContainer" style="text-align: center; padding: 20px;">
+                <button onclick="loadMoreSearchResults()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">
+                    Load More (${remainingCount} remaining)
+                </button>
+            </div>
+        `;
+    }
+
     // Update like button states
-    sortedResults.forEach(post => {
+    resultsToShow.forEach(post => {
         updateLikeButtonState(post.id);
     });
 
@@ -1885,6 +1941,21 @@ async function renderSearchResults() {
         console.error('Error processing paywalled notes in search results:', error);
     }
 }
+
+// Load more search results
+export function loadMoreSearchResults() {
+    displayedResultsCount += RESULTS_PER_PAGE;
+    renderSearchResults();
+
+    // Scroll to where new results start
+    const loadMoreBtn = document.getElementById('loadMoreContainer');
+    if (loadMoreBtn) {
+        loadMoreBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
+// Make loadMoreSearchResults available globally
+window.loadMoreSearchResults = loadMoreSearchResults;
 
 // Render a single search result
 function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, replies: 0 }) {
