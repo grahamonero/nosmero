@@ -461,6 +461,7 @@ export async function syncWallet() {
     if (spinner) spinner.style.display = 'block';
     if (statusEl) statusEl.textContent = 'Syncing...';
 
+    let syncSucceeded = false;
     try {
         await Wallet.sync((progress) => {
             const percent = Math.round(progress.percentDone * 100) || 0;
@@ -469,15 +470,24 @@ export async function syncWallet() {
 
         if (spinner) spinner.style.display = 'none';
         if (statusEl) statusEl.textContent = '✓ Synced';
-
-        await updateBalance();
-        await updateTransactions();
-        updateNodeInfo();
+        syncSucceeded = true;
     } catch (err) {
         console.error('[WalletModal] Sync failed:', err);
         if (spinner) spinner.style.display = 'none';
         if (statusEl) statusEl.textContent = '⚠ Sync failed';
         if (progressEl) progressEl.textContent = err.message;
+    }
+
+    // Always update balance and transactions, even if sync failed
+    // The wallet may have cached data from a previous sync
+    try {
+        await updateBalance();
+        await updateTransactions();
+        if (syncSucceeded) {
+            updateNodeInfo();
+        }
+    } catch (err) {
+        console.error('[WalletModal] Failed to update display after sync:', err);
     }
 }
 

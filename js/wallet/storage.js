@@ -6,13 +6,14 @@
  */
 
 const DB_NAME = 'nosmero-wallet';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Bumped for wallet_cache store
 
 // Object store names
 const STORES = {
-    WALLET: 'wallet',      // Encrypted keys and wallet metadata
-    SYNC: 'sync_state',    // Blockchain sync progress
-    TX_CACHE: 'tx_cache'   // Cached transaction data
+    WALLET: 'wallet',           // Encrypted keys and wallet metadata
+    SYNC: 'sync_state',         // Blockchain sync progress
+    TX_CACHE: 'tx_cache',       // Cached transaction data
+    WALLET_CACHE: 'wallet_cache' // Full wallet state for delta sync
 };
 
 let db = null;
@@ -56,6 +57,11 @@ export async function initDB() {
                 const txStore = database.createObjectStore(STORES.TX_CACHE, { keyPath: 'txid' });
                 txStore.createIndex('timestamp', 'timestamp', { unique: false });
                 txStore.createIndex('height', 'height', { unique: false });
+            }
+
+            // Wallet cache - stores full wallet state for delta sync
+            if (!database.objectStoreNames.contains(STORES.WALLET_CACHE)) {
+                database.createObjectStore(STORES.WALLET_CACHE, { keyPath: 'id' });
             }
         };
     });
@@ -159,11 +165,12 @@ export async function deleteWallet(pubkey) {
 
     await initDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction([STORES.WALLET, STORES.SYNC, STORES.TX_CACHE], 'readwrite');
+        const tx = db.transaction([STORES.WALLET, STORES.SYNC, STORES.TX_CACHE, STORES.WALLET_CACHE], 'readwrite');
 
         // Delete only this user's wallet data
         tx.objectStore(STORES.WALLET).delete(pubkey);
         tx.objectStore(STORES.SYNC).delete(pubkey);
+        tx.objectStore(STORES.WALLET_CACHE).delete(pubkey);
 
         // For tx cache, we need to delete all entries for this user
         // Since tx cache uses txid as key, we need to clear all (or add user prefix later)
@@ -346,6 +353,85 @@ export async function updateWalletMeta(pubkey, updates) {
         };
 
         const request = store.put(record);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Save encrypted wallet cache data (full wallet state for delta sync)
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @param {Object} cacheData - Encrypted cache data
+ * @param {Uint8Array} cacheData.encrypted_data - AES-GCM encrypted wallet data
+ * @param {Uint8Array} cacheData.iv - Initialization vector
+ * @param {Uint8Array} cacheData.salt - PBKDF2 salt
+ * @param {number} cacheData.height - Sync height when cache was saved
+ * @returns {Promise<void>}
+ */
+export async function saveWalletCache(pubkey, cacheData) {
+    if (!pubkey) {
+        throw new Error('pubkey is required to save wallet cache');
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.WALLET_CACHE, 'readwrite');
+        const store = tx.objectStore(STORES.WALLET_CACHE);
+
+        const record = {
+            id: pubkey,
+            encrypted_data: cacheData.encrypted_data,
+            iv: cacheData.iv,
+            salt: cacheData.salt,
+            height: cacheData.height,
+            saved_at: Date.now()
+        };
+
+        const request = store.put(record);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Load encrypted wallet cache data
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @returns {Promise<Object|null>} Encrypted cache data or null if not found
+ */
+export async function loadWalletCache(pubkey) {
+    if (!pubkey) {
+        return null;
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.WALLET_CACHE, 'readonly');
+        const store = tx.objectStore(STORES.WALLET_CACHE);
+        const request = store.get(pubkey);
+
+        request.onsuccess = () => {
+            resolve(request.result || null);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Delete wallet cache for a specific user
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @returns {Promise<void>}
+ */
+export async function deleteWalletCache(pubkey) {
+    if (!pubkey) {
+        return;
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.WALLET_CACHE, 'readwrite');
+        const store = tx.objectStore(STORES.WALLET_CACHE);
+        const request = store.delete(pubkey);
+
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
     });
