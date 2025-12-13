@@ -281,6 +281,7 @@ export async function updateHeaderUIForAuthState() {
     const isLoggedIn = StateModule.publicKey !== null && StateModule.publicKey !== undefined;
 
     const loginBtn = document.getElementById('headerLoginBtn');
+    const createAccountBtn = document.getElementById('headerCreateAccountBtn');
     const createNoteBtn = document.getElementById('headerCreateNoteBtn');
     const menuCreateNoteBtn = document.getElementById('menuCreateNoteBtn');
     const menuLogoutBtn = document.getElementById('menuLogoutBtn');
@@ -293,9 +294,10 @@ export async function updateHeaderUIForAuthState() {
     console.log('  - isLoggedIn:', isLoggedIn);
 
     if (isLoggedIn) {
-        // Logged in: show create note, hide login, show menu logout, hide menu login options, show notifications
+        // Logged in: show create note, hide login/create account, show menu logout, hide menu login options, show notifications
         console.log('  ✅ User is logged in - showing Create Note button');
         if (loginBtn) loginBtn.style.display = 'none';
+        if (createAccountBtn) createAccountBtn.style.display = 'none';
         if (createNoteBtn) createNoteBtn.style.display = 'flex';
         if (menuCreateNoteBtn) menuCreateNoteBtn.style.display = 'flex';
         if (menuLogoutBtn) menuLogoutBtn.style.display = 'flex';
@@ -346,16 +348,16 @@ export async function updateHeaderUIForAuthState() {
             }
         }
     } else {
-        // Anonymous: show login button, hide create note, hide menu logout, show menu login options, hide notifications
-        console.log('  ❌ User is anonymous - showing Login button');
-        if (loginBtn) loginBtn.style.display = 'flex'; // Changed to flex to match button layout
+        // Anonymous: show login/create account buttons, hide create note, hide menu logout, show menu login options, hide notifications
+        console.log('  ❌ User is anonymous - showing Login/Create Account buttons');
+        if (loginBtn) loginBtn.style.display = 'flex';
+        if (createAccountBtn) createAccountBtn.style.display = 'flex';
         if (createNoteBtn) createNoteBtn.style.display = 'none';
         if (menuCreateNoteBtn) menuCreateNoteBtn.style.display = 'none';
         if (menuLogoutBtn) menuLogoutBtn.style.display = 'none';
         if (menuLoginOptions) menuLoginOptions.style.display = 'block';
         if (menuUserInfo) menuUserInfo.style.display = 'none';
         if (notificationsBtn) notificationsBtn.style.display = 'none';
-
     }
 }
 

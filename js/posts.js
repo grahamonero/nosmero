@@ -562,6 +562,13 @@ export async function loadTrendingFeed(forceRefresh = false) {
             homeFeedList.innerHTML = infoHeader + renderedPosts.join('') + loadMoreButton;
         }
 
+        // Process embedded notes (quote reposts)
+        try {
+            await Utils.processEmbeddedNotes('homeFeedList');
+        } catch (error) {
+            console.error('Error processing embedded notes in trending feed:', error);
+        }
+
         // Expose trending data to window for Puppeteer extraction
         window.__nosmeroTrendingCache__ = {
             timestamp: Date.now(),
@@ -800,6 +807,13 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
 
         if (homeFeedList) {
             homeFeedList.innerHTML = anonymousBanner + renderedPosts.join('') + loadMoreButton;
+        }
+
+        // Process embedded notes (quote reposts)
+        try {
+            await Utils.processEmbeddedNotes('homeFeedList');
+        } catch (error) {
+            console.error('Error processing embedded notes in anonymous trending feed:', error);
         }
 
         // Hide the home feed header for anonymous users (trending feed has its own banner)
@@ -1068,6 +1082,13 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
 
     homeFeedList.innerHTML = infoHeader + renderedPosts.join('') + loadMoreButton;
 
+    // Process embedded notes (quote reposts)
+    try {
+        await Utils.processEmbeddedNotes('homeFeedList');
+    } catch (error) {
+        console.error('Error processing embedded notes in cached trending feed:', error);
+    }
+
     // Expose trending data to window for Puppeteer extraction (even when loaded from cache)
     window.__nosmeroTrendingCache__ = cache;
 
@@ -1329,6 +1350,13 @@ async function loadTrendingFeedForNewUser() {
             homeFeedList.innerHTML = onboardingBanner + renderedPosts.join('') + loadMoreButton;
         }
 
+        // Process embedded notes (quote reposts)
+        try {
+            await Utils.processEmbeddedNotes('homeFeedList');
+        } catch (error) {
+            console.error('Error processing embedded notes in onboarding feed:', error);
+        }
+
         console.log(`✅ Onboarding feed loaded for new user`);
         console.log(`   📊 Trending notes: ${cachedTrendingPosts.length}`);
         console.log(`   📄 Displaying: ${displayedTrendingPostCount}`);
@@ -1432,6 +1460,13 @@ async function loadMoreTrendingPosts() {
         const homeFeedList = document.getElementById('homeFeedList');
         if (homeFeedList) {
             homeFeedList.insertAdjacentHTML('beforeend', renderedPosts.join('') + loadMoreButton);
+        }
+
+        // Process embedded notes (quote reposts)
+        try {
+            await Utils.processEmbeddedNotes('homeFeedList');
+        } catch (error) {
+            console.error('Error processing embedded notes in load more trending:', error);
         }
 
         console.log(`📄 Loaded ${postsToRender.length} more trending posts (showing ${displayedTrendingPostCount} of ${cachedTrendingPosts.length})`);
@@ -2264,6 +2299,13 @@ export async function loadMoreWebOfTrustPosts() {
             if (homeFeedList && loadMoreContainer) {
                 homeFeedList.insertAdjacentHTML('beforeend', renderedPosts.filter(p => p).join(''));
                 loadMoreContainer.outerHTML = newLoadMoreButton;
+
+                // Process embedded notes (quote reposts)
+                try {
+                    await Utils.processEmbeddedNotes('homeFeedList');
+                } catch (error) {
+                    console.error('Error processing embedded notes in web of trust load more:', error);
+                }
             }
         } else {
             // No posts in this batch, keep the Load More button for next cycle
@@ -2729,10 +2771,18 @@ async function renderHomeFeedResults() {
             } catch (error) {
                 console.error('Error processing paywalled notes in home feed:', error);
             }
+
+            // Process embedded notes (quote reposts) after final re-render
+            try {
+                const Utils = await import('./utils.js');
+                await Utils.processEmbeddedNotes('homeFeedList');
+            } catch (error) {
+                console.error('Error processing embedded notes after re-render:', error);
+            }
         });
     });
 
-    // Process any embedded notes after rendering
+    // Process any embedded notes after initial rendering (before engagement data loads)
     try {
         const Utils = await import('./utils.js');
         await Utils.processEmbeddedNotes('homeFeedList');
@@ -4363,12 +4413,12 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                 const parentAuthor = getAuthorInfo(parentPost);
                 const textColor = '#ccc';
                 const borderColor = '#444';
-                
+
                 parentHtml = `
                     <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px; opacity: 0.8;">
                         <div class="post-header" style="font-size: 14px;">
-                            ${parentAuthor.picture ? 
-                                `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` : 
+                            ${parentAuthor.picture ?
+                                `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
                                 `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
                             }
                             <div class="post-info">
@@ -4378,7 +4428,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                         </div>
                         <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis; color: ${textColor};">${Utils.parseContent(parentPost.content)}</div>
                     </div>
-                    <div style="color: #666; font-size: 12px; margin-bottom: 8px; margin-left: 12px;">↳ Replying to</div>
+                    <div style="color: #666; font-size: 12px; margin-bottom: 8px; margin-left: 12px;">↑ Replying to</div>
                 `;
             }
         }
@@ -6375,6 +6425,13 @@ async function showMoreTrendingAll() {
         }
     }
 
+    // Process embedded notes (quote reposts)
+    try {
+        await Utils.processEmbeddedNotes('homeFeedList');
+    } catch (error) {
+        console.error('[TrendingAll] Error processing embedded notes:', error);
+    }
+
     // Add trust badges to rendered notes
     try {
         const TrustBadges = await import('./trust-badges.js');
@@ -6544,6 +6601,13 @@ export async function loadDiscoverFeed() {
                 ${renderedNotes.filter(n => n).join('')}
             </div>
         `;
+
+        // Process embedded notes (quote reposts)
+        try {
+            await Utils.processEmbeddedNotes('homeFeedList');
+        } catch (error) {
+            console.error('[Discover] Error processing embedded notes:', error);
+        }
 
     } catch (error) {
         console.error('Error loading discover feed:', error);

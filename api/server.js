@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as Paywall from './paywall.js';
+import authRouter from './auth.js';
 
 // Get __dirname equivalent for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -1420,6 +1421,9 @@ app.delete('/api/paywall/:noteId', paywallLimiter, (req, res) => {
   }
 });
 
+// ==================== AUTH ENDPOINTS ====================
+app.use('/api/auth', authRouter);
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -1470,6 +1474,15 @@ Paywall Endpoints:
   POST /api/paywall/verify              - Verify payment, get decryption key
   GET  /api/paywall/my-unlocks/:pubkey  - Get user's unlocks
   GET  /api/paywall/creator-stats/:pk   - Get creator stats
+
+Auth Endpoints:
+  POST /api/auth/signup                 - Create account (email/username)
+  POST /api/auth/login                  - Login with email/username
+  GET  /api/auth/verify-email           - Verify email address
+  POST /api/auth/forgot-password        - Request password reset
+  POST /api/auth/reset-password         - Reset password with token
+  POST /api/auth/add-recovery           - Add recovery to existing account
+  GET  /api/auth/check-availability     - Check email/username availability
 
 Relatr Server: ${RELATR_BASE_URL}
 

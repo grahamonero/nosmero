@@ -82,6 +82,9 @@ export function showLoginModal() {
     const modal = document.getElementById('loginModal');
     if (modal) {
         modal.classList.add('show');
+        // Ensure login sections are visible (not blank modal)
+        document.getElementById('loginMainButtons')?.classList.remove('hidden');
+        document.getElementById('returningUserSection')?.classList.remove('hidden');
     }
 }
 
@@ -91,6 +94,131 @@ export function hideLoginModal() {
         modal.classList.remove('show');
     }
 }
+
+// ==================== LOGIN MODAL SECTION TOGGLES ====================
+
+// Hide all login modal sections
+function hideAllLoginSections() {
+    const sections = [
+        'returningUserSection',
+        'newUserSection',
+        'emailPasswordSignupSection',
+        'keysOnlySignupSection',
+        'forgotPasswordSection',
+        'loginWithNsecSection',
+        'loginWithAmberSection',
+        'keyDisplaySection',
+        'quickLoginSection',
+        'loginMainButtons'
+    ];
+    sections.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+}
+
+// Show returning user login form
+export function showReturningUserSection() {
+    hideAllLoginSections();
+    document.getElementById('loginMainButtons')?.classList.remove('hidden');
+    document.getElementById('returningUserSection')?.classList.remove('hidden');
+    document.getElementById('emailOrUsernameInput')?.focus();
+}
+
+// Show new user full signup form
+export function showNewUserSection() {
+    // Copy display name from quick input
+    const quickName = document.getElementById('quickDisplayName')?.value;
+    const displayNameInput = document.getElementById('displayNameInput');
+    if (quickName && displayNameInput) {
+        displayNameInput.value = quickName;
+    }
+
+    hideAllLoginSections();
+    document.getElementById('newUserSection')?.classList.remove('hidden');
+    document.getElementById('displayNameInput')?.focus();
+}
+
+// Show nsec login section in modal
+export function showLoginWithNsecSection() {
+    hideAllLoginSections();
+    document.getElementById('loginWithNsecSection')?.classList.remove('hidden');
+    document.getElementById('nsecInput')?.focus();
+}
+
+// Show Amber login section in modal
+export function showLoginWithAmberSection() {
+    hideAllLoginSections();
+    document.getElementById('loginWithAmberSection')?.classList.remove('hidden');
+    document.getElementById('amberBunkerInput')?.focus();
+}
+
+// Back to main login options
+export function backToLoginOptions() {
+    hideAllLoginSections();
+    document.getElementById('loginMainButtons')?.classList.remove('hidden');
+    document.getElementById('quickLoginSection')?.classList.remove('hidden');
+}
+
+// Show login modal with login form visible
+export function showLoginModalWithLogin() {
+    const modal = document.getElementById('loginModal');
+    if (modal) {
+        modal.classList.add('show');
+        // Show returning user (email/password) login section
+        hideAllLoginSections();
+        document.getElementById('loginMainButtons')?.classList.remove('hidden');
+        document.getElementById('returningUserSection')?.classList.remove('hidden');
+        document.getElementById('emailOrUsernameInput')?.focus();
+    }
+}
+
+// Show login modal with create account form visible
+export function showCreateAccountModal() {
+    const modal = document.getElementById('loginModal');
+    if (modal) {
+        modal.classList.add('show');
+        // Show new user signup section
+        hideAllLoginSections();
+        document.getElementById('newUserSection')?.classList.remove('hidden');
+        document.getElementById('displayNameInput')?.focus();
+    }
+}
+
+// Toggle recovery fields section
+export function toggleRecoverySection() {
+    const checkbox = document.getElementById('enableRecoveryCheckbox');
+    const section = document.getElementById('recoveryFieldsSection');
+    if (section) {
+        section.style.display = checkbox?.checked ? 'block' : 'none';
+    }
+}
+
+// Show email/password signup form
+export function showEmailPasswordSignup() {
+    hideAllLoginSections();
+    document.getElementById('emailPasswordSignupSection')?.classList.remove('hidden');
+    document.getElementById('displayNameInput')?.focus();
+}
+
+// Show keys-only signup form
+export function showKeysOnlySignup() {
+    hideAllLoginSections();
+    document.getElementById('keysOnlySignupSection')?.classList.remove('hidden');
+    document.getElementById('keysOnlyDisplayNameInput')?.focus();
+}
+
+// Make functions globally available
+window.showReturningUserSection = showReturningUserSection;
+window.showNewUserSection = showNewUserSection;
+window.showLoginWithNsecSection = showLoginWithNsecSection;
+window.showLoginWithAmberSection = showLoginWithAmberSection;
+window.showEmailPasswordSignup = showEmailPasswordSignup;
+window.showKeysOnlySignup = showKeysOnlySignup;
+window.backToLoginOptions = backToLoginOptions;
+window.showCreateAccountModal = showCreateAccountModal;
+window.showLoginModalWithLogin = showLoginModalWithLogin;
+window.toggleRecoverySection = toggleRecoverySection;
 
 // Show create account interface
 export function showCreateAccount() {
@@ -1852,14 +1980,45 @@ export function showMediaPreview(file, context) {
 
 // ==================== UTILITY FUNCTIONS ====================
 
-// Copy text to clipboard
+// Copy text to clipboard with fallback for older browsers/restricted contexts
 export function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        showSuccessToast('Copied to clipboard!');
-    }).catch(err => {
-        console.error('Failed to copy:', err);
-        showErrorToast('Failed to copy to clipboard');
-    });
+    // Try modern clipboard API first
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            showSuccessToast('Copied to clipboard!');
+        }).catch(err => {
+            console.warn('Clipboard API failed, trying fallback:', err);
+            fallbackCopyToClipboard(text);
+        });
+    } else {
+        fallbackCopyToClipboard(text);
+    }
+}
+
+// Fallback copy method using textarea selection
+function fallbackCopyToClipboard(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+            showSuccessToast('Copied to clipboard!');
+        } else {
+            showErrorToast('Failed to copy - please select and copy manually');
+        }
+    } catch (err) {
+        console.error('Fallback copy failed:', err);
+        showErrorToast('Failed to copy - please select and copy manually');
+    }
+
+    document.body.removeChild(textarea);
 }
 
 // ==================== XMR ZAP QUEUE ====================
