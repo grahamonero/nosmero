@@ -337,6 +337,12 @@ export async function loginWithNsec() {
             window.NostrPosts.clearHomeFeedState();
         }
 
+        // Hide login modal before starting the application
+        const loginModal = document.getElementById('loginModal');
+        if (loginModal) {
+            loginModal.classList.remove('show');
+        }
+
         // Start the application with the new session
         if (window.startApplication) {
             await window.startApplication();
@@ -350,6 +356,138 @@ export async function loginWithNsec() {
         alert('Failed to login: ' + error.message);
     }
 }
+
+// Complete login with nsec (used by email/password auth after decryption)
+// This function is called after the nsec has been retrieved from server and decrypted
+// Options:
+//   skipPin: boolean - if true, skip PIN setup and store key in sessionStorage only (for password users)
+export async function completeLoginWithNsec(nsec, displayName = null, options = {}) {
+    const { skipPin = false } = options;
+
+    try {
+        if (!nsec || !nsec.startsWith('nsec1')) {
+            throw new Error('Invalid nsec format');
+        }
+
+        if (!window.NostrTools) {
+            throw new Error('Unable to load cryptographic tools. Please refresh the page.');
+        }
+
+        // Clear any existing user settings
+        clearUserSettings();
+
+        // Decode nsec to hex format
+        const { nip19, getPublicKey } = window.NostrTools;
+        const decoded = nip19.decode(nsec);
+
+        if (decoded.type !== 'nsec') {
+            throw new Error('Invalid private key format');
+        }
+
+        const hexPrivateKey = decoded.data;
+
+        // Handle case where decoded.data might be a Uint8Array
+        let normalizedKey = hexPrivateKey;
+        if (hexPrivateKey instanceof Uint8Array) {
+            normalizedKey = Array.from(hexPrivateKey)
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+        }
+
+        // Validate the decoded hex key
+        if (typeof normalizedKey !== 'string' || normalizedKey.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(normalizedKey)) {
+            throw new Error('Invalid private key - decoded format is incorrect');
+        }
+
+        if (skipPin) {
+            // For password users: store in sessionStorage only (no PIN, no localStorage)
+            // User will re-authenticate with password when browser closes
+            console.log('🔐 Password login - storing key in session only (no PIN)');
+            sessionStorage.setItem('nostr-session-key', normalizedKey);
+            localStorage.setItem('login-method', 'email_password');
+        } else {
+            // For nsec users: prompt for PIN and encrypt in localStorage
+            console.log('🔐 Prompting for PIN to secure key locally...');
+            const pin = await showPinModal('create');
+            if (!pin) {
+                console.log('PIN entry cancelled');
+                return false;
+            }
+
+            console.log('🔐 Encrypting private key with PIN...');
+            await storeSecurePrivateKey(normalizedKey, pin);
+            localStorage.setItem('login-method', 'nsec');
+        }
+
+        // Store in state for immediate use
+        setPrivateKey(normalizedKey);
+
+        // Generate and set public key
+        const derivedPublicKey = getPublicKey(normalizedKey);
+        setPublicKey(derivedPublicKey);
+        localStorage.setItem('nostr-public-key', derivedPublicKey);
+
+        if (skipPin) {
+            showNotification('Login successful!', 'success');
+        } else {
+            showNotification('Login successful! Your key is encrypted with your PIN.', 'success');
+        }
+
+        // Load user's NIP-65 relay list
+        try {
+            const Relays = await import('./relays.js');
+            await Relays.importRelayList();
+        } catch (error) {
+            console.error('Error loading NIP-65 relay list:', error);
+        }
+
+        // Update disclosed tips widget
+        try {
+            const Posts = await import('./posts.js');
+            await Posts.updateWidgetForAuthState();
+        } catch (error) {
+            console.error('Error updating disclosed tips widget:', error);
+        }
+
+        // Clear the anonymous feed display
+        const feed = document.getElementById('feed');
+        const homeFeedList = document.getElementById('homeFeedList');
+        if (feed) {
+            feed.innerHTML = '<div class="loading">Loading your feed...</div>';
+        }
+        if (homeFeedList) {
+            homeFeedList.innerHTML = '';
+        }
+
+        // Clear home feed state
+        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
+            window.NostrPosts.clearHomeFeedState();
+        }
+
+        // Hide login modal
+        const loginModal = document.getElementById('loginModal');
+        if (loginModal) {
+            loginModal.classList.remove('show');
+        }
+
+        // Start the application
+        if (window.startApplication) {
+            await window.startApplication();
+        } else {
+            window.location.reload();
+        }
+
+        return true;
+
+    } catch (error) {
+        console.error('Complete login error:', error);
+        alert('Failed to complete login: ' + error.message);
+        return false;
+    }
+}
+
+// Make completeLoginWithNsec globally available for auth-ui.js
+window.completeLoginWithNsec = completeLoginWithNsec;
 
 // Login using a browser extension like nos2x or Alby (keeps keys secure)
 export async function loginWithExtension() {

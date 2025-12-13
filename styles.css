@@ -308,6 +308,27 @@
             box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
         }
 
+        /* Create Account Button in Header */
+        .create-account-btn {
+            background: transparent;
+            color: var(--monero-orange);
+            padding: 0.6rem 1.2rem;
+            border-radius: 50px;
+            border: 1px solid var(--monero-orange);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .create-account-btn:hover {
+            background: rgba(255, 102, 0, 0.1);
+            transform: scale(1.05);
+        }
+
         /* Create Note Button in Header */
         .create-note-btn {
             background: linear-gradient(135deg, var(--monero-orange), var(--purple));
@@ -1027,6 +1048,54 @@
         .login-option-btn:hover {
             background: #2a2a2a;
             border-color: #FF6600;
+        }
+
+        .nostr-option-btn {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #ccc;
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+            flex: 1;
+            min-width: 80px;
+        }
+
+        .nostr-option-btn:hover {
+            background: #2a2a2a;
+            border-color: #8B5CF6;
+            color: #fff;
+        }
+
+        .text-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .text-btn:hover {
+            text-decoration: underline;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Availability indicators */
+        #emailAvailability, #usernameAvailability {
+            color: #666;
+        }
+        #emailAvailability.available, #usernameAvailability.available {
+            color: #22c55e;
+        }
+        #emailAvailability.unavailable, #usernameAvailability.unavailable {
+            color: #ef4444;
+        }
+        #emailAvailability.checking, #usernameAvailability.checking {
+            color: #8B5CF6;
         }
 
         /* New post composition area */

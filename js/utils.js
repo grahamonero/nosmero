@@ -334,9 +334,20 @@ export async function processEmbeddedNotes(containerId) {
             }
 
             if (event) {
+                // Fetch profile for the embedded note's author if not cached
+                if (!State.profileCache[event.pubkey]) {
+                    try {
+                        const Posts = await import('./posts.js');
+                        await Posts.fetchProfiles([event.pubkey]);
+                        console.log('👤 Fetched profile for embedded note author:', event.pubkey.slice(0, 8));
+                    } catch (profileError) {
+                        console.warn('⚠️ Could not fetch profile for embedded note author:', profileError);
+                    }
+                }
+
                 // Replace placeholder with actual note content
                 console.log('✅ Rendering embedded note');
-                noteDiv.innerHTML = renderEmbeddedNote(event);
+                noteDiv.innerHTML = renderEmbeddedNote(event, State);
                 noteDiv.classList.add('loaded');
             } else {
                 // Fallback: show minimal info instead of "Loading event..."
@@ -401,31 +412,26 @@ async function fetchEventById(eventId) {
 }
 
 // Render an embedded note in compact format
-function renderEmbeddedNote(event) {
-    const author = getEventAuthor(event);
+function renderEmbeddedNote(event, State) {
+    const profile = State?.profileCache?.[event.pubkey];
+    const authorName = profile?.name || profile?.display_name || event.pubkey.slice(0, 8) + '...';
+    const authorPicture = profile?.picture;
     const content = event.content ? event.content.slice(0, 200) + (event.content.length > 200 ? '...' : '') : '';
     const timeAgo = formatTimeAgo(event.created_at * 1000);
 
     return `
-        <div class="embedded-note-content" onclick="openThreadView('${event.id}')" style="cursor: pointer;">
-            <div class="embedded-note-header">
-                <span class="embedded-note-author">${author}</span>
-                <span class="embedded-note-time">${timeAgo}</span>
+        <div class="embedded-note-content" onclick="openThreadView('${event.id}')" style="cursor: pointer; background: rgba(255,255,255,0.03); border: 1px solid #333; border-radius: 8px; padding: 10px; margin-top: 8px;">
+            <div style="display: flex !important; flex-direction: row !important; align-items: center !important; gap: 8px !important; margin-bottom: 6px;">
+                ${authorPicture ?
+                    `<img src="${authorPicture}" style="width: 20px !important; height: 20px !important; max-width: 20px !important; max-height: 20px !important; min-width: 20px !important; min-height: 20px !important; border-radius: 50% !important; object-fit: cover !important; flex-shrink: 0 !important; display: inline-block !important;" onerror="this.style.display='none'">` :
+                    `<div style="width: 20px !important; height: 20px !important; min-width: 20px !important; min-height: 20px !important; border-radius: 50% !important; background: linear-gradient(135deg, #FF6600, #8B5CF6) !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; color: white !important; font-size: 10px !important; font-weight: bold !important; flex-shrink: 0 !important;">${authorName.charAt(0).toUpperCase()}</div>`
+                }
+                <span style="color: #ccc !important; font-weight: 500 !important; font-size: 13px !important; display: inline !important;">${authorName}</span>
+                <span style="color: #666 !important; font-size: 12px !important; display: inline !important;">${timeAgo}</span>
             </div>
-            <div class="embedded-note-text">${parseContent(content, true)}</div>
+            <div style="color: #aaa !important; font-size: 14px !important; line-height: 1.4 !important;">${parseContent(content, true)}</div>
         </div>
     `;
-}
-
-// Get author info for an event
-function getEventAuthor(event) {
-    try {
-        const State = window.NostrState || {};
-        const profile = State.profileCache?.[event.pubkey];
-        return profile?.name || profile?.display_name || event.pubkey.slice(0, 8) + '...';
-    } catch (error) {
-        return event.pubkey.slice(0, 8) + '...';
-    }
 }
 
 // Format time ago helper

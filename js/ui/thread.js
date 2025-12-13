@@ -335,17 +335,29 @@ export async function openThreadView(eventId, skipHistory = false) {
 
         // Render thread with proper nesting
         let threadHtml = '';
-        async function renderThreadNode(node, depth = 0) {
+        async function renderThreadNode(node, depth = 0, parentNode = null) {
             const isMainPost = node.post.id === eventId;
             const indent = Math.min(depth * 20, 100); // Max indent of 100px
 
-            let html = `<div class="thread-post ${isMainPost ? 'main-post' : ''}" style="margin-bottom: 12px; margin-left: ${indent}px;">`;
+            let html = '';
+
+            // Add "Replying to" indicator for replies (non-root posts)
+            if (parentNode && depth > 0) {
+                const parentProfile = StateModule.profileCache[parentNode.post.pubkey];
+                const parentName = parentProfile?.name || parentProfile?.display_name || parentNode.post.pubkey.slice(0, 8) + '...';
+                html += `<div style="margin-left: ${indent}px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                    <div style="width: 2px; height: 16px; background: #444; margin-left: 20px;"></div>
+                    <span style="color: #666; font-size: 12px;">↑ Replying to <span style="color: #888;">@${parentName}</span></span>
+                </div>`;
+            }
+
+            html += `<div class="thread-post ${isMainPost ? 'main-post' : ''}" style="margin-bottom: 12px; margin-left: ${indent}px; ${depth > 0 ? 'border-left: 2px solid #333; padding-left: 12px;' : ''}">`;
             html += await Posts.renderSinglePost(node.post, isMainPost ? 'highlight' : 'thread', engagementData);
             html += '</div>';
 
-            // Render replies
+            // Render replies, passing current node as parent
             for (const reply of node.replies) {
-                html += await renderThreadNode(reply, depth + 1);
+                html += await renderThreadNode(reply, depth + 1, node);
             }
 
             return html;

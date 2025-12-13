@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>NIP-49 Test</title>
+  <script type="module">
+    import { encrypt, decrypt, isValidNcryptsec } from './js/auth/nip49.js';
+
+    window.runTest = async function() {
+      const output = document.getElementById('output');
+      output.textContent = 'Running tests...\n\n';
+
+      try {
+        // Test nsec (this is a test key, not a real one)
+        const testNsec = 'nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5';
+        const password = 'testpassword123';
+
+        output.textContent += '1. Encrypting nsec with password...\n';
+        const ncryptsec = await encrypt(testNsec, password);
+        output.textContent += `   ncryptsec: ${ncryptsec.slice(0, 30)}...${ncryptsec.slice(-10)}\n\n`;
+
+        output.textContent += '2. Validating ncryptsec format...\n';
+        const isValid = isValidNcryptsec(ncryptsec);
+        output.textContent += `   Valid: ${isValid}\n\n`;
+
+        output.textContent += '3. Decrypting with correct password...\n';
+        const decryptedNsec = await decrypt(ncryptsec, password);
+        output.textContent += `   Decrypted nsec: ${decryptedNsec.slice(0, 20)}...\n`;
+        output.textContent += `   Match: ${decryptedNsec === testNsec}\n\n`;
+
+        output.textContent += '4. Decrypting with wrong password...\n';
+        try {
+          await decrypt(ncryptsec, 'wrongpassword');
+          output.textContent += '   ERROR: Should have failed!\n';
+        } catch (e) {
+          output.textContent += `   Correctly failed: ${e.message}\n\n`;
+        }
+
+        output.textContent += 'All tests passed!\n';
+      } catch (error) {
+        output.textContent += `\nERROR: ${error.message}\n${error.stack}`;
+      }
+    };
+  </script>
+</head>
+<body style="font-family: monospace; padding: 20px;">
+  <h1>NIP-49 Encryption Test</h1>
+  <button onclick="runTest()">Run Tests</button>
+  <pre id="output" style="background: #f5f5f5; padding: 20px; margin-top: 20px; white-space: pre-wrap;"></pre>
+</body>
+</html>

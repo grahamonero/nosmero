@@ -12,7 +12,7 @@ const RightPanel = {
     startX: 0,
     startWidth: 0,
     minWidth: 320,
-    maxWidth: 600,
+    maxWidth: 800,
 
     // Navigation history for back button
     history: [], // Array of {view, data, title} objects
@@ -475,6 +475,14 @@ const RightPanel = {
                 }
 
                 this.defaultFeed.innerHTML = renderedPosts.join('');
+
+                // Process embedded notes (quote reposts)
+                try {
+                    const Utils = await import('./utils.js');
+                    await Utils.processEmbeddedNotes('rightPanelDefaultFeed');
+                } catch (embedError) {
+                    console.error('Right panel: Error processing embedded notes:', embedError);
+                }
 
                 // Add trust badges after rendering (same as main feed)
                 try {
@@ -1181,33 +1189,115 @@ const RightPanel = {
                 await window.NostrPosts.fetchProfiles(pubkeysToFetch);
             }
 
-            // Render using NostrPosts.renderSinglePost
+            // Build a map of posts by ID for quick lookup
+            const postMap = new Map();
+            postMap.set(mainNote.id, mainNote);
+            replies.forEach(reply => postMap.set(reply.id, reply));
+
+            // Build thread tree
+            const buildTree = (posts, rootId) => {
+                const nodes = new Map();
+                const roots = [];
+
+                // Create nodes for all posts
+                posts.forEach(post => {
+                    nodes.set(post.id, { post, replies: [], parentId: null });
+                });
+
+                // Link children to parents
+                posts.forEach(post => {
+                    // Find the parent ID (last 'e' tag with marker 'reply' or just the last 'e' tag)
+                    const eTags = post.tags.filter(t => t[0] === 'e');
+                    let parentId = null;
+                    for (const tag of eTags) {
+                        if (tag[3] === 'reply') {
+                            parentId = tag[1];
+                            break;
+                        }
+                    }
+                    if (!parentId && eTags.length > 0) {
+                        parentId = eTags[eTags.length - 1][1];
+                    }
+
+                    const node = nodes.get(post.id);
+                    if (parentId && nodes.has(parentId)) {
+                        node.parentId = parentId;
+                        nodes.get(parentId).replies.push(node);
+                    } else if (post.id !== rootId) {
+                        // If no parent found in thread, treat as direct reply to root
+                        const rootNode = nodes.get(rootId);
+                        if (rootNode) {
+                            node.parentId = rootId;
+                            rootNode.replies.push(node);
+                        }
+                    }
+                });
+
+                // Root is the main note
+                if (nodes.has(rootId)) {
+                    roots.push(nodes.get(rootId));
+                }
+
+                return { roots, nodes };
+            };
+
+            const { roots, nodes } = buildTree([mainNote, ...replies], noteId);
+
+            // Render using NostrPosts.renderSinglePost with hierarchy
             let html = '';
 
-            // Main note
-            if (window.NostrPosts?.renderSinglePost) {
-                html += await window.NostrPosts.renderSinglePost(mainNote, 'thread');
-            } else {
-                html += `<div class="post" style="padding: 16px; border-bottom: 1px solid var(--border-color);">
-                    ${this.escapeHtml(mainNote.content)}
-                </div>`;
-            }
+            const renderNode = async (node, depth = 0, parentNode = null) => {
+                const indent = Math.min(depth * 16, 80); // Smaller indent for right panel
+                let nodeHtml = '';
 
-            // Replies
-            if (replies && replies.length > 0) {
-                replies.sort((a, b) => a.created_at - b.created_at);
-                for (const reply of replies) {
-                    if (window.NostrPosts?.renderSinglePost) {
-                        html += await window.NostrPosts.renderSinglePost(reply, 'thread');
-                    } else {
-                        html += `<div class="post reply" style="padding: 16px; border-bottom: 1px solid var(--border-color); margin-left: 20px;">
-                            ${this.escapeHtml(reply.content)}
-                        </div>`;
-                    }
+                // Add "Replying to" indicator for replies
+                if (parentNode && depth > 0) {
+                    const parentProfile = window.NostrState?.profileCache?.[parentNode.post.pubkey];
+                    const parentName = parentProfile?.name || parentProfile?.display_name || parentNode.post.pubkey.slice(0, 8) + '...';
+                    nodeHtml += `<div style="margin-left: ${indent}px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                        <div style="width: 2px; height: 12px; background: #444; margin-left: 12px;"></div>
+                        <span style="color: #666; font-size: 11px;">↑ Replying to <span style="color: #888;">@${parentName}</span></span>
+                    </div>`;
                 }
+
+                nodeHtml += `<div style="margin-left: ${indent}px; ${depth > 0 ? 'border-left: 2px solid #333; padding-left: 8px;' : ''}">`;
+                if (window.NostrPosts?.renderSinglePost) {
+                    nodeHtml += await window.NostrPosts.renderSinglePost(node.post, depth === 0 ? 'highlight' : 'thread');
+                } else {
+                    nodeHtml += `<div class="post" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
+                        ${this.escapeHtml(node.post.content)}
+                    </div>`;
+                }
+                nodeHtml += '</div>';
+
+                // Sort replies by timestamp
+                node.replies.sort((a, b) => a.post.created_at - b.post.created_at);
+
+                // Render child replies
+                for (const childNode of node.replies) {
+                    nodeHtml += await renderNode(childNode, depth + 1, node);
+                }
+
+                return nodeHtml;
+            };
+
+            for (const root of roots) {
+                html += await renderNode(root, 0, null);
             }
 
             container.innerHTML = html;
+
+            // Process embedded notes (quote reposts)
+            try {
+                // Ensure container has an ID for processEmbeddedNotes
+                if (!container.id) {
+                    container.id = 'rightPanelThreadContent';
+                }
+                const Utils = await import('./utils.js');
+                await Utils.processEmbeddedNotes(container.id);
+            } catch (embedError) {
+                console.error('Right panel thread: Error processing embedded notes:', embedError);
+            }
 
             // Add trust badges
             try {
@@ -1429,6 +1519,14 @@ const RightPanel = {
                     posts.map(post => window.NostrPosts.renderSinglePost(post, 'feed'))
                 );
                 container.innerHTML = rendered.join('');
+
+                // Process embedded notes (quote reposts)
+                try {
+                    const Utils = await import('./utils.js');
+                    await Utils.processEmbeddedNotes('panelProfilePosts');
+                } catch (embedError) {
+                    console.error('Right panel profile: Error processing embedded notes:', embedError);
+                }
             } else {
                 container.innerHTML = posts.map(post => `
                     <div class="post" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
