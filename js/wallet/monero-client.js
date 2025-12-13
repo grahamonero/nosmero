@@ -32,9 +32,10 @@ function isTorAccess() {
 
 // Tor daemon - same-origin proxy to avoid CORS issues
 // External onion nodes don't have CORS headers, so we proxy through our own nginx
+// NOTE: monero-ts ignores path in URI and hits /json_rpc, /get_blocks.bin etc directly on host
+// So we return just the origin and nginx proxies /json_rpc etc to monerod
 function getTorDaemonUri() {
-    // Use same-origin path that nginx proxies to local monerod
-    return `${window.location.origin}/monero-rpc`;
+    return window.location.origin;
 }
 
 // Clearnet daemon - HTTPS proxy to local monerod with CORS support
@@ -80,18 +81,15 @@ async function getNostrPubkey() {
     // Try to get from State module
     try {
         const State = await import('../state.js');
-        console.log('[MoneroClient] State.publicKey:', State.publicKey);
         if (State.publicKey) {
             return State.publicKey;
         }
     } catch (e) {
-        console.log('[MoneroClient] State module error:', e.message);
+        // Silent fallback to localStorage
     }
 
     // Fallback to localStorage
-    const lsPubkey = localStorage.getItem('nostr-public-key');
-    console.log('[MoneroClient] localStorage nostr-public-key:', lsPubkey);
-    return lsPubkey || null;
+    return localStorage.getItem('nostr-public-key') || null;
 }
 
 /**
@@ -101,7 +99,6 @@ async function getNostrPubkey() {
 export async function hasWallet() {
     const currentPubkey = await getNostrPubkey();
     if (!currentPubkey) {
-        console.log('[MoneroClient] No user logged in, cannot check wallet');
         return false;
     }
     return storage.walletExists(currentPubkey);
@@ -162,8 +159,6 @@ export async function createWallet(pin) {
         throw new Error('Wallet already exists. Delete it first to create a new one.');
     }
 
-    console.log('[MoneroClient] Creating new wallet for user:', currentPubkey.substring(0, 8));
-
     // Create keys-only wallet (fast, no sync needed)
     const wallet = await MoneroTS.createWalletKeys({
         networkType: MoneroTS.MoneroNetworkType.MAINNET,
@@ -210,8 +205,6 @@ export async function createWallet(pin) {
             owner_pubkey: ownerPubkey
         });
 
-        console.log('[MoneroClient] Wallet created and saved for user:', ownerPubkey?.substring(0, 8) || 'unknown');
-
         // Auto-unlock after creation
         decryptedKeys = { seed, privateSpendKey, privateViewKey, publicSpendKey, publicViewKey };
         isUnlocked = true;
@@ -239,8 +232,6 @@ export async function restoreWallet(seed, pin, restoreHeight = 0) {
         throw new Error('Must be logged in to restore a wallet');
     }
 
-    console.log('[MoneroClient] restoreWallet called with height:', restoreHeight);
-
     // Validate PIN
     const pinCheck = walletCrypto.validatePIN(pin);
     if (!pinCheck.valid) {
@@ -257,8 +248,6 @@ export async function restoreWallet(seed, pin, restoreHeight = 0) {
     if (words.length !== 25) {
         throw new Error('Seed phrase must be exactly 25 words');
     }
-
-    console.log('[MoneroClient] Restoring wallet from seed for user:', currentPubkey.substring(0, 8));
 
     // Restore keys-only wallet
     const wallet = await MoneroTS.createWalletKeys({
@@ -295,8 +284,6 @@ export async function restoreWallet(seed, pin, restoreHeight = 0) {
             restore_height: restoreHeight,
             owner_pubkey: ownerPubkey
         });
-
-        console.log('[MoneroClient] Wallet restored and saved for user:', ownerPubkey?.substring(0, 8) || 'unknown');
 
         // Auto-unlock after restore
         decryptedKeys = { seed: seed.trim(), privateSpendKey, privateViewKey, publicSpendKey, publicViewKey };
@@ -400,7 +387,6 @@ export async function unlock(pin) {
     }
 
     const walletData = await storage.loadWallet(currentPubkey);
-    console.log('[MoneroClient] unlock - walletData loaded:', walletData ? 'yes' : 'no');
     if (!walletData) {
         throw new Error('No wallet found');
     }
@@ -414,16 +400,14 @@ export async function unlock(pin) {
             walletData.salt
         );
 
-        // Clear failed attempts on success
-        clearPinAttempts();
-
         isUnlocked = true;
         resetUnlockTimeout();
 
-        console.log('[MoneroClient] Wallet unlocked');
+        // Clear failed attempts on success
+        clearPinAttempts();
+
         return true;
     } catch (error) {
-        console.error('[MoneroClient] Unlock failed:', error.message, error);
 
         // Record failed attempt
         const result = recordFailedPinAttempt();
@@ -459,7 +443,6 @@ export function lock() {
     }
 
     isUnlocked = false;
-    console.log('[MoneroClient] Wallet locked');
 }
 
 /**
@@ -471,7 +454,6 @@ function resetUnlockTimeout() {
     }
 
     unlockTimeout = setTimeout(() => {
-        console.log('[MoneroClient] Auto-locking wallet due to inactivity');
         lock();
     }, UNLOCK_TIMEOUT_MS);
 }
@@ -505,20 +487,18 @@ export async function getFullWallet() {
 
     // Create full wallet from keys
     if (!currentWallet) {
-        console.log('[MoneroClient] Creating full wallet instance...');
-
         let serverUri = null;
         const torMode = isTorAccess();
 
         if (torMode) {
-            // TOR MODE: Use same-origin proxy to avoid CORS issues
-            // External onion nodes don't have CORS headers, browsers block cross-origin requests
+            // TOR MODE: Use same-origin proxy (the onion site itself)
+            // Same-origin requests work fine from Web Workers - no CORS needed
             serverUri = getTorDaemonUri();
-            console.log('[MoneroClient] Tor access - using same-origin proxy:', serverUri);
+            console.log('[MoneroClient] Tor mode - using same-origin proxy:', serverUri);
         } else {
             // CLEARNET MODE: Use Nosmero's private daemon via HTTPS proxy
             serverUri = getClearnetDaemonUri();
-            console.log('[MoneroClient] Clearnet access - using private daemon:', serverUri);
+            console.log('[MoneroClient] Clearnet mode - using proxy:', serverUri);
         }
 
         if (!serverUri) {
@@ -527,45 +507,122 @@ export async function getFullWallet() {
 
         // Store the current daemon URI for UI display
         currentDaemonUri = serverUri;
-        console.log('[MoneroClient] Using daemon URI:', serverUri);
-        console.log('[MoneroClient] Restore height from storage:', walletData.restore_height);
+        console.log('[MoneroClient] Creating wallet with server:', serverUri);
 
-        // Create wallet with server parameter (can be string URI or MoneroRpcConnection)
-        // Per https://woodser.github.io/monero-ts/typedocs/classes/MoneroWalletConfig.html
-        // IMPORTANT: restoreHeight for wallet creation must ALWAYS be the original wallet creation height.
-        // Using a later sync height would skip all transactions before that point!
-        // Delta sync (resuming from last synced block) happens in sync() method, not here.
-        const restoreHeight = walletData.restore_height || 0;
-        console.log('[MoneroClient] Using restore height:', restoreHeight);
+        // Check for cached wallet data (enables delta sync)
+        let cachedWalletData = null;
+        try {
+            const walletCache = await storage.loadWalletCache(currentPubkey);
+            if (walletCache && walletCache.encrypted_data) {
+                const decryptedBytes = await walletCrypto.decryptWalletCache(
+                    decryptedKeys.privateViewKey,
+                    walletCache.encrypted_data,
+                    walletCache.iv,
+                    walletCache.salt
+                );
+                if (decryptedBytes && decryptedBytes.length > 4) {
+                    // Deserialize: [4 bytes: keys length] [keys data] [cache data]
+                    const view = new DataView(decryptedBytes.buffer, decryptedBytes.byteOffset, decryptedBytes.byteLength);
+                    const keysLength = view.getUint32(0, true); // little-endian
+                    const keysData = decryptedBytes.slice(4, 4 + keysLength);
+                    const cacheData = decryptedBytes.slice(4 + keysLength);
+                    cachedWalletData = [keysData, cacheData];
+                }
+            }
+        } catch (e) {
+            console.warn('[MoneroClient] Failed to load wallet cache:', e.message);
+        }
 
-        currentWallet = await MoneroTS.createWalletFull({
-            networkType: MoneroTS.MoneroNetworkType.MAINNET,
-            primaryAddress: walletData.primary_address,
-            privateViewKey: decryptedKeys.privateViewKey,
-            privateSpendKey: decryptedKeys.privateSpendKey,
-            restoreHeight: restoreHeight,
-            server: serverUri,
-            proxyToWorker: true
-        });
+        // Always use Worker thread (proxyToWorker: true) for better performance and stability
+        // Same-origin requests work fine from Workers - the old "Workers can't resolve .onion" was a myth
+        // Main-thread WASM (proxyToWorker: false) causes crashes after tx signing due to Asyncify fragility
 
-        // Verify connection
-        let isConnected = await currentWallet.isConnectedToDaemon();
-        console.log('[MoneroClient] Wallet daemon connected (initial):', isConnected);
+        // If we have cached wallet data, use openWalletData to restore full state
+        if (cachedWalletData && Array.isArray(cachedWalletData) && cachedWalletData.length === 2) {
+            const [keysData, cacheData] = cachedWalletData;
 
-        // If not connected, try to set daemon connection explicitly
-        if (!isConnected) {
-            console.log('[MoneroClient] Attempting explicit daemon connection...');
+            // openWalletData expects a MoneroWalletConfig instance, not a plain object
+            // Password is empty string since keys aren't password-protected in our storage format
+            const walletConfig = new MoneroTS.MoneroWalletConfig({
+                password: '',
+                networkType: MoneroTS.MoneroNetworkType.MAINNET,
+                keysData: keysData,
+                cacheData: cacheData,
+                server: serverUri,
+                proxyToWorker: true
+            });
+            currentWallet = await MoneroTS.MoneroWalletFull.openWalletData(walletConfig);
+        } else {
+            // No cache - create from keys with restoreHeight
+            const restoreHeight = walletData.restore_height || 0;
+            const walletConfig = {
+                networkType: MoneroTS.MoneroNetworkType.MAINNET,
+                primaryAddress: walletData.primary_address,
+                privateViewKey: decryptedKeys.privateViewKey,
+                privateSpendKey: decryptedKeys.privateSpendKey,
+                restoreHeight: restoreHeight,
+                server: serverUri,
+                proxyToWorker: true
+            };
+            currentWallet = await MoneroTS.createWalletFull(walletConfig);
+        }
+
+        // Verify connection by forcing an actual RPC call
+        // isConnectedToDaemon() is just a state check - doesn't probe the daemon
+        // getHeight() returns wallet's internal height, NOT daemon height
+        // getDaemonHeight() actually calls the daemon's get_info RPC
+        let isConnected = false;
+        try {
+            const daemonHeight = await currentWallet.getDaemonHeight();
+            console.log('[MoneroClient] Daemon probe success, daemon height:', daemonHeight);
+            isConnected = true;
+        } catch (e) {
+            console.log('[MoneroClient] Initial daemon probe failed:', e.message);
+
+            // Try explicit setDaemonConnection and probe again
+            console.log('[MoneroClient] Trying setDaemonConnection...');
             try {
                 await currentWallet.setDaemonConnection(serverUri);
-                isConnected = await currentWallet.isConnectedToDaemon();
-                console.log('[MoneroClient] Wallet daemon connected (after setDaemonConnection):', isConnected);
-            } catch (e) {
-                console.warn('[MoneroClient] setDaemonConnection failed:', e.message);
+                const daemonHeight = await currentWallet.getDaemonHeight();
+                console.log('[MoneroClient] After setDaemonConnection, daemon height:', daemonHeight);
+                isConnected = true;
+            } catch (e2) {
+                console.warn('[MoneroClient] setDaemonConnection probe failed:', e2.message);
             }
+        }
+
+        if (!isConnected) {
+            console.error('[MoneroClient] Failed to connect to daemon:', serverUri);
         }
     }
 
     return currentWallet;
+}
+
+/**
+ * Ensure wallet has active daemon connection (especially important for Tor mode)
+ * The WASM wallet may lose connection between operations in main-thread mode
+ * @param {MoneroWalletFull} wallet - The wallet instance
+ * @returns {Promise<void>}
+ */
+async function ensureDaemonConnection(wallet) {
+    if (!wallet) return;
+
+    const torMode = window.location.hostname.endsWith('.onion');
+    if (!torMode) return; // Worker mode maintains connections better
+
+    try {
+        // Quick check - getDaemonHeight actually calls the daemon
+        await wallet.getDaemonHeight();
+    } catch (e) {
+        console.log('[MoneroClient] Daemon connection lost, reconnecting...');
+        const serverUri = currentDaemonUri || getTorDaemonUri();
+        await wallet.setDaemonConnection(serverUri);
+
+        // Verify reconnection
+        const height = await wallet.getDaemonHeight();
+        console.log('[MoneroClient] Reconnected to daemon, height:', height);
+    }
 }
 
 /**
@@ -576,6 +633,7 @@ export async function getBalance() {
     const wallet = await getFullWallet();
     const balance = await wallet.getBalance();
     const unlockedBalance = await wallet.getUnlockedBalance();
+    console.log('[MoneroClient] getBalance() - balance:', balance, 'unlocked:', unlockedBalance);
 
     // Check for recent cached outgoing txs that are NOT yet confirmed on chain
     let pendingOutgoing = 0n;
@@ -585,6 +643,8 @@ export async function getBalance() {
         const oneDayAgo = Math.floor(Date.now() / 1000) - 86400;
 
         // Get confirmed tx hashes to compare
+        // Ensure daemon connection before getTxs (Tor mode may have lost it)
+        await ensureDaemonConnection(wallet);
         const confirmedTxs = await wallet.getTxs();
         const confirmedHashes = new Set(confirmedTxs.map(tx => {
             const hash = typeof tx.getHash === 'function' ? tx.getHash() : tx.hash;
@@ -627,6 +687,85 @@ export async function getReceiveAddress(newSubaddress = false) {
 let pendingTx = null;
 
 /**
+ * Universal getter for monero-ts objects (handles both methods and properties)
+ * @param {Object} item - The monero-ts object
+ * @param {string} propName - Property name (will try getX(), isX(), and .x)
+ * @returns {*} The value or undefined
+ */
+function getVal(item, propName) {
+    if (!item) return undefined;
+    const funcName = 'get' + propName.charAt(0).toUpperCase() + propName.slice(1);
+    if (typeof item[funcName] === 'function') return item[funcName]();
+    const boolName = 'is' + propName.charAt(0).toUpperCase() + propName.slice(1);
+    if (typeof item[boolName] === 'function') return item[boolName]();
+    if (item[propName] !== undefined) return item[propName];
+    return undefined;
+}
+
+/**
+ * Reconstruct a MoneroOutput into a clean, serializable object
+ * Fixes Tor Browser Web Worker serialization issues:
+ * - BigInt -> String (Tor postMessage doesn't support BigInt)
+ * - globalIndex mapping (monero-ts expects globalIndex, raw objects have index)
+ * - Strips circular references (Coin -> Tx -> Coin)
+ * @param {Object} output - Raw MoneroOutput from wallet.getOutputs()
+ * @returns {Object} Clean, serializable input object for createTx
+ */
+function reconstructInput(output) {
+    // Extract globalIndex - check getGlobalIndex(), globalIndex, then index
+    let globalIndex = getVal(output, 'globalIndex');
+    if (globalIndex === undefined) {
+        globalIndex = getVal(output, 'index');
+    }
+
+    // Extract keyImage (can be string, object with hex, or has getHex())
+    let keyImageHex;
+    const rawKeyImage = getVal(output, 'keyImage');
+    if (typeof rawKeyImage === 'string') {
+        keyImageHex = rawKeyImage;
+    } else if (rawKeyImage && typeof rawKeyImage.getHex === 'function') {
+        keyImageHex = rawKeyImage.getHex();
+    } else if (rawKeyImage && rawKeyImage.hex) {
+        keyImageHex = rawKeyImage.hex;
+    }
+
+    // Extract tx metadata (stripped of circular refs)
+    const txObj = getVal(output, 'tx');
+    const txData = txObj ? {
+        hash: getVal(txObj, 'hash'),
+        version: getVal(txObj, 'version'),
+        unlockTime: getVal(txObj, 'unlockTime'),
+        isConfirmed: getVal(txObj, 'confirmed'),
+        height: getVal(txObj, 'height')
+    } : undefined;
+
+    return {
+        amount: getVal(output, 'amount')?.toString(),
+        keyImage: keyImageHex ? { hex: keyImageHex } : undefined,
+        globalIndex: globalIndex,
+        tx: txData
+    };
+}
+
+/**
+ * Get sanitized unspent outputs for Tor Browser compatibility
+ * @param {Object} wallet - The monero-ts wallet instance
+ * @returns {Promise<Array>} Array of reconstructed inputs sorted by amount (largest first)
+ */
+async function getSanitizedOutputs(wallet) {
+    const outputs = await wallet.getOutputs({ isSpent: false });
+
+    // Sort by amount descending (use largest coins first to minimize inputs)
+    outputs.sort((a, b) => {
+        const valA = BigInt(getVal(a, 'amount') || 0);
+        const valB = BigInt(getVal(b, 'amount') || 0);
+        return (valA < valB) ? 1 : (valA > valB) ? -1 : 0;
+    });
+
+    return outputs.map(reconstructInput);
+}
+
+/**
  * Convert priority string to monero-ts enum
  */
 function getPriorityEnum(priority) {
@@ -651,16 +790,76 @@ export async function createTransaction(address, amount, priority = 'normal') {
     const wallet = await getFullWallet();
     const MoneroTS = getMoneroTS();
 
-    const txConfig = new MoneroTS.MoneroTxConfig({
-        accountIndex: 0,
-        address: address,
-        amount: BigInt(amount),
-        priority: getPriorityEnum(priority),
-        relay: false  // Don't broadcast yet
-    });
+    // Ensure daemon connection before creating tx (Tor mode may have lost it)
+    await ensureDaemonConnection(wallet);
 
-    console.log('[MoneroClient] Creating transaction (not relaying)...');
-    pendingTx = await wallet.createTx(txConfig);
+    const requestedAmount = BigInt(amount);
+
+    // For Tor Browser: Use reconstruction pattern to avoid Worker serialization bugs
+    // (BigInt serialization, circular refs, missing globalIndex)
+    if (isTorAccess()) {
+        console.log('[MoneroClient] Tor mode: Using reconstruction pattern for createTx');
+
+        // Get sanitized outputs (sorted largest-first)
+        const sanitizedOutputs = await getSanitizedOutputs(wallet);
+
+        if (sanitizedOutputs.length === 0) {
+            throw new Error('No unspent outputs available');
+        }
+
+        // Select inputs to cover the requested amount + estimated fee
+        // Fee estimate: ~0.0001 XMR per input (conservative)
+        const FEE_PER_INPUT = 100000000n; // 0.0001 XMR in atomic units
+        const BASE_FEE = 50000000n; // 0.00005 XMR base fee
+
+        let selectedInputs = [];
+        let totalInputAmount = 0n;
+        let estimatedFee = BASE_FEE;
+
+        for (const input of sanitizedOutputs) {
+            if (!input.amount || !input.globalIndex) {
+                console.warn('[MoneroClient] Skipping invalid input:', input);
+                continue;
+            }
+
+            selectedInputs.push(input);
+            totalInputAmount += BigInt(input.amount);
+            estimatedFee = BASE_FEE + (BigInt(selectedInputs.length) * FEE_PER_INPUT);
+
+            // Stop when we have enough to cover amount + fee
+            if (totalInputAmount >= requestedAmount + estimatedFee) {
+                break;
+            }
+        }
+
+        if (totalInputAmount < requestedAmount + estimatedFee) {
+            throw new Error(`Insufficient funds. Have: ${totalInputAmount}, need: ${requestedAmount + estimatedFee}`);
+        }
+
+        console.log(`[MoneroClient] Selected ${selectedInputs.length} inputs, total: ${totalInputAmount}`);
+
+        // Create transaction with explicit inputs
+        const txConfig = {
+            accountIndex: 0,
+            destinations: [{ address: address, amount: requestedAmount.toString() }],
+            inputs: selectedInputs,
+            priority: getPriorityEnum(priority),
+            relay: false
+        };
+
+        pendingTx = await wallet.createTx(txConfig);
+    } else {
+        // Standard path for non-Tor browsers
+        const txConfig = new MoneroTS.MoneroTxConfig({
+            accountIndex: 0,
+            address: address,
+            amount: requestedAmount,
+            priority: getPriorityEnum(priority),
+            relay: false
+        });
+
+        pendingTx = await wallet.createTx(txConfig);
+    }
 
     // Get fee using safe accessor
     const fee = typeof pendingTx.getFee === 'function' ? pendingTx.getFee() : pendingTx.fee;
@@ -668,7 +867,7 @@ export async function createTransaction(address, amount, priority = 'normal') {
 
     return {
         fee: fee,
-        amount: BigInt(amount),
+        amount: requestedAmount,
         address: address,
         txHash: txHash
     };
@@ -684,26 +883,83 @@ export async function createBatchTransaction(destinations, priority = 'normal') 
     const wallet = await getFullWallet();
     const MoneroTS = getMoneroTS();
 
-    // Convert destinations to MoneroDestination objects
-    const moneroDestinations = destinations.map(dest => {
-        return new MoneroTS.MoneroDestination({
-            address: dest.address,
-            amount: BigInt(dest.amount)
-        });
-    });
+    // Ensure daemon connection before creating tx (Tor mode may have lost it)
+    await ensureDaemonConnection(wallet);
 
     // Calculate total amount
     const totalAmount = destinations.reduce((sum, dest) => sum + BigInt(dest.amount), 0n);
 
-    const txConfig = new MoneroTS.MoneroTxConfig({
-        accountIndex: 0,
-        destinations: moneroDestinations,
-        priority: getPriorityEnum(priority),
-        relay: false  // Don't broadcast yet
-    });
+    // For Tor Browser: Use reconstruction pattern to avoid Worker serialization bugs
+    if (isTorAccess()) {
+        console.log('[MoneroClient] Tor mode: Using reconstruction pattern for batch createTx');
 
-    console.log('[MoneroClient] Creating batch transaction with', destinations.length, 'destinations...');
-    pendingTx = await wallet.createTx(txConfig);
+        // Get sanitized outputs (sorted largest-first)
+        const sanitizedOutputs = await getSanitizedOutputs(wallet);
+
+        if (sanitizedOutputs.length === 0) {
+            throw new Error('No unspent outputs available');
+        }
+
+        // Select inputs to cover total amount + estimated fee
+        const FEE_PER_INPUT = 100000000n;
+        const FEE_PER_OUTPUT = 50000000n;
+        const BASE_FEE = 50000000n;
+
+        let selectedInputs = [];
+        let totalInputAmount = 0n;
+        let estimatedFee = BASE_FEE + (BigInt(destinations.length) * FEE_PER_OUTPUT);
+
+        for (const input of sanitizedOutputs) {
+            if (!input.amount || !input.globalIndex) {
+                continue;
+            }
+
+            selectedInputs.push(input);
+            totalInputAmount += BigInt(input.amount);
+            estimatedFee = BASE_FEE + (BigInt(selectedInputs.length) * FEE_PER_INPUT) + (BigInt(destinations.length) * FEE_PER_OUTPUT);
+
+            if (totalInputAmount >= totalAmount + estimatedFee) {
+                break;
+            }
+        }
+
+        if (totalInputAmount < totalAmount + estimatedFee) {
+            throw new Error(`Insufficient funds. Have: ${totalInputAmount}, need: ${totalAmount + estimatedFee}`);
+        }
+
+        // Convert destinations to plain objects with string amounts
+        const plainDestinations = destinations.map(dest => ({
+            address: dest.address,
+            amount: BigInt(dest.amount).toString()
+        }));
+
+        const txConfig = {
+            accountIndex: 0,
+            destinations: plainDestinations,
+            inputs: selectedInputs,
+            priority: getPriorityEnum(priority),
+            relay: false
+        };
+
+        pendingTx = await wallet.createTx(txConfig);
+    } else {
+        // Standard path for non-Tor browsers
+        const moneroDestinations = destinations.map(dest => {
+            return new MoneroTS.MoneroDestination({
+                address: dest.address,
+                amount: BigInt(dest.amount)
+            });
+        });
+
+        const txConfig = new MoneroTS.MoneroTxConfig({
+            accountIndex: 0,
+            destinations: moneroDestinations,
+            priority: getPriorityEnum(priority),
+            relay: false
+        });
+
+        pendingTx = await wallet.createTx(txConfig);
+    }
 
     // Get fee using safe accessor
     const fee = typeof pendingTx.getFee === 'function' ? pendingTx.getFee() : pendingTx.fee;
@@ -756,7 +1012,6 @@ export async function relayTransaction(recipients = null) {
     // Method 1: wallet.relayTx with transaction object
     if (!relaySuccess) {
         try {
-            console.log('[MoneroClient] Relaying transaction (method 1: relayTx object)...');
             await wallet.relayTx(pendingTx);
             relaySuccess = true;
         } catch (e) {
@@ -773,7 +1028,6 @@ export async function relayTransaction(recipients = null) {
                 : pendingTx.metadata;
 
             if (txMetadata) {
-                console.log('[MoneroClient] Relaying transaction (method 2: relayTx metadata)...');
                 await wallet.relayTx(txMetadata);
                 relaySuccess = true;
             }
@@ -786,17 +1040,23 @@ export async function relayTransaction(recipients = null) {
     // Method 3: Direct daemon submission with full hex
     if (!relaySuccess && txFullHex) {
         try {
-            console.log('[MoneroClient] Relaying transaction (method 3: submitTxHex)...');
             const MoneroTS = getMoneroTS();
             const daemon = await MoneroTS.connectToDaemonRpc(currentDaemonUri || getClearnetDaemonUri());
             const result = await daemon.submitTxHex(txFullHex, false); // false = do relay
 
-            // Check submission result
-            if (result && !result.isDoubleSpendSeen() && !result.isFeeTooLow()) {
+            // Check submission result - handle both object methods and plain properties
+            const isDoubleSpend = typeof result.isDoubleSpendSeen === 'function'
+                ? result.isDoubleSpendSeen()
+                : result.isDoubleSpendSeen;
+            const isFeeLow = typeof result.isFeeTooLow === 'function'
+                ? result.isFeeTooLow()
+                : result.isFeeTooLow;
+
+            if (result && !isDoubleSpend && !isFeeLow) {
                 relaySuccess = true;
             } else {
-                const reason = result.isDoubleSpendSeen() ? 'double spend' :
-                              result.isFeeTooLow() ? 'fee too low' : 'unknown';
+                const reason = isDoubleSpend ? 'double spend' :
+                              isFeeLow ? 'fee too low' : 'unknown';
                 console.warn('[MoneroClient] submitTxHex rejected:', reason);
             }
         } catch (e) {
@@ -808,7 +1068,6 @@ export async function relayTransaction(recipients = null) {
     // Method 4: HTTP POST to daemon's /sendrawtransaction endpoint
     if (!relaySuccess && txFullHex) {
         try {
-            console.log('[MoneroClient] Relaying transaction (method 4: sendrawtransaction)...');
             const daemonUri = currentDaemonUri || getClearnetDaemonUri();
             const response = await fetch(`${daemonUri}/sendrawtransaction`, {
                 method: 'POST',
@@ -865,7 +1124,6 @@ export async function relayTransaction(recipients = null) {
 
         const currentPubkey = await getNostrPubkey();
         await storage.cacheTransaction(txData, currentPubkey);
-        console.log('[MoneroClient] Transaction cached:', txHash, recipients ? `with ${recipients.length} recipients` : '');
     } catch (e) {
         console.warn('[MoneroClient] Could not cache transaction:', e.message);
     }
@@ -882,7 +1140,6 @@ export async function relayTransaction(recipients = null) {
  */
 export function cancelPendingTransaction() {
     pendingTx = null;
-    console.log('[MoneroClient] Pending transaction cancelled');
 }
 
 /**
@@ -911,7 +1168,6 @@ export async function send(address, amount, priority = 'normal') {
         relay: true
     });
 
-    console.log('[MoneroClient] Sending transaction...');
     const tx = await wallet.createTx(txConfig);
 
     const fee = typeof tx.getFee === 'function' ? tx.getFee() : tx.fee;
@@ -928,7 +1184,6 @@ export async function send(address, amount, priority = 'normal') {
 export async function sweepAll(address) {
     const wallet = await getFullWallet();
 
-    console.log('[MoneroClient] Sweeping all funds...');
     const txs = await wallet.sweepUnlocked({
         address: address,
         relay: true
@@ -953,9 +1208,9 @@ export async function getTransactions(limit = 50) {
     let txs = [];
     try {
         txs = await wallet.getTxs();
-        console.log('[MoneroClient] getTxs returned:', txs?.length || 0, 'transactions');
+        console.log('[MoneroClient] getTransactions() - raw txs count:', txs?.length || 0);
     } catch (e) {
-        console.error('[MoneroClient] getTxs failed:', e);
+        console.log('[MoneroClient] getTransactions() - error:', e.message);
         txs = [];
     }
 
@@ -1067,17 +1322,14 @@ export async function sync(onProgress) {
     const wallet = await getFullWallet();
     const currentPubkey = await getNostrPubkey();
 
-    // Delta sync: Load last synced height to resume from where we left off
-    // This avoids re-scanning the entire blockchain on every unlock
-    let startHeight = undefined;
-    if (currentPubkey) {
-        const syncState = await storage.loadSyncState(currentPubkey);
-        if (syncState?.height) {
-            // Go back a few blocks for safety (reorgs, missed blocks)
-            startHeight = Math.max(0, syncState.height - 10);
-            console.log('[MoneroClient] Delta sync from height', startHeight);
-        }
-    }
+    // Ensure daemon connection before sync (Tor mode may have lost it)
+    await ensureDaemonConnection(wallet);
+
+    // Delta sync is now supported via wallet cache:
+    // - On first sync (or if cache is missing), wallet syncs from restoreHeight
+    // - After sync, we save wallet state via getData() to IndexedDB
+    // - On next unlock, we restore from cache and only sync new blocks
+    // The wallet's internal state knows where it left off when restored from cache.
 
     // Create a proper listener that extends MoneroWalletListener
     // monero-ts checks instanceof MoneroWalletListener, so plain objects don't work
@@ -1105,22 +1357,68 @@ export async function sync(onProgress) {
     const listener = new SyncListener(onProgress);
 
     try {
-        // Pass listener as first param and startHeight as second param
+        // Wallet syncs from its internal state (restored from cache) or restoreHeight (first sync)
         // monero-ts sync() signature: sync(listenerOrStartHeight?, startHeight?, allowConcurrentCalls?)
-        // The listener MUST be an instance of MoneroWalletListener for this to work correctly
-        await wallet.sync(listener, startHeight);
+        await wallet.sync(listener);
     } catch (e) {
         console.error('[MoneroClient] Sync error:', e);
         throw e;
     }
 
-    // Save sync state
     const height = await wallet.getHeight();
-    if (currentPubkey) {
-        await storage.saveSyncState(currentPubkey, { height });
+
+    // Save wallet state for delta sync on next unlock
+    // getData() exports full wallet state including transaction cache
+    if (currentPubkey && decryptedKeys) {
+        try {
+            console.log('[MoneroClient] Saving wallet cache for delta sync...');
+            const walletDataArrays = await wallet.getData();
+
+            // getData() returns [keysData, cacheData] - two Uint8Arrays
+            // We need to serialize them into a single buffer for storage
+            // Format: [4 bytes: keys length] [keys data] [cache data]
+            let walletDataBytes;
+            if (Array.isArray(walletDataArrays) && walletDataArrays.length === 2) {
+                const keysData = walletDataArrays[0];
+                const cacheData = walletDataArrays[1];
+                console.log('[MoneroClient] Keys data:', keysData.length, 'bytes, Cache data:', cacheData.length, 'bytes');
+
+                // Combine into single buffer with length prefix
+                walletDataBytes = new Uint8Array(4 + keysData.length + cacheData.length);
+                const view = new DataView(walletDataBytes.buffer);
+                view.setUint32(0, keysData.length, true); // little-endian
+                walletDataBytes.set(keysData, 4);
+                walletDataBytes.set(cacheData, 4 + keysData.length);
+            } else if (walletDataArrays instanceof Uint8Array) {
+                // Single Uint8Array (unexpected but handle it)
+                walletDataBytes = walletDataArrays;
+            } else {
+                throw new Error('Unexpected getData() format: ' + typeof walletDataArrays);
+            }
+
+            console.log('[MoneroClient] Total wallet data size:', walletDataBytes.length, 'bytes');
+
+            // Encrypt with privateViewKey
+            const encryptedCache = await walletCrypto.encryptWalletCache(
+                decryptedKeys.privateViewKey,
+                walletDataBytes
+            );
+
+            // Save to IndexedDB
+            await storage.saveWalletCache(currentPubkey, {
+                encrypted_data: encryptedCache.encrypted_data,
+                iv: encryptedCache.iv,
+                salt: encryptedCache.salt,
+                height: height
+            });
+
+            console.log('[MoneroClient] Wallet cache saved at height:', height);
+        } catch (e) {
+            // Non-fatal - delta sync just won't work next time
+            console.warn('[MoneroClient] Failed to save wallet cache:', e.message);
+        }
     }
 
-    console.log('[MoneroClient] Sync complete at height', height);
     return { height };
 }
 
@@ -1135,7 +1433,6 @@ export async function deleteWallet() {
     }
     lock();
     await storage.deleteWallet(currentPubkey);
-    console.log('[MoneroClient] Wallet deleted for user:', currentPubkey.substring(0, 8));
 }
 
 /**

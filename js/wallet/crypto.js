@@ -220,3 +220,87 @@ export function secureWipe(obj) {
         }
     }
 }
+
+/**
+ * Derive an encryption key from privateViewKey for wallet cache encryption
+ * Uses PBKDF2 with fewer iterations since viewKey is already high-entropy (256 bits)
+ * @param {string} privateViewKey - Hex string of private view key
+ * @param {Uint8Array} salt - Random salt
+ * @returns {Promise<CryptoKey>}
+ */
+async function deriveKeyFromViewKey(privateViewKey, salt) {
+    // Convert hex to bytes
+    const keyBytes = new Uint8Array(privateViewKey.match(/.{2}/g).map(b => parseInt(b, 16)));
+
+    const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        keyBytes,
+        'PBKDF2',
+        false,
+        ['deriveKey']
+    );
+
+    // Fewer iterations since viewKey is already 256-bit entropy (not a weak PIN)
+    return crypto.subtle.deriveKey(
+        {
+            name: 'PBKDF2',
+            salt: salt,
+            iterations: 10000,  // Lower iterations OK for high-entropy input
+            hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: 'AES-GCM', length: KEY_LENGTH },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+
+/**
+ * Encrypt wallet cache data using privateViewKey
+ * The cache contains privacy-sensitive data (which outputs belong to you)
+ * @param {string} privateViewKey - Hex string of private view key
+ * @param {Uint8Array} data - Raw wallet data from getData()
+ * @returns {Promise<{encrypted_data: Uint8Array, iv: Uint8Array, salt: Uint8Array}>}
+ */
+export async function encryptWalletCache(privateViewKey, data) {
+    const salt = generateSalt();
+    const iv = generateIV();
+    const key = await deriveKeyFromViewKey(privateViewKey, salt);
+
+    const ciphertext = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        data
+    );
+
+    return {
+        encrypted_data: new Uint8Array(ciphertext),
+        iv: iv,
+        salt: salt
+    };
+}
+
+/**
+ * Decrypt wallet cache data using privateViewKey
+ * @param {string} privateViewKey - Hex string of private view key
+ * @param {Uint8Array} encrypted_data - Encrypted cache data
+ * @param {Uint8Array} iv - Initialization vector
+ * @param {Uint8Array} salt - PBKDF2 salt
+ * @returns {Promise<Uint8Array>} Decrypted wallet data
+ */
+export async function decryptWalletCache(privateViewKey, encrypted_data, iv, salt) {
+    const key = await deriveKeyFromViewKey(privateViewKey, salt);
+
+    try {
+        const plaintext = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: iv },
+            key,
+            encrypted_data
+        );
+
+        return new Uint8Array(plaintext);
+    } catch (error) {
+        console.warn('[WalletCrypto] Failed to decrypt wallet cache:', error.message);
+        return null;
+    }
+}
