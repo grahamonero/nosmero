@@ -84,8 +84,13 @@ export function showLoginModal() {
     const modal = document.getElementById('loginModal');
     if (modal) {
         modal.classList.add('show');
+        // Ensure login sections are visible (not blank modal)
+        document.getElementById('loginMainButtons')?.classList.remove('hidden');
+        document.getElementById('returningUserSection')?.classList.remove('hidden');
     }
 }
+// Make available globally immediately (needed for onclick handlers in dynamic content)
+window.showLoginModal = showLoginModal;
 
 export function hideLoginModal() {
     const modal = document.getElementById('loginModal');
@@ -93,6 +98,121 @@ export function hideLoginModal() {
         modal.classList.remove('show');
     }
 }
+
+// ==================== LOGIN MODAL SECTION TOGGLES ====================
+
+// Hide all login modal sections
+function hideAllLoginSections() {
+    const sections = [
+        'returningUserSection',
+        'newUserSection',
+        'emailPasswordSignupSection',
+        'keysOnlySignupSection',
+        'forgotPasswordSection',
+        'loginWithNsecSection',
+        'loginWithAmberSection',
+        'keyDisplaySection',
+        'quickLoginSection',
+        'loginMainButtons'
+    ];
+    sections.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+}
+
+// Show login modal with login form visible
+export function showLoginModalWithLogin() {
+    const modal = document.getElementById('loginModal');
+    if (modal) {
+        modal.classList.add('show');
+        hideAllLoginSections();
+        document.getElementById('loginMainButtons')?.classList.remove('hidden');
+        document.getElementById('returningUserSection')?.classList.remove('hidden');
+        // Update header
+        const header = document.getElementById('loginModalHeader');
+        if (header) header.textContent = 'Log In';
+        document.getElementById('emailOrUsernameInput')?.focus();
+    }
+}
+
+// Show login modal with create account form visible
+export function showCreateAccountModal() {
+    const modal = document.getElementById('loginModal');
+    if (modal) {
+        modal.classList.add('show');
+        hideAllLoginSections();
+        document.getElementById('newUserSection')?.classList.remove('hidden');
+        // Update header
+        const header = document.getElementById('loginModalHeader');
+        if (header) header.textContent = 'Create Account';
+        document.getElementById('displayNameInput')?.focus();
+    }
+}
+
+// Show nsec login section in modal
+export function showLoginWithNsecSection() {
+    hideAllLoginSections();
+    document.getElementById('loginWithNsecSection')?.classList.remove('hidden');
+    const header = document.getElementById('loginModalHeader');
+    if (header) header.textContent = 'Login with nsec';
+    document.getElementById('nsecInput')?.focus();
+}
+
+// Show Amber login section in modal
+export function showLoginWithAmberSection() {
+    hideAllLoginSections();
+    document.getElementById('loginWithAmberSection')?.classList.remove('hidden');
+    const header = document.getElementById('loginModalHeader');
+    if (header) header.textContent = 'Login with Amber';
+    document.getElementById('amberBunkerInput')?.focus();
+}
+
+// Back to main login options
+export function backToLoginOptions() {
+    hideAllLoginSections();
+    document.getElementById('loginMainButtons')?.classList.remove('hidden');
+    document.getElementById('returningUserSection')?.classList.remove('hidden');
+    const header = document.getElementById('loginModalHeader');
+    if (header) header.textContent = 'Log In';
+}
+
+// Make functions globally available
+window.showLoginModalWithLogin = showLoginModalWithLogin;
+window.showCreateAccountModal = showCreateAccountModal;
+window.showLoginWithNsecSection = showLoginWithNsecSection;
+window.showLoginWithAmberSection = showLoginWithAmberSection;
+window.backToLoginOptions = backToLoginOptions;
+
+// Toggle recovery fields visibility
+export function toggleRecoverySection() {
+    const checkbox = document.getElementById('enableRecoveryCheckbox');
+    const section = document.getElementById('recoveryFieldsSection');
+    if (section) {
+        section.style.display = checkbox?.checked ? 'block' : 'none';
+    }
+}
+window.toggleRecoverySection = toggleRecoverySection;
+
+// Show email/password signup form
+export function showEmailPasswordSignup() {
+    hideAllLoginSections();
+    document.getElementById('emailPasswordSignupSection')?.classList.remove('hidden');
+    const header = document.getElementById('loginModalHeader');
+    if (header) header.textContent = 'Create Account';
+    document.getElementById('displayNameInput')?.focus();
+}
+window.showEmailPasswordSignup = showEmailPasswordSignup;
+
+// Show keys-only signup form
+export function showKeysOnlySignup() {
+    hideAllLoginSections();
+    document.getElementById('keysOnlySignupSection')?.classList.remove('hidden');
+    const header = document.getElementById('loginModalHeader');
+    if (header) header.textContent = 'Create Account';
+    document.getElementById('keysOnlyDisplayNameInput')?.focus();
+}
+window.showKeysOnlySignup = showKeysOnlySignup;
 
 // Show create account interface
 export function showCreateAccount() {
@@ -1692,19 +1812,31 @@ export async function openThreadView(eventId, skipHistory = false) {
 
         // Render thread with proper nesting
         let threadHtml = '';
-        async function renderThreadNode(node, depth = 0) {
+        async function renderThreadNode(node, depth = 0, parentNode = null) {
             const isMainPost = node.post.id === eventId;
             const indent = Math.min(depth * 20, 100); // Max indent of 100px
 
-            let html = `<div class="thread-post ${isMainPost ? 'main-post' : ''}" style="margin-bottom: 12px; margin-left: ${indent}px;">`;
+            let html = '';
+
+            // Add "Replying to" indicator for replies (non-root posts)
+            if (parentNode && depth > 0) {
+                const parentProfile = State.profileCache[parentNode.post.pubkey];
+                const parentName = parentProfile?.name || parentProfile?.display_name || parentNode.post.pubkey.slice(0, 8) + '...';
+                html += `<div style="margin-left: ${indent}px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                    <div style="width: 2px; height: 16px; background: #444; margin-left: 20px;"></div>
+                    <span style="color: #666; font-size: 12px;">↑ Replying to <span style="color: #888;">@${parentName}</span></span>
+                </div>`;
+            }
+
+            html += `<div class="thread-post ${isMainPost ? 'main-post' : ''}" style="margin-bottom: 12px; margin-left: ${indent}px; ${depth > 0 ? 'border-left: 2px solid #333; padding-left: 12px;' : ''}">`;
             html += await Posts.renderSinglePost(node.post, isMainPost ? 'highlight' : 'thread', engagementData);
             html += '</div>';
-            
-            // Render replies
+
+            // Render replies, passing current node as parent
             for (const reply of node.replies) {
-                html += await renderThreadNode(reply, depth + 1);
+                html += await renderThreadNode(reply, depth + 1, node);
             }
-            
+
             return html;
         }
         
@@ -1911,18 +2043,20 @@ const PROFILE_POSTS_PER_PAGE = 30;
 async function fetchUserPosts(pubkey) {
     try {
         // Import required modules
-        const [StateModule, RelaysModule, UtilsModule] = await Promise.all([
+        const [StateModule, RelaysModule, UtilsModule, PostsModule] = await Promise.all([
             import('./state.js'),
             import('./relays.js'),
-            import('./utils.js')
+            import('./utils.js'),
+            import('./posts.js')
         ]);
 
         const userPostsContainer = document.getElementById('userPostsContainer');
         if (!userPostsContainer) return;
 
-        const userPosts = [];
+        const rawEvents = [];
+        const processedIds = new Set();
+        const repostEventIdsToFetch = []; // For reposts with only 'e' tag (no embedded content)
         let hasReceivedPosts = false;
-        let moneroAddressesFetched = false; // Track if we already fetched Monero addresses
 
         // Create timeout for loading
         const timeout = setTimeout(() => {
@@ -1947,46 +2081,75 @@ async function fetchUserPosts(pubkey) {
                 limit: 100 // Get user's last 100 posts/reposts
             }
         ], {
-            async onevent(event) {
+            onevent(event) {
                 hasReceivedPosts = true;
                 clearTimeout(timeout);
 
-                // Import posts module for repost normalization
-                const PostsModule = await import('./posts.js');
+                if (!processedIds.has(event.id)) {
+                    rawEvents.push(event);
+                    processedIds.add(event.id);
 
-                // Normalize reposts (kind 6) to extract original post
-                const { post, reposter, repostId, repostTimestamp } = PostsModule.normalizeEventForDisplay(event);
-
-                if (!post) {
-                    // Skip unparseable reposts
-                    return;
+                    // If this is a kind 6 repost with only 'e' tag, collect the ID to fetch
+                    if (event.kind === 6 && (!event.content || !event.content.trim().startsWith('{'))) {
+                        const eTag = event.tags.find(t => t[0] === 'e');
+                        if (eTag && eTag[1]) {
+                            repostEventIdsToFetch.push(eTag[1]);
+                        }
+                    }
                 }
-
-                // Check for duplicates by original post ID
-                if (userPosts.find(p => p.id === post.id)) {
-                    return;
-                }
-
-                // Store repost context on the post for later rendering
-                if (reposter) {
-                    post._repostContext = { reposter, repostId, repostTimestamp };
-                    post._sortTimestamp = repostTimestamp;
-                } else {
-                    post._sortTimestamp = post.created_at;
-                }
-
-                userPosts.push(post);
-                // ALSO add to global event cache so repost/reply can find it
-                StateModule.eventCache[post.id] = post;
-
-                // Sort by sort timestamp (repost time or original post time)
-                userPosts.sort((a, b) => (b._sortTimestamp || b.created_at) - (a._sortTimestamp || a.created_at));
-
-                // Just collect events - don't render until oneose
             },
             async oneose() {
                 clearTimeout(timeout);
                 sub.close();
+
+                console.log('Received', rawEvents.length, 'raw events (including reposts)');
+
+                // Fetch original posts for reposts that only had 'e' tags
+                let fetchedOriginals = {};
+                if (repostEventIdsToFetch.length > 0) {
+                    console.log('Fetching', repostEventIdsToFetch.length, 'original posts for e-tag reposts');
+                    fetchedOriginals = await fetchOriginalPostsForRepostsUI(StateModule, RelaysModule, repostEventIdsToFetch);
+                }
+
+                // Normalize events: extract original posts from reposts (kind 6)
+                const userPosts = [];
+                const seenOriginalIds = new Set();
+
+                for (const event of rawEvents) {
+                    let { post, reposter, repostId, repostTimestamp } = PostsModule.normalizeEventForDisplay(event);
+
+                    // If normalizeEventForDisplay returned null post (e-tag only repost), use fetched original
+                    if (!post && event.kind === 6) {
+                        const eTag = event.tags.find(t => t[0] === 'e');
+                        if (eTag && eTag[1] && fetchedOriginals[eTag[1]]) {
+                            post = fetchedOriginals[eTag[1]];
+                            reposter = event.pubkey;
+                            repostId = event.id;
+                            repostTimestamp = event.created_at;
+                        }
+                    }
+
+                    if (!post) continue; // Skip if we still couldn't get the original post
+
+                    // De-duplicate by original post ID
+                    if (seenOriginalIds.has(post.id)) continue;
+                    seenOriginalIds.add(post.id);
+
+                    // Store repost context on the post for rendering
+                    if (reposter) {
+                        post._repostContext = { reposter, repostId, repostTimestamp };
+                        post._sortTimestamp = repostTimestamp;
+                    } else {
+                        post._sortTimestamp = post.created_at;
+                    }
+
+                    userPosts.push(post);
+                    // ALSO add to global event cache so repost/reply can find it
+                    StateModule.eventCache[post.id] = post;
+                }
+
+                // Sort by sort timestamp (repost time or original post time)
+                userPosts.sort((a, b) => (b._sortTimestamp || b.created_at) - (a._sortTimestamp || a.created_at));
 
                 if (userPosts.length === 0) {
                     userPostsContainer.innerHTML = `
@@ -1997,7 +2160,6 @@ async function fetchUserPosts(pubkey) {
                     `;
                 } else {
                     // Fetch profiles for final render
-                    const PostsModule = await import('./posts.js');
                     const allAuthors = [...new Set(userPosts.map(post => post.pubkey))];
                     await PostsModule.fetchProfiles(allAuthors);
 
@@ -2023,6 +2185,34 @@ async function fetchUserPosts(pubkey) {
             `;
         }
     }
+}
+
+// Fetch original posts for reposts that only have 'e' tags (for UI profile viewing)
+async function fetchOriginalPostsForRepostsUI(StateModule, RelaysModule, eventIds) {
+    if (!eventIds.length) return {};
+
+    const results = {};
+
+    return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+            console.log('Timeout fetching original posts for reposts, got', Object.keys(results).length, 'of', eventIds.length);
+            resolve(results);
+        }, 3000);
+
+        const sub = StateModule.pool.subscribeMany(RelaysModule.getActiveRelays(), [
+            { ids: eventIds }
+        ], {
+            onevent(event) {
+                results[event.id] = event;
+            },
+            oneose() {
+                clearTimeout(timeout);
+                sub.close();
+                console.log('Fetched', Object.keys(results).length, 'original posts for e-tag reposts');
+                resolve(results);
+            }
+        });
+    });
 }
 
 async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = null) {

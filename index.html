@@ -24,7 +24,38 @@
             <button class="menu-close" onclick="closeHamburgerMenu()">✕</button>
         </div>
         <div class="menu-nav">
-            <!-- Feed Selection (at TOP of menu) -->
+            <!-- Auth Options (shown when anonymous) - AT TOP for easy access -->
+            <div id="menuLoginOptions" style="display: none; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; padding: 0 16px; font-weight: 600;">GET STARTED</div>
+                <div class="menu-item" onclick="showCreateAccountModal(); closeHamburgerMenu();">
+                    <span class="menu-icon">✨</span>
+                    <span style="color: #FF6600;">Create Account</span>
+                </div>
+                <div class="menu-item" onclick="showLoginModalWithLogin(); closeHamburgerMenu();">
+                    <span class="menu-icon">🔑</span>
+                    <span>Log In</span>
+                </div>
+                <div style="padding: 12px 16px; color: #666; font-size: 12px;">
+                    Already on Nostr?
+                </div>
+                <div class="menu-item" onclick="loginWithExtension(); closeHamburgerMenu();">
+                    <span class="menu-icon">🔌</span>
+                    <span>Use Extension</span>
+                </div>
+                <div class="menu-item" onclick="showLoginWithNsec(); closeHamburgerMenu();">
+                    <span class="menu-icon">📝</span>
+                    <span>Paste nsec</span>
+                </div>
+                <div class="menu-item" onclick="showLoginWithNsecApp(); closeHamburgerMenu();">
+                    <span class="menu-icon">🌐</span>
+                    <span>nsec.app</span>
+                </div>
+                <div class="menu-item" onclick="showLoginWithAmber(); closeHamburgerMenu();">
+                    <span class="menu-icon">📱</span>
+                    <span>Amber</span>
+                </div>
+            </div>
+            <!-- Feed Selection -->
             <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
                 <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; padding: 0 16px; font-weight: 600;">FEEDS</div>
                 <div class="menu-item" onclick="handleFeedMenuClick('following')">
@@ -90,29 +121,6 @@
             <div class="menu-item" onclick="toggleCompose()" id="menuCreateNoteBtn" style="display: none;">
                 <span class="menu-icon">✏️</span>
                 <span>Create Note</span>
-            </div>
-            <!-- Login Options (shown when anonymous) -->
-            <div id="menuLoginOptions" style="display: none; margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-                <div class="menu-item" onclick="showCreateAccount(); closeHamburgerMenu();">
-                    <span class="menu-icon">🆕</span>
-                    <span>Create Account</span>
-                </div>
-                <div class="menu-item" onclick="showLoginWithNsec(); closeHamburgerMenu();">
-                    <span class="menu-icon">🔑</span>
-                    <span>Login with nsec</span>
-                </div>
-                <div class="menu-item" onclick="loginWithExtension(); closeHamburgerMenu();">
-                    <span class="menu-icon">🔌</span>
-                    <span>Use Extension</span>
-                </div>
-                <div class="menu-item" onclick="showLoginWithNsecApp(); closeHamburgerMenu();">
-                    <span class="menu-icon">🌐</span>
-                    <span>Use nsec.app</span>
-                </div>
-                <div class="menu-item" onclick="showLoginWithAmber(); closeHamburgerMenu();">
-                    <span class="menu-icon">📱</span>
-                    <span>Use Amber</span>
-                </div>
             </div>
             <!-- Logged-in user info -->
             <div id="menuUserInfo" style="display: none; margin-top: auto; padding: 1rem; border-top: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.02);">
@@ -374,73 +382,206 @@
 
     <!-- Login Modal -->
     <div class="modal" id="loginModal">
-        <div class="modal-content">
-            <div class="modal-header">Welcome to nosmero</div>
-            <div style="margin-bottom: 20px; color: #ccc; text-align: left;">
-                Choose how you want to get started:
-            </div>
-            
-            <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
-                <button class="login-option-btn" onclick="showCreateAccount()">
-                    🆕 Create New Account
-                </button>
-                <button class="login-option-btn" onclick="showLoginWithNsec()">
-                    🔑 Login with Private Key (nsec)
-                </button>
-                <button class="login-option-btn" onclick="loginWithExtension()">
-                    🔌 Login with Browser Extension
-                </button>
-                <button class="login-option-btn" onclick="showLoginWithNsecApp()">
-                    🌐 Login with nsec.app
-                </button>
-                <button class="login-option-btn" onclick="showLoginWithAmber()">
-                    📱 Login with Amber
-                </button>
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header" id="loginModalHeader">Log In</div>
+
+            <!-- Main Login Buttons -->
+            <div id="loginMainButtons">
+                <!-- Returning User Login Section -->
+                <div id="returningUserSection" class="hidden">
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+                        <button class="login-option-btn" onclick="loginWithExtension()">
+                            <span style="margin-right: 8px;">🔌</span> Browser Extension
+                        </button>
+                        <button class="login-option-btn" onclick="showLoginWithNsecSection()">
+                            <span style="margin-right: 8px;">🔑</span> Paste nsec
+                        </button>
+                        <button class="login-option-btn" onclick="showLoginWithNsecApp()">
+                            <span style="margin-right: 8px;">🌐</span> nsec.app
+                        </button>
+                        <button class="login-option-btn" onclick="showLoginWithAmberSection()">
+                            <span style="margin-right: 8px;">📱</span> Amber (Android)
+                        </button>
+                    </div>
+
+                    <div style="display: flex; align-items: center; margin: 20px 0; gap: 12px;">
+                        <div style="flex: 1; height: 1px; background: #333;"></div>
+                        <span style="color: #666; font-size: 12px;">or with Nosmero username</span>
+                        <div style="flex: 1; height: 1px; background: #333;"></div>
+                    </div>
+
+                    <form id="loginForm" onsubmit="return false;">
+                        <div style="margin-bottom: 12px;">
+                            <input type="text" id="emailOrUsernameInput" placeholder="Username Created on Nosmero"
+                                   style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
+                        </div>
+                        <div style="margin-bottom: 12px;">
+                            <input type="password" id="loginPasswordInput" placeholder="Password"
+                                   style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <button type="submit" id="loginBtn" class="send-btn" onclick="authUI.handleLogin()" style="flex: 1;">Log In</button>
+                            <button type="button" class="text-btn" onclick="authUI.showForgotPassword()" style="color: #8B5CF6; font-size: 13px;">Forgot?</button>
+                        </div>
+                    </form>
+
+                    <div style="text-align: center; margin-top: 20px;">
+                        <button class="text-btn" onclick="showCreateAccountModal()" style="color: #FF6600; font-size: 14px;">
+                            New to Nostr? Create Account
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Quick Login Buttons (legacy, hidden by default) -->
+                <div id="quickLoginSection" class="hidden"></div>
             </div>
 
-            <!-- Create Account Section -->
-            <div id="createAccountSection" style="display: none;">
-                <div style="margin-bottom: 16px; color: #ccc; font-size: 14px;">
-                    We'll generate a new private key for you. Make sure to save it!
+            <!-- New User Section - Choose Method -->
+            <div id="newUserSection" class="hidden">
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <button class="login-option-btn" onclick="showEmailPasswordSignup()" style="text-align: left; padding: 16px;">
+                        <div style="font-weight: 600; margin-bottom: 4px;">Create with Username/Password</div>
+                        <div style="font-size: 12px; color: #888;">Familiar login experience - Nostr keys generated & encrypted with your password</div>
+                        <div style="font-size: 11px; color: #8B5CF6; margin-top: 4px;">Export your nsec/npub anytime to use elsewhere</div>
+                    </button>
+                    <button class="login-option-btn" onclick="showKeysOnlySignup()" style="text-align: left; padding: 16px;">
+                        <div style="font-weight: 600; margin-bottom: 4px;">Just Generate Keys</div>
+                        <div style="font-size: 12px; color: #888;">Advanced - You save and manage your own keys</div>
+                    </button>
                 </div>
-                <button class="send-btn" onclick="createNewAccount()">Generate New Keys</button>
-                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
+                <div style="text-align: center; margin-top: 16px;">
+                    <button class="text-btn" onclick="showLoginModalWithLogin()" style="color: #8B5CF6; font-size: 14px;">
+                        Already have an account? Log In
+                    </button>
+                </div>
+            </div>
+
+            <!-- Email/Password Signup Form (Username-only, no email stored) -->
+            <div id="emailPasswordSignupSection" class="hidden">
+                <form id="signupForm" onsubmit="return false;">
+                    <!-- Display Name -->
+                    <div style="margin-bottom: 16px;">
+                        <input type="text" id="displayNameInput" placeholder="Display name (e.g., John Smith)"
+                               style="width: 100%; padding: 14px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 15px;">
+                        <div style="font-size: 11px; color: #888; margin-top: 4px;">Public - This name appears on your posts and profile</div>
+                    </div>
+
+                    <!-- Username (required) -->
+                    <div style="margin-bottom: 12px;">
+                        <input type="text" id="signupUsernameInput" placeholder="Username (you'll log in with this)"
+                               style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;"
+                               oninput="checkUsernameAvailability(this.value)">
+                        <div style="font-size: 11px; color: #888; margin-top: 2px;">Private - Only you see this. Letters, numbers, underscore (3-20 chars)</div>
+                        <div id="usernameAvailability" style="font-size: 11px; margin-top: 2px; min-height: 16px;"></div>
+                    </div>
+
+                    <!-- Password with strength indicator -->
+                    <div style="margin-bottom: 12px;">
+                        <input type="password" id="signupPasswordInput" placeholder="Password (min 8 characters)"
+                               style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;"
+                               oninput="updatePasswordStrength(this.value)">
+                        <!-- Password strength meter -->
+                        <div style="margin-top: 8px;">
+                            <div style="display: flex; gap: 4px; margin-bottom: 4px;">
+                                <div id="strengthBar1" style="flex: 1; height: 4px; background: #333; border-radius: 2px;"></div>
+                                <div id="strengthBar2" style="flex: 1; height: 4px; background: #333; border-radius: 2px;"></div>
+                                <div id="strengthBar3" style="flex: 1; height: 4px; background: #333; border-radius: 2px;"></div>
+                                <div id="strengthBar4" style="flex: 1; height: 4px; background: #333; border-radius: 2px;"></div>
+                            </div>
+                            <div id="strengthText" style="font-size: 11px; color: #888;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Confirm Password -->
+                    <div style="margin-bottom: 12px;">
+                        <input type="password" id="confirmPasswordInput" placeholder="Confirm password"
+                               style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
+                    </div>
+
+                    <!-- Password security explanation -->
+                    <div style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border: 1px solid rgba(139, 92, 246, 0.2);">
+                        <div style="color: #8B5CF6; font-weight: 600; font-size: 12px; margin-bottom: 6px;">Why password strength matters</div>
+                        <div style="color: #aaa; font-size: 11px; line-height: 1.5;">
+                            Your password encrypts your private key. If Nosmero's database were ever compromised, a strong password protects your identity from being stolen. Use 12+ characters with mixed case, numbers, and symbols.
+                        </div>
+                    </div>
+
+                    <!-- Optional nsec backup email -->
+                    <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 255, 255, 0.03); border-radius: 8px; border: 1px solid #333;">
+                        <label style="display: flex; align-items: flex-start; color: #ccc; font-size: 13px; cursor: pointer;">
+                            <input type="checkbox" id="emailBackupCheckbox" onchange="toggleEmailBackup(this.checked)"
+                                   style="margin-right: 10px; margin-top: 2px; accent-color: #8B5CF6;">
+                            <div>
+                                <span style="font-weight: 500;">Email me my nsec backup</span>
+                                <div style="font-size: 11px; color: #888; margin-top: 2px;">One-time send only - your email is NOT stored</div>
+                            </div>
+                        </label>
+                        <div id="emailBackupContainer" style="display: none; margin-top: 12px;">
+                            <input type="email" id="signupEmailInput" placeholder="Email for one-time nsec backup"
+                                   style="width: 100%; padding: 10px; border: 1px solid #333; border-radius: 6px; background: #000; color: #fff; font-size: 13px;">
+                            <div style="font-size: 10px; color: #666; margin-top: 4px;">We send your nsec once, then permanently delete your email from our systems</div>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="createAccountBtn" class="send-btn" onclick="authUI.handleSignup()" style="width: 100%;">
+                        Create Account
+                    </button>
+                </form>
+                <button class="close-btn" onclick="showCreateAccountModal()" style="margin-top: 12px;">Back</button>
+            </div>
+
+            <!-- Keys Only Signup Form -->
+            <div id="keysOnlySignupSection" class="hidden">
+                <form id="keysOnlyForm" onsubmit="return false;">
+                    <div style="margin-bottom: 16px;">
+                        <input type="text" id="keysOnlyDisplayNameInput" placeholder="Display name (e.g., John Smith)"
+                               style="width: 100%; padding: 14px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 15px;">
+                        <div style="font-size: 11px; color: #888; margin-top: 4px;">Your public name shown on your profile</div>
+                    </div>
+                    <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
+                        <div style="color: #FF6600; font-size: 13px; line-height: 1.5;">
+                            Your keys will be generated and shown once. Save them securely - if lost, your account cannot be recovered.
+                        </div>
+                    </div>
+                    <button type="submit" class="send-btn" onclick="authUI.handleKeysOnlySignup()" style="width: 100%;">
+                        Generate My Keys
+                    </button>
+                </form>
+                <button class="close-btn" onclick="showCreateAccountModal()" style="margin-top: 12px;">Back</button>
+            </div>
+
+            <!-- Forgot Password Section -->
+            <div id="forgotPasswordSection" class="hidden">
+                <div style="margin-bottom: 16px; color: #ccc; font-size: 14px;">
+                    Enter your email to receive a password reset link.
+                </div>
+                <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
+                    <div style="color: #FF6600; font-size: 13px;">
+                        Note: Password reset requires your nsec backup.
+                    </div>
+                </div>
+                <form id="forgotPasswordForm" onsubmit="return false;">
+                    <div style="margin-bottom: 16px;">
+                        <input type="email" id="forgotEmailInput" placeholder="Email address"
+                               style="width: 100%; padding: 14px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 15px;">
+                    </div>
+                    <button type="submit" id="forgotPasswordBtn" class="send-btn" onclick="authUI.handleForgotPassword()" style="width: 100%;">
+                        Send Reset Link
+                    </button>
+                </form>
+                <button class="close-btn" onclick="authUI.backToMainLogin()" style="margin-top: 12px;">Back</button>
             </div>
 
             <!-- Login with nsec Section -->
-            <div id="loginWithNsecSection" style="display: none;">
+            <div id="loginWithNsecSection" class="hidden">
                 <div style="margin-bottom: 16px;">
                     <input type="password" id="nsecInput" placeholder="Enter your nsec..."
                            style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
                 </div>
-                <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
-                    Your private key starts with "nsec1..."
-                </div>
-
-                <!-- Security warning about nsec exposure -->
                 <div style="margin-bottom: 16px; padding: 14px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
-                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">⚠️ Critical Security Warning</div>
-                    <div style="color: #ccc; font-size: 13px; line-height: 1.6; margin-bottom: 12px;">
-                        <strong style="color: #FF6600;">Anyone with your nsec can control your account permanently.</strong> There is no password reset or recovery - if your nsec is exposed or lost, your identity is compromised forever.
-                    </div>
-                </div>
-
-                <!-- Security notice about PIN encryption -->
-                <div style="margin-bottom: 16px; padding: 14px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
-                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">🔐 How We Protect Your Key</div>
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">Security Warning</div>
                     <div style="color: #ccc; font-size: 13px; line-height: 1.5;">
-                        Your private key will be encrypted with a PIN and stored in your browser.
-                        <strong style="color: #FF6600;">If you forget your PIN, you'll need to re-login with your nsec.</strong>
-                    </div>
-                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(139, 92, 246, 0.2);">
-                        <div style="color: #999; font-size: 12px; margin-bottom: 6px;">For better security, consider:</div>
-                        <ul style="margin: 0; padding-left: 20px; color: #999; font-size: 12px;">
-                            <li>Using a browser extension (Alby, nos2x)</li>
-                            <li>Using nsec.app for remote signing</li>
-                        </ul>
-                    </div>
-                    <div style="margin-top: 8px; color: #666; font-size: 11px; font-style: italic;">
-                        ⚠️ Only use this login method on devices you trust
+                        Your nsec controls your identity permanently. It will be encrypted with a PIN and stored locally.
                     </div>
                 </div>
 
@@ -449,35 +590,19 @@
             </div>
 
             <!-- Login with Amber Section -->
-            <div id="loginWithAmberSection" style="display: none;">
+            <div id="loginWithAmberSection" class="hidden">
                 <div style="margin-bottom: 16px;">
                     <input type="text" id="amberBunkerInput" placeholder="Paste your bunker URI from Amber..."
                            style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
                 </div>
-                <div style="margin-bottom: 16px; color: #999; font-size: 12px;">
-                    Get your bunker URI from the Amber app (Settings → Connections)
-                </div>
-
                 <div style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
-                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">📱 How to get your bunker URI:</div>
+                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">How to get your bunker URI:</div>
                     <ol style="color: #ccc; font-size: 13px; margin: 0; padding-left: 20px; line-height: 1.8;">
-                        <li>Open <strong style="color: #8B5CF6;">Amber</strong> on your Android device</li>
-                        <li>Go to Settings → Connections</li>
-                        <li>Tap "Create Connection" or use an existing one</li>
-                        <li>Copy the <strong style="color: #8B5CF6;">bunker://</strong> URI</li>
-                        <li>Paste it here</li>
+                        <li>Open Amber on your Android device</li>
+                        <li>Go to Settings - Connections</li>
+                        <li>Create or select a connection</li>
+                        <li>Copy the bunker:// URI</li>
                     </ol>
-                </div>
-
-                <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
-                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">🔐 What is Amber?</div>
-                    <div style="color: #ccc; font-size: 13px; line-height: 1.5;">
-                        Amber is a secure Nostr signer app for Android that keeps your private key on your phone.
-                        When you use Amber, your key never leaves your device - Nosmero requests signatures remotely.
-                    </div>
-                    <div style="margin-top: 8px; color: #999; font-size: 12px;">
-                        <strong>Benefits:</strong> Maximum security, works like a hardware wallet, approve each action
-                    </div>
                 </div>
 
                 <button class="send-btn" onclick="loginWithAmber()">Connect to Amber</button>
@@ -485,23 +610,31 @@
             </div>
 
             <!-- Key Display Section -->
-            <div id="keyDisplaySection" style="display: none;">
+            <div id="keyDisplaySection" class="hidden">
                 <div style="margin-bottom: 20px;">
-                    <div style="margin-bottom: 12px; color: #ccc;">Your Private Key (SAVE THIS!):</div>
-                    <div id="privateKeyDisplay" style="padding: 12px; background: #1a1a1a; border-radius: 8px; font-family: monospace; font-size: 12px; word-break: break-all; margin-bottom: 12px; color: #FF6600;"></div>
-                    
-                    <div style="margin-bottom: 12px; color: #ccc;">Your Public Key:</div>
-                    <div id="publicKeyDisplay" style="padding: 12px; background: #1a1a1a; border-radius: 8px; font-family: monospace; font-size: 12px; word-break: break-all; color: #8B5CF6;"></div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <div style="color: #FF6600; font-weight: 600;">Your Private Key (nsec)</div>
+                        <button onclick="copyToClipboard(document.getElementById('privateKeyDisplay').textContent, this)"
+                                style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; color: #FF6600; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 4px;">
+                            📋 Copy
+                        </button>
+                    </div>
+                    <div id="privateKeyDisplay" style="padding: 12px; background: #1a1a1a; border-radius: 8px; font-family: monospace; font-size: 12px; word-break: break-all; color: #FF6600; border: 1px solid rgba(255, 102, 0, 0.3);"></div>
+                    <!-- Hidden element to store npub for proceedToApp -->
+                    <div id="publicKeyDisplay" style="display: none;"></div>
                 </div>
-                
+
                 <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.2), rgba(139, 92, 246, 0.2)); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
-                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">⚠️ IMPORTANT:</div>
-                    <div style="color: #ccc; font-size: 14px;">
-                        Save your private key (nsec) somewhere safe! You'll need it to login again. Never share it with anyone!
+                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">Save Your nsec!</div>
+                    <div style="color: #ccc; font-size: 14px; line-height: 1.5;">
+                        Your <strong>nsec</strong> is your private key - it proves your identity. Save it somewhere safe (password manager, secure note).
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); color: #888; font-size: 13px;">
+                            You can also find and export your nsec from <strong>Settings</strong> after logging in.
+                        </div>
                     </div>
                 </div>
-                
-                <button class="send-btn" onclick="proceedToApp()">I've Saved My Keys - Continue</button>
+
+                <button class="send-btn" onclick="authUI.proceedToApp()">I've Saved It - Continue</button>
             </div>
         </div>
     </div>

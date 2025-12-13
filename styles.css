@@ -1053,6 +1053,35 @@
             border-color: #FF6600;
         }
 
+        .text-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .text-btn:hover {
+            text-decoration: underline;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Availability indicators */
+        #emailAvailability, #usernameAvailability {
+            color: #666;
+        }
+        #emailAvailability.available, #usernameAvailability.available {
+            color: #22c55e;
+        }
+        #emailAvailability.unavailable, #usernameAvailability.unavailable {
+            color: #ef4444;
+        }
+        #emailAvailability.checking, #usernameAvailability.checking {
+            color: #8B5CF6;
+        }
+
         /* New post composition area */
         .compose-area {
             padding: 16px 20px;

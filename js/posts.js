@@ -551,6 +551,13 @@ export async function loadTrendingFeed(forceRefresh = false) {
             homeFeedList.innerHTML = infoHeader + renderedPosts.join('') + loadMoreButton;
         }
 
+        // Process embedded notes (quote reposts)
+        try {
+            await Utils.processEmbeddedNotes('homeFeedList');
+        } catch (error) {
+            console.error('Error processing embedded notes in trending feed:', error);
+        }
+
         // Add trust badges to trending feed notes
         try {
             const TrustBadges = await import('./trust-badges.js?v=2.9.41');
@@ -811,6 +818,13 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
             homeFeedList.innerHTML = anonymousBanner + renderedPosts.join('') + loadMoreButton;
         }
 
+        // Process embedded notes (quote reposts)
+        try {
+            await Utils.processEmbeddedNotes('homeFeedList');
+        } catch (error) {
+            console.error('Error processing embedded notes in anonymous trending feed:', error);
+        }
+
         // Add trust badges to trending feed notes
         try {
             const TrustBadges = await import('./trust-badges.js?v=2.9.41');
@@ -988,6 +1002,13 @@ async function renderCachedTrendingFeed(cache) {
 
     homeFeedList.innerHTML = anonymousBanner + renderedPosts.join('') + loadMoreButton;
 
+    // Process embedded notes (quote reposts)
+    try {
+        await Utils.processEmbeddedNotes('homeFeedList');
+    } catch (error) {
+        console.error('Error processing embedded notes in cached trending feed:', error);
+    }
+
     // Add trust badges to cached trending feed notes
     try {
         const TrustBadges = await import('./trust-badges.js?v=2.9.41');
@@ -1140,6 +1161,13 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
 
     feed.innerHTML = infoHeader + renderedPosts.join('') + loadMoreButton;
 
+    // Process embedded notes (quote reposts)
+    try {
+        await Utils.processEmbeddedNotes('feed');
+    } catch (error) {
+        console.error('Error processing embedded notes in cached trending feed for logged-in:', error);
+    }
+
     // Add trust badges for all rendered notes
     try {
         const TrustBadges = await import('./trust-badges.js?v=2.9.41');
@@ -1242,6 +1270,13 @@ async function loadMoreTrendingPosts() {
         const homeFeedList = document.getElementById('homeFeedList');
         if (homeFeedList) {
             homeFeedList.insertAdjacentHTML('beforeend', renderedPosts.join('') + loadMoreButton);
+        }
+
+        // Process embedded notes (quote reposts)
+        try {
+            await Utils.processEmbeddedNotes('homeFeedList');
+        } catch (error) {
+            console.error('Error processing embedded notes in load more trending:', error);
         }
 
         // Add trust badges to newly loaded notes
@@ -2018,6 +2053,13 @@ export async function loadMoreWebOfTrustPosts() {
             if (homeFeedList && loadMoreContainer) {
                 homeFeedList.insertAdjacentHTML('beforeend', renderedPosts.filter(p => p).join(''));
                 loadMoreContainer.outerHTML = newLoadMoreButton;
+
+                // Process embedded notes (quote reposts)
+                try {
+                    await Utils.processEmbeddedNotes('homeFeedList');
+                } catch (error) {
+                    console.error('Error processing embedded notes in web of trust load more:', error);
+                }
             }
         } else {
             // No posts in this batch, keep the Load More button for next cycle
@@ -2460,13 +2502,21 @@ async function renderHomeFeedResults() {
         const renderedPostsComplete = sortedResults.map(post => {
             return renderSinglePost(post, 'feed', engagementData, parentPostsMap, repostContextMap.get(post.id) || null);
         });
-        Promise.all(renderedPostsComplete).then(posts => {
+        Promise.all(renderedPostsComplete).then(async posts => {
             resultsEl.innerHTML = posts.join('');
             console.log('✅ Posts re-rendered with all data: disclosed tips, parent context, and engagement counts');
+
+            // Process embedded notes (quote reposts) after final re-render
+            try {
+                const Utils = await import('./utils.js');
+                await Utils.processEmbeddedNotes('homeFeedList');
+            } catch (error) {
+                console.error('Error processing embedded notes after re-render:', error);
+            }
         });
     });
 
-    // Process any embedded notes after rendering
+    // Process any embedded notes after initial rendering (before engagement data loads)
     try {
         const Utils = await import('./utils.js');
         await Utils.processEmbeddedNotes('homeFeedList');
@@ -4119,7 +4169,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                         </div>
                         <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis; color: ${textColor};">${Utils.parseContent(parentPost.content)}</div>
                     </div>
-                    <div style="color: #666; font-size: 12px; margin-bottom: 8px; margin-left: 12px;">↳ Replying to</div>
+                    <div style="color: #666; font-size: 12px; margin-bottom: 8px; margin-left: 12px;">↑ Replying to</div>
                 `;
             }
         }
@@ -6032,6 +6082,13 @@ async function showMoreTrendingAll() {
         if (hasMore) {
             feed.insertAdjacentHTML('beforeend', loadMoreButton);
         }
+    }
+
+    // Process embedded notes (quote reposts)
+    try {
+        await Utils.processEmbeddedNotes('homeFeedList');
+    } catch (error) {
+        console.error('[TrendingAll] Error processing embedded notes:', error);
     }
 
     // Add trust badges to rendered notes

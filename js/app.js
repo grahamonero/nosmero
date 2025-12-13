@@ -17,6 +17,7 @@ import * as TrustBadges from './trust-badges.js?v=2.9.41';
 import * as Paywall from './paywall.js';
 import * as PaywallUI from './paywall-ui.js';
 import * as ThumbHashLoader from './thumbhash-loader.js';
+import * as AuthUI from './auth/auth-ui.js';
 
 // WalletModal is loaded separately via index.html script tag
 
@@ -96,6 +97,10 @@ async function initializeApp() {
         // Initialize theme toggle
         initializeThemeToggle();
         console.log('✓ Theme toggle initialized');
+
+        // Initialize auth UI for email/password login
+        AuthUI.initAuthUI();
+        console.log('✓ Auth UI initialized');
 
         // Check for direct note links BEFORE loading feed
         checkDirectNoteLink();  // Check for /n/{noteId} URLs from Monero transactions
@@ -260,6 +265,19 @@ async function checkExistingSession() {
                 console.error('Error decrypting key:', error);
                 alert('Failed to decrypt your private key. You may need to re-login.');
                 return;
+            }
+        }
+    }
+
+    // Check for password user session (stored in sessionStorage, no PIN)
+    if (!storedPrivateKey) {
+        const loginMethod = localStorage.getItem('login-method');
+        if (loginMethod === 'email_password') {
+            const Auth = await import('./auth.js');
+            const sessionKey = Auth.getSessionKey();
+            if (sessionKey) {
+                console.log('🔓 Found password user session key, restoring...');
+                storedPrivateKey = sessionKey;
             }
         }
     }
@@ -1117,20 +1135,72 @@ async function loadUserPosts() {
     if (!profileContent) return;
 
     try {
-        const userPosts = [];
+        const Posts = await import('./posts.js');
+        const rawEvents = [];
         const processedIds = new Set();
+        const repostEventIdsToFetch = []; // For reposts with only 'e' tag (no embedded content)
 
         const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
-            { kinds: [1], authors: [State.publicKey], limit: 100 }
+            { kinds: [1, 6], authors: [State.publicKey], limit: 100 }
         ], {
             onevent(event) {
                 if (!processedIds.has(event.id)) {
-                    userPosts.push(event);
+                    rawEvents.push(event);
                     processedIds.add(event.id);
+
+                    // If this is a kind 6 repost with only 'e' tag, collect the ID to fetch
+                    if (event.kind === 6 && (!event.content || !event.content.trim().startsWith('{'))) {
+                        const eTag = event.tags.find(t => t[0] === 'e');
+                        if (eTag && eTag[1]) {
+                            repostEventIdsToFetch.push(eTag[1]);
+                        }
+                    }
                 }
             },
-            oneose() {
-                console.log('Received', userPosts.length, 'user posts');
+            async oneose() {
+                console.log('Received', rawEvents.length, 'raw events (including reposts)');
+
+                // Fetch original posts for reposts that only had 'e' tags
+                let fetchedOriginals = {};
+                if (repostEventIdsToFetch.length > 0) {
+                    console.log('Fetching', repostEventIdsToFetch.length, 'original posts for e-tag reposts');
+                    fetchedOriginals = await fetchOriginalPostsForReposts(repostEventIdsToFetch);
+                }
+
+                // Normalize events: extract original posts from reposts (kind 6)
+                const userPosts = [];
+                const seenOriginalIds = new Set();
+
+                for (const event of rawEvents) {
+                    let { post, reposter, repostId, repostTimestamp } = Posts.normalizeEventForDisplay(event);
+
+                    // If normalizeEventForDisplay returned null post (e-tag only repost), use fetched original
+                    if (!post && event.kind === 6) {
+                        const eTag = event.tags.find(t => t[0] === 'e');
+                        if (eTag && eTag[1] && fetchedOriginals[eTag[1]]) {
+                            post = fetchedOriginals[eTag[1]];
+                            reposter = event.pubkey;
+                            repostId = event.id;
+                            repostTimestamp = event.created_at;
+                        }
+                    }
+
+                    if (!post) continue; // Skip if we still couldn't get the original post
+
+                    // De-duplicate by original post ID
+                    if (seenOriginalIds.has(post.id)) continue;
+                    seenOriginalIds.add(post.id);
+
+                    // Store repost context on the post for rendering
+                    if (reposter) {
+                        post._repostContext = { reposter, repostId, repostTimestamp };
+                        post._sortTimestamp = repostTimestamp;
+                    } else {
+                        post._sortTimestamp = post.created_at;
+                    }
+
+                    userPosts.push(post);
+                }
 
                 // Update posts count
                 const postsCount = document.getElementById('postsCount');
@@ -1138,8 +1208,8 @@ async function loadUserPosts() {
                     postsCount.textContent = userPosts.length;
                 }
 
-                // Sort posts by timestamp (newest first)
-                userPosts.sort((a, b) => b.created_at - a.created_at);
+                // Sort posts by timestamp (newest first, using repost time if applicable)
+                userPosts.sort((a, b) => (b._sortTimestamp || b.created_at) - (a._sortTimestamp || a.created_at));
 
                 if (userPosts.length === 0) {
                     profileContent.innerHTML = `
@@ -1163,7 +1233,7 @@ async function loadUserPosts() {
 
         setTimeout(() => {
             sub.close();
-            if (userPosts.length === 0) {
+            if (rawEvents.length === 0) {
                 profileContent.innerHTML = `
                     <div style="text-align: center; color: #666; padding: 40px;">
                         <p>No posts found</p>
@@ -1177,6 +1247,34 @@ async function loadUserPosts() {
         console.error('Error loading user posts:', error);
         profileContent.innerHTML = '<div style="color: #f56565; text-align: center; padding: 40px;">Error loading posts</div>';
     }
+}
+
+// Fetch original posts for reposts that only have 'e' tags
+async function fetchOriginalPostsForReposts(eventIds) {
+    if (!eventIds.length) return {};
+
+    const results = {};
+
+    return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+            console.log('Timeout fetching original posts for reposts, got', Object.keys(results).length, 'of', eventIds.length);
+            resolve(results);
+        }, 3000);
+
+        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
+            { ids: eventIds }
+        ], {
+            onevent(event) {
+                results[event.id] = event;
+            },
+            oneose() {
+                clearTimeout(timeout);
+                sub.close();
+                console.log('Fetched', Object.keys(results).length, 'original posts for e-tag reposts');
+                resolve(results);
+            }
+        });
+    });
 }
 
 // Display user posts
@@ -1196,9 +1294,11 @@ function displayUserPosts(posts) {
                 State.eventCache[post.id] = post;
             });
 
-            // Fetch profiles for posts and any parent posts they might reference
+            // Fetch profiles for posts, reposters, and any parent posts they might reference
             const allAuthors = [...new Set(posts.map(post => post.pubkey))];
-            await Posts.fetchProfiles(allAuthors);
+            const reposterPubkeys = posts.filter(p => p._repostContext).map(p => p._repostContext.reposter);
+            const allPubkeysToFetch = [...new Set([...allAuthors, ...reposterPubkeys])];
+            await Posts.fetchProfiles(allPubkeysToFetch);
 
             // Fetch Monero addresses for all post authors
             if (window.getUserMoneroAddress) {
@@ -1236,7 +1336,7 @@ function displayUserPosts(posts) {
 
             const renderedPosts = await Promise.all(posts.map(async post => {
                 try {
-                    return await Posts.renderSinglePost(post, 'feed', engagementData, parentPostsMap);
+                    return await Posts.renderSinglePost(post, 'feed', engagementData, parentPostsMap, post._repostContext || null);
                 } catch (error) {
                     console.error('Error rendering profile post:', error);
                     // Fallback to simple rendering
