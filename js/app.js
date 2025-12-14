@@ -12,7 +12,7 @@ import * as Posts from './posts.js?v=2.9.51';
 import * as Auth from './auth.js';
 import * as UI from './ui.js?v=2.9.38';
 import * as Messages from './messages.js';
-import * as Search from './search.js';
+import * as Search from './search.js?v=2.0.1';
 import * as TrustBadges from './trust-badges.js?v=2.9.41';
 import * as Paywall from './paywall.js';
 import * as PaywallUI from './paywall-ui.js';
