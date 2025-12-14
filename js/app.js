@@ -18,6 +18,7 @@ import * as Paywall from './paywall.js';
 import * as PaywallUI from './paywall-ui.js';
 import * as ThumbHashLoader from './thumbhash-loader.js';
 import * as AuthUI from './auth/auth-ui.js';
+import * as Livestream from './livestream.js?v=1.0.3';
 
 // WalletModal is loaded separately via index.html script tag
 

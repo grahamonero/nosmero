@@ -6,8 +6,10 @@
     <title>nosmero - Nostr + Monero</title>
     <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
     <link rel="stylesheet" href="/styles.css?v=1.9.15-wallet">
+    <link rel="stylesheet" href="/css/livestream.css?v=1.0.1">
 
-
+    <!-- HLS.js for livestream video playback (self-hosted for privacy browser compatibility) -->
+    <script src="/lib/hls.min.js"></script>
 </head>
 <body>
     <!-- ==================================
@@ -61,6 +63,10 @@
                 <div class="menu-item" onclick="handleFeedMenuClick('following')">
                     <span class="menu-icon">👥</span>
                     <span>Following</span>
+                </div>
+                <div class="menu-item" onclick="handleFeedMenuClick('live')">
+                    <span class="menu-icon">📺</span>
+                    <span>Live Streams</span>
                 </div>
                 <div class="menu-item" onclick="handleFeedMenuClick('global')">
                     <span class="menu-icon">🌐</span>
@@ -152,6 +158,7 @@
 
             <nav class="feed-selector">
                 <a href="#" class="feed-tab active" data-feed="following" onclick="handleFeedTabClick('following', event)">Following</a>
+                <a href="#" class="feed-tab" data-feed="live" onclick="handleFeedTabClick('live', event)">📺 Live</a>
                 <a href="#" class="feed-tab" data-feed="tipactivity" onclick="handleFeedTabClick('tipactivity', event)">Monero Tip Activity</a>
                 <a href="#" class="feed-tab" data-feed="global" onclick="handleFeedTabClick('global', event)">Web of Trust Feed</a>
                 <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero Notes</a>
@@ -1217,10 +1224,10 @@
     <script src="/lib/monero-wallet.iife.js" integrity="sha384-/bPHoGgNd6VwHiBPUzapfjKCa5QgS4l77vrHImA0Bmku2+QIezVJCxmPnArNZQBi" crossorigin="anonymous"></script>
 
     <!-- UI Redesign JS - New minimal header, hamburger menu, feed tabs -->
-    <script src="/js/ui-redesign.js?v=3.2.1"></script>
+    <script src="/js/ui-redesign.js?v=3.3.0"></script>
 
     <!-- Load the modular v2 application -->
-    <script type="module" src="/js/app.js?v=2.9.58"></script>
+    <script type="module" src="/js/app.js?v=2.9.67"></script>
 
     <!-- Wallet Modal (loaded after app) -->
     <script type="module" src="/js/wallet-modal.js?v=1.0.5"></script>

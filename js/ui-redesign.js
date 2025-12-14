@@ -95,7 +95,8 @@ async function handleFeedTabClick(feedType, event) {
         'following': 'following',
         'monero': 'trendingmonero',
         'tipactivity': 'tipactivity',
-        'trending': 'popular'
+        'trending': 'popular',
+        'live': 'live'
     };
     const feedPath = feedNames[feedType] || feedType;
     history.pushState(
@@ -140,6 +141,15 @@ async function handleFeedTabClick(feedType, event) {
             // Popular Notes: Trending posts across all topics
             console.log('Loading Popular Notes feed...');
             PostsModule.loadTrendingAllFeed();
+            break;
+        case 'live':
+            // Live Streams: NIP-53 livestreams with XMR tipping
+            console.log('Loading Live Streams...');
+            if (window.NostrLivestream) {
+                window.NostrLivestream.renderLivestreamFeed();
+            } else {
+                console.warn('Livestream module not loaded');
+            }
             break;
     }
 }
