@@ -206,6 +206,14 @@
             justify-content: flex-start;
         }
 
+        /* Header auth buttons container - visible on mobile */
+        .header-auth-buttons {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-left: auto;
+        }
+
         .feed-tab {
             color: var(--text-secondary);
             font-weight: 500;

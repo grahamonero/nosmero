@@ -94,7 +94,8 @@ export async function handleFeedTabClick(feedType, event) {
         'following': 'following',
         'monero': 'trendingmonero',
         'tipactivity': 'tipactivity',
-        'trending': 'trending'
+        'trending': 'trending',
+        'live': 'live'
     };
     const feedPath = feedNames[feedType] || feedType;
     history.pushState(
@@ -139,6 +140,14 @@ export async function handleFeedTabClick(feedType, event) {
             // Trending feed: Popular notes across all topics
             console.log('Loading Trending Notes feed...');
             PostsModule.loadTrendingAllFeed();
+            break;
+        case 'live':
+            // Live streams feed: NIP-53 live activities
+            console.log('Loading Live Streams feed...');
+            // Import and load livestream module
+            import('../livestream.js').then(Livestream => {
+                Livestream.renderLivestreamFeed();
+            });
             break;
     }
 }

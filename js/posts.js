@@ -2415,6 +2415,11 @@ async function streamRelayPosts() {
                 if (!cachedHomeFeedPosts.find(p => p.id === event.id)) {
                     cachedHomeFeedPosts.push(event);
 
+                    // Also add to global event cache for interactions (repost, like, reply)
+                    if (!State.eventCache[event.id]) {
+                        State.eventCache[event.id] = event;
+                    }
+
                     // Track oldest timestamp for pagination
                     if (!oldestCachedTimestamp || event.created_at < oldestCachedTimestamp) {
                         oldestCachedTimestamp = event.created_at;
@@ -3186,6 +3191,11 @@ async function fetchMorePostsInBackground() {
                 // Add to cache, avoiding duplicates
                 if (!cachedHomeFeedPosts.find(p => p.id === event.id)) {
                     cachedHomeFeedPosts.push(event);
+
+                    // Also add to global event cache for interactions (repost, like, reply)
+                    if (!State.eventCache[event.id]) {
+                        State.eventCache[event.id] = event;
+                    }
 
                     // Update oldest timestamp
                     if (!oldestCachedTimestamp || event.created_at < oldestCachedTimestamp) {

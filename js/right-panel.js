@@ -1218,6 +1218,23 @@ const RightPanel = {
             replies.forEach(r => allPostsMap.set(r.id, r));
             clickedReplies.forEach(r => allPostsMap.set(r.id, r));
 
+            // Second pass: fetch replies to replies (notes might only reference their direct parent)
+            // Get IDs of all notes we've found so far (excluding root which we already queried)
+            const foundNoteIds = Array.from(allPostsMap.keys()).filter(id => id !== rootId && id !== noteId);
+            if (foundNoteIds.length > 0) {
+                // Query in batches to avoid too large requests
+                const batchSize = 20;
+                for (let i = 0; i < foundNoteIds.length; i += batchSize) {
+                    const batch = foundNoteIds.slice(i, i + batchSize);
+                    const nestedReplies = await pool.querySync(relays, {
+                        kinds: [1],
+                        '#e': batch,
+                        limit: 100
+                    });
+                    nestedReplies.forEach(r => allPostsMap.set(r.id, r));
+                }
+            }
+
             // Add all to cache
             allPostsMap.forEach((post, id) => {
                 if (window.NostrState?.eventCache) {

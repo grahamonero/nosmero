@@ -5,7 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>nosmero - Nostr + Monero</title>
     <script src="/lib/qrcode.min.js"></script>
-    <link rel="stylesheet" href="/styles.css?v=1.9.0-three-column">
+    <!-- HLS.js for livestream video playback -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.14"
+            integrity="sha384-pOfkGbK3mm4nyDNvreNZgI7TJ8PQJT3CuFmi0HMrTVDE8KHeVlHS3AyJT4ucszCo"
+            crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="/styles.css?v=1.9.1-mobile-fix">
+    <link rel="stylesheet" href="/css/livestream.css?v=1.0.4">
 
 </head>
 <body>
@@ -119,10 +124,15 @@
 
             <nav class="feed-selector">
                 <a href="#" class="feed-tab active" data-feed="following" onclick="handleFeedTabClick('following', event)">Following</a>
+                <a href="#" class="feed-tab" data-feed="live" onclick="handleFeedTabClick('live', event)">📺 Live</a>
                 <a href="#" class="feed-tab" data-feed="global" onclick="handleFeedTabClick('global', event)">Suggested Follows</a>
                 <a href="#" class="feed-tab" data-feed="tipactivity" onclick="handleFeedTabClick('tipactivity', event)">Monero Tip Activity</a>
                 <a href="#" class="feed-tab" data-feed="trending" onclick="handleFeedTabClick('trending', event)">Popular Notes</a>
                 <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero</a>
+            </nav>
+
+            <!-- Auth buttons - separate from feed-selector so they show on mobile -->
+            <div class="header-auth-buttons">
                 <button class="create-note-btn" id="headerCreateNoteBtn" onclick="handleCreateNoteClick()" style="display: none;">
                     ✏️ <span>Post</span>
                 </button>
@@ -136,7 +146,7 @@
                 <button class="login-btn-orange" id="headerLoginBtn" onclick="showLoginModalWithLogin()">
                     Log In
                 </button>
-            </nav>
+            </div>
 
             <div class="quick-actions">
                 <div class="relay-indicator" id="relayIndicator">

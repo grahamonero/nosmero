@@ -18,6 +18,7 @@ import * as PaywallUI from './paywall-ui.js';
 import RightPanel from './right-panel.js';
 import * as ThumbHashLoader from './thumbhash-loader.js';
 import * as AuthUI from './auth/auth-ui.js';
+import * as Livestream from './livestream.js';
 
 // Make modules available globally
 window.NostrState = State;
@@ -1173,27 +1174,16 @@ async function loadUserPosts() {
         const rawEvents = [];
         const processedIds = new Set();
         const repostEventIdsToFetch = []; // For reposts with only 'e' tag (no embedded content)
+        let hasProcessedPosts = false; // Track if we've already processed
 
-        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
-            { kinds: [1, 6], authors: [State.publicKey], limit: 100 }
-        ], {
-            onevent(event) {
-                if (!processedIds.has(event.id)) {
-                    rawEvents.push(event);
-                    processedIds.add(event.id);
+        // Helper function to process and display posts (called from oneose or timeout)
+        async function processAndDisplayPosts() {
+            if (hasProcessedPosts) return; // Prevent double processing
+            hasProcessedPosts = true;
 
-                    // If this is a kind 6 repost with only 'e' tag, collect the ID to fetch
-                    if (event.kind === 6 && (!event.content || !event.content.trim().startsWith('{'))) {
-                        const eTag = event.tags.find(t => t[0] === 'e');
-                        if (eTag && eTag[1]) {
-                            repostEventIdsToFetch.push(eTag[1]);
-                        }
-                    }
-                }
-            },
-            async oneose() {
-                console.log('Received', rawEvents.length, 'raw events (including reposts)');
+            console.log('Processing', rawEvents.length, 'raw events (including reposts)');
 
+            try {
                 // Fetch original posts for reposts that only had 'e' tags
                 let fetchedOriginals = {};
                 if (repostEventIdsToFetch.length > 0) {
@@ -1260,21 +1250,45 @@ async function loadUserPosts() {
                     // Render first page of posts
                     displayUserPosts(userPosts.slice(0, OWN_PROFILE_POSTS_PER_PAGE));
                 }
+            } catch (error) {
+                console.error('Error processing user posts:', error);
+                profileContent.innerHTML = `
+                    <div style="text-align: center; color: #666; padding: 40px;">
+                        <p>Error loading posts</p>
+                        <p style="font-size: 14px; margin-top: 10px;">${error.message}</p>
+                    </div>
+                `;
+            }
+        }
 
+        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
+            { kinds: [1, 6], authors: [State.publicKey], limit: 100 }
+        ], {
+            onevent(event) {
+                if (!processedIds.has(event.id)) {
+                    rawEvents.push(event);
+                    processedIds.add(event.id);
+
+                    // If this is a kind 6 repost with only 'e' tag, collect the ID to fetch
+                    if (event.kind === 6 && (!event.content || !event.content.trim().startsWith('{'))) {
+                        const eTag = event.tags.find(t => t[0] === 'e');
+                        if (eTag && eTag[1]) {
+                            repostEventIdsToFetch.push(eTag[1]);
+                        }
+                    }
+                }
+            },
+            oneose() {
+                // Use setTimeout to handle async processing without blocking
+                setTimeout(() => processAndDisplayPosts(), 0);
                 sub.close();
             }
         });
 
+        // Fallback timeout - ensure we always show something even if oneose never fires
         setTimeout(() => {
             sub.close();
-            if (rawEvents.length === 0) {
-                profileContent.innerHTML = `
-                    <div style="text-align: center; color: #666; padding: 40px;">
-                        <p>No posts found</p>
-                        <p style="font-size: 14px; margin-top: 10px;">Your posts will appear here when you share them.</p>
-                    </div>
-                `;
-            }
+            processAndDisplayPosts(); // Will be skipped if already processed
         }, 5000);
 
     } catch (error) {
