@@ -25,6 +25,8 @@ export const SEARCH_CACHE_DURATION = 3 * 60 * 1000; // 3 minutes
 
 // Search relay health tracking
 const searchRelayHealth = {};
+let searchRelayHealthLastReset = Date.now();
+const RELAY_HEALTH_RESET_INTERVAL = 5 * 60 * 1000; // Reset health data every 5 minutes
 const SEARCH_RELAY_SLOW_THRESHOLD = 5000; // 5 seconds = considered slow
 
 // Trending searches (fetched from API)
@@ -1097,6 +1099,13 @@ function getHealthySearchRelays() {
 
 // Update relay health after a search
 function updateSearchRelayHealth(relayUrl, responseTime, success) {
+    // Reset all health data periodically to prevent stale data
+    if (Date.now() - searchRelayHealthLastReset > RELAY_HEALTH_RESET_INTERVAL) {
+        Object.keys(searchRelayHealth).forEach(key => delete searchRelayHealth[key]);
+        searchRelayHealthLastReset = Date.now();
+        console.log('[Search] Reset relay health data (periodic reset)');
+    }
+
     if (!searchRelayHealth[relayUrl]) {
         searchRelayHealth[relayUrl] = { avgTime: responseTime, failures: 0, successes: 0 };
     }
@@ -1104,11 +1113,19 @@ function updateSearchRelayHealth(relayUrl, responseTime, success) {
     const health = searchRelayHealth[relayUrl];
     if (success) {
         health.successes++;
+        // Decay failures on success (relay recovered)
+        if (health.failures > 0) {
+            health.failures = Math.max(0, health.failures - 1);
+        }
         // Rolling average of response times
         health.avgTime = Math.round((health.avgTime * 0.7) + (responseTime * 0.3));
     } else {
-        health.failures++;
-        health.avgTime = SEARCH_RELAY_SLOW_THRESHOLD; // Mark as slow on failure
+        // Only count as failure if it's a timeout, not just 0 results
+        if (responseTime >= SEARCH_RELAY_SLOW_THRESHOLD) {
+            health.failures++;
+            health.avgTime = SEARCH_RELAY_SLOW_THRESHOLD;
+        }
+        // Don't penalize relays that respond quickly but have no results
     }
 }
 

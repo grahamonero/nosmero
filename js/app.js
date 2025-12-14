@@ -11,7 +11,7 @@ import * as Posts from './posts.js';
 import * as Auth from './auth.js';
 import * as UI from './ui/index.js';
 import * as Messages from './messages.js';
-import * as Search from './search.js';
+import * as Search from './search.js?v=2.0.1';
 import * as TrustBadges from './trust-badges.js';
 import * as Paywall from './paywall.js';
 import * as PaywallUI from './paywall-ui.js';
