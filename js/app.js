@@ -2809,13 +2809,16 @@ async function getFollowingCount(pubkey) {
 
 // Get count of users who follow this person (scan other users' contact lists)
 async function getFollowersCount(pubkey) {
+    // Use aggregating relays for comprehensive follower discovery
+    const socialGraphRelays = Relays.SOCIAL_GRAPH_RELAYS;
+
     return new Promise((resolve) => {
         const followers = new Set();
         let processedEvents = 0;
-        const maxEvents = 100; // Limit to prevent overwhelming
-        
-        const sub = State.pool.subscribeMany(Relays.getUserDataRelays(), [
-            { kinds: [3], '#p': [pubkey], limit: 100 }
+        const maxEvents = 200; // Match getFollowersList limit
+
+        const sub = State.pool.subscribeMany(socialGraphRelays, [
+            { kinds: [3], '#p': [pubkey], limit: 200 }
         ], {
             onevent(event) {
                 try {
@@ -3000,15 +3003,8 @@ function renderFollowersPage(type, users) {
 
 // Get detailed following list with user info
 async function getFollowingList(pubkey) {
-    // Use reliable public relays for follower/following searches to ensure comprehensive results
-    const publicRelays = [
-        'wss://relay.damus.io',
-        'wss://nos.lol',
-        'wss://relay.primal.net',
-        'wss://relay.nostr.band',
-        'wss://nostr-pub.wellorder.net',
-        'wss://offchain.pub'
-    ];
+    // Use aggregating relays for comprehensive social graph data
+    const socialGraphRelays = Relays.SOCIAL_GRAPH_RELAYS;
 
     return new Promise((resolve) => {
         let following = [];
@@ -3018,12 +3014,12 @@ async function getFollowingList(pubkey) {
         const finishSearch = () => {
             if (isResolved) return;
             isResolved = true;
-            console.log(`Found ${following.length} following for ${pubkey.substring(0,8)}... from ${completedRelays}/${publicRelays.length} relays`);
+            console.log(`Found ${following.length} following for ${pubkey.substring(0,8)}... from ${completedRelays}/${socialGraphRelays.length} relays`);
             sub.close();
             resolve(following);
         };
 
-        const sub = State.pool.subscribeMany(publicRelays, [
+        const sub = State.pool.subscribeMany(socialGraphRelays, [
             { kinds: [3], authors: [pubkey], limit: 1 }
         ], {
             onevent(event) {
@@ -3043,7 +3039,7 @@ async function getFollowingList(pubkey) {
             oneose: () => {
                 completedRelays++;
                 // Finish early if we found a good following list or most relays responded
-                if (following.length > 0 && (completedRelays >= Math.ceil(publicRelays.length * 0.7) || completedRelays >= 4)) {
+                if (following.length > 0 && (completedRelays >= Math.ceil(socialGraphRelays.length * 0.7) || completedRelays >= 4)) {
                     finishSearch();
                 }
             }
@@ -3058,15 +3054,8 @@ async function getFollowingList(pubkey) {
 
 // Get detailed followers list with user info
 async function getFollowersList(pubkey) {
-    // Use reliable public relays for follower/following searches to ensure comprehensive results
-    const publicRelays = [
-        'wss://relay.damus.io',
-        'wss://nos.lol',
-        'wss://relay.primal.net',
-        'wss://relay.nostr.band',
-        'wss://nostr-pub.wellorder.net',
-        'wss://offchain.pub'
-    ];
+    // Use aggregating relays for comprehensive follower discovery
+    const socialGraphRelays = Relays.SOCIAL_GRAPH_RELAYS;
 
     return new Promise((resolve) => {
         const followers = new Set();
@@ -3076,12 +3065,12 @@ async function getFollowersList(pubkey) {
         const finishSearch = () => {
             if (isResolved) return;
             isResolved = true;
-            console.log(`Found ${followers.size} followers for ${pubkey.substring(0,8)}... from ${completedRelays}/${publicRelays.length} relays`);
+            console.log(`Found ${followers.size} followers for ${pubkey.substring(0,8)}... from ${completedRelays}/${socialGraphRelays.length} relays`);
             sub.close();
             resolve([...followers]);
         };
 
-        const sub = State.pool.subscribeMany(publicRelays, [
+        const sub = State.pool.subscribeMany(socialGraphRelays, [
             { kinds: [3], '#p': [pubkey], limit: 200 }
         ], {
             onevent(event) {
@@ -3100,7 +3089,7 @@ async function getFollowersList(pubkey) {
             oneose: () => {
                 completedRelays++;
                 // Finish early if most relays have responded or we have good results
-                if (completedRelays >= Math.ceil(publicRelays.length * 0.7) || completedRelays >= 4) {
+                if (completedRelays >= Math.ceil(socialGraphRelays.length * 0.7) || completedRelays >= 4) {
                     finishSearch();
                 }
             }
