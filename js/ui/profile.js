@@ -941,7 +941,8 @@ async function getFollowersCount(pubkey) {
 
         if (!StateModule.pool) return 0;
 
-        const readRelays = RelaysModule.getUserDataRelays();
+        // Use aggregating relays for comprehensive follower discovery
+        const socialGraphRelays = RelaysModule.SOCIAL_GRAPH_RELAYS;
 
         return new Promise((resolve) => {
             const followers = new Set();
@@ -949,8 +950,8 @@ async function getFollowersCount(pubkey) {
                 resolve(followers.size);
             }, 5000); // 5 second timeout
 
-            const sub = StateModule.pool.subscribeMany(readRelays, [
-                { kinds: [3], '#p': [pubkey], limit: 100 }
+            const sub = StateModule.pool.subscribeMany(socialGraphRelays, [
+                { kinds: [3], '#p': [pubkey], limit: 200 }
             ], {
                 onevent(event) {
                     try {

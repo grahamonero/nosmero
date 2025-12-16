@@ -34,6 +34,17 @@ export const SEARCH_RELAYS = [
     'wss://nostr.mom'
 ];
 
+// Aggregating relays for social graph queries (followers/following)
+// These relays index contact lists broadly, providing comprehensive follower data
+export const SOCIAL_GRAPH_RELAYS = [
+    'wss://relay.nostr.band',
+    'wss://relay.primal.net',
+    'wss://relay.damus.io',
+    'wss://nos.lol',
+    'wss://purplepag.es',
+    'wss://nostr-pub.wellorder.net'
+];
+
 // Current active relays array (imported from state)
 export const getActiveRelays = () => {
     // Initialize with defaults if not set
