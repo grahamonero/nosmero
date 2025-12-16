@@ -86,6 +86,185 @@ export let userRelayList = {
 // Performance tracking for relays
 let relayPerformance = {};
 
+// ==================== OUTBOX MODEL (NIP-65) ====================
+// Cache for other users' relay lists (pubkey -> {read: [], write: [], timestamp})
+const otherUsersRelayCache = new Map();
+const RELAY_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+const MAX_OUTBOX_RELAYS = 5; // Limit relays per user to avoid too many connections
+
+// Major relays for discovering NIP-65 relay lists
+const DISCOVERY_RELAYS = [
+    'wss://purplepag.es',
+    'wss://relay.damus.io',
+    'wss://nos.lol',
+    'wss://relay.nostr.band'
+];
+
+/**
+ * Get another user's write relays (outbox) - where they publish their posts
+ * Use this when READING posts from a specific user
+ * @param {string} pubkey - The user's public key
+ * @returns {Promise<string[]>} - Array of relay URLs
+ */
+export async function getOutboxRelays(pubkey) {
+    // Check cache first
+    const cached = otherUsersRelayCache.get(pubkey);
+    if (cached && (Date.now() - cached.timestamp) < RELAY_CACHE_TTL) {
+        if (cached.write && cached.write.length > 0) {
+            return cached.write.slice(0, MAX_OUTBOX_RELAYS);
+        }
+    }
+
+    // Fetch from network
+    try {
+        const relayList = await fetchOtherUserRelayList(pubkey);
+        if (relayList && relayList.write && relayList.write.length > 0) {
+            // Cache the result
+            otherUsersRelayCache.set(pubkey, {
+                ...relayList,
+                timestamp: Date.now()
+            });
+            return relayList.write.slice(0, MAX_OUTBOX_RELAYS);
+        }
+    } catch (error) {
+        console.warn(`Failed to fetch outbox relays for ${pubkey.slice(0, 8)}:`, error.message);
+    }
+
+    // Fallback to default relays
+    return DEFAULT_RELAYS;
+}
+
+/**
+ * Get another user's read relays (inbox) - where they want to receive messages
+ * Use this when WRITING replies/reactions to a user
+ * @param {string} pubkey - The user's public key
+ * @returns {Promise<string[]>} - Array of relay URLs
+ */
+export async function getInboxRelays(pubkey) {
+    // Check cache first
+    const cached = otherUsersRelayCache.get(pubkey);
+    if (cached && (Date.now() - cached.timestamp) < RELAY_CACHE_TTL) {
+        if (cached.read && cached.read.length > 0) {
+            return cached.read.slice(0, MAX_OUTBOX_RELAYS);
+        }
+    }
+
+    // Fetch from network
+    try {
+        const relayList = await fetchOtherUserRelayList(pubkey);
+        if (relayList && relayList.read && relayList.read.length > 0) {
+            // Cache the result
+            otherUsersRelayCache.set(pubkey, {
+                ...relayList,
+                timestamp: Date.now()
+            });
+            return relayList.read.slice(0, MAX_OUTBOX_RELAYS);
+        }
+    } catch (error) {
+        console.warn(`Failed to fetch inbox relays for ${pubkey.slice(0, 8)}:`, error.message);
+    }
+
+    // Fallback to default relays
+    return DEFAULT_RELAYS;
+}
+
+/**
+ * Fetch another user's NIP-65 relay list from discovery relays
+ * @param {string} pubkey - The user's public key
+ * @returns {Promise<{read: string[], write: string[]} | null>}
+ */
+async function fetchOtherUserRelayList(pubkey) {
+    if (!State.pool) {
+        console.warn('Relay pool not initialized');
+        return null;
+    }
+
+    try {
+        const events = await State.pool.querySync(DISCOVERY_RELAYS, {
+            kinds: [10002],
+            authors: [pubkey],
+            limit: 1
+        });
+
+        if (events && events.length > 0) {
+            // Get the most recent relay list
+            const event = events.sort((a, b) => b.created_at - a.created_at)[0];
+            return parseRelayList(event);
+        }
+    } catch (error) {
+        console.error(`Error fetching relay list for ${pubkey.slice(0, 8)}:`, error);
+    }
+
+    return null;
+}
+
+/**
+ * Get the primary relay hint for a user (first write relay)
+ * Use this when adding relay hints to event tags
+ * @param {string} pubkey - The user's public key
+ * @returns {Promise<string>} - Primary relay URL or empty string
+ */
+export async function getPrimaryRelayHint(pubkey) {
+    const outbox = await getOutboxRelays(pubkey);
+    // Return first relay that's not a default (prefer user's specific relay)
+    const nonDefault = outbox.find(r => !DEFAULT_RELAYS.includes(r));
+    return nonDefault || outbox[0] || '';
+}
+
+/**
+ * Prefetch relay lists for multiple users (batch operation)
+ * @param {string[]} pubkeys - Array of public keys
+ */
+export async function prefetchRelayLists(pubkeys) {
+    if (!State.pool || !pubkeys || pubkeys.length === 0) return;
+
+    // Filter out already cached pubkeys
+    const uncached = pubkeys.filter(pk => {
+        const cached = otherUsersRelayCache.get(pk);
+        return !cached || (Date.now() - cached.timestamp) >= RELAY_CACHE_TTL;
+    });
+
+    if (uncached.length === 0) return;
+
+    console.log(`Prefetching relay lists for ${uncached.length} users...`);
+
+    try {
+        const events = await State.pool.querySync(DISCOVERY_RELAYS, {
+            kinds: [10002],
+            authors: uncached.slice(0, 50) // Limit batch size
+        });
+
+        // Group by pubkey and take most recent
+        const byPubkey = {};
+        events.forEach(event => {
+            if (!byPubkey[event.pubkey] || event.created_at > byPubkey[event.pubkey].created_at) {
+                byPubkey[event.pubkey] = event;
+            }
+        });
+
+        // Cache all results
+        Object.entries(byPubkey).forEach(([pk, event]) => {
+            const relayList = parseRelayList(event);
+            otherUsersRelayCache.set(pk, {
+                ...relayList,
+                timestamp: Date.now()
+            });
+        });
+
+        console.log(`Cached relay lists for ${Object.keys(byPubkey).length} users`);
+    } catch (error) {
+        console.error('Error prefetching relay lists:', error);
+    }
+}
+
+/**
+ * Clear the relay cache (useful for testing or memory management)
+ */
+export function clearRelayCache() {
+    otherUsersRelayCache.clear();
+    console.log('Relay cache cleared');
+}
+
 // Query relays with performance tracking and fast responses using Promise.race
 export async function queryRelaysFast(filters, options = {}) {
     const { limit = 50, timeout = State.RELAY_TIMEOUT, useCache = true } = options;

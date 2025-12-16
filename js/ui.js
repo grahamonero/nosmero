@@ -2074,7 +2074,11 @@ async function fetchUserPosts(pubkey) {
             throw new Error('Relay pool not initialized');
         }
 
-        const sub = StateModule.pool.subscribeMany(RelaysModule.getActiveRelays(), [
+        // Get user's write relays (outbox) - where they publish their posts
+        const outboxRelays = await RelaysModule.getOutboxRelays(pubkey);
+        console.log(`Fetching posts from ${pubkey.slice(0, 8)}'s outbox relays:`, outboxRelays);
+
+        const sub = StateModule.pool.subscribeMany(outboxRelays, [
             {
                 kinds: [1, 6], // Text notes and reposts
                 authors: [pubkey],
