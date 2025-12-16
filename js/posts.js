@@ -3393,13 +3393,16 @@ export async function likePost(postId) {
             Utils.showNotification('Note unliked', 'info');
             
         } else {
-            // Like: Create reaction event (kind 7)
+            // Get relay hint for the author (NIP-65 outbox model)
+            const relayHint = await Relays.getPrimaryRelayHint(post.pubkey);
+
+            // Like: Create reaction event (kind 7) with relay hints
             const eventTemplate = {
                 kind: 7,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
-                    ['e', postId],
-                    ['p', post.pubkey],
+                    ['e', postId, relayHint],
+                    ['p', post.pubkey, relayHint],
                     ['k', '1'], // Reacting to kind 1 (text note)
                     ['client', 'nosmero']
                 ],
@@ -3407,7 +3410,11 @@ export async function likePost(postId) {
             };
 
             const signedEvent = await Utils.signEvent(eventTemplate);
-            await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+
+            // Publish to your write relays + author's read relays (inbox)
+            const authorInbox = await Relays.getInboxRelays(post.pubkey);
+            const publishRelays = [...new Set([...Relays.getWriteRelays(), ...authorInbox])];
+            await State.pool.publish(publishRelays, signedEvent);
 
             // Track like event
             trackClientEvent(7, State.publicKey, signedEvent.id);
@@ -3565,19 +3572,26 @@ export async function sendRepost() {
 
 // Perform quick repost (kind 6)
 async function doQuickRepost() {
+    // Get relay hint for the original author (NIP-65 outbox model)
+    const relayHint = await Relays.getPrimaryRelayHint(currentRepostPost.pubkey);
+
     const eventTemplate = {
         kind: 6,
         created_at: Math.floor(Date.now() / 1000),
         tags: [
-            ['e', currentRepostPost.id, '', 'mention'],
-            ['p', currentRepostPost.pubkey],
+            ['e', currentRepostPost.id, relayHint, 'mention'],
+            ['p', currentRepostPost.pubkey, relayHint],
             ['client', 'nosmero']
         ],
         content: JSON.stringify(currentRepostPost) // Include original event
     };
 
     const signedEvent = await Utils.signEvent(eventTemplate);
-    await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+
+    // Publish to your write relays + original author's read relays (inbox)
+    const authorInbox = await Relays.getInboxRelays(currentRepostPost.pubkey);
+    const publishRelays = [...new Set([...Relays.getWriteRelays(), ...authorInbox])];
+    await State.pool.publish(publishRelays, signedEvent);
 
     // Track repost event
     trackClientEvent(6, State.publicKey, signedEvent.id);
@@ -3596,6 +3610,9 @@ async function doQuoteRepost() {
         return;
     }
 
+    // Get relay hint for the original author (NIP-65 outbox model)
+    const relayHint = await Relays.getPrimaryRelayHint(currentRepostPost.pubkey);
+
     // Create note content with user comment and embedded note reference
     const noteContent = `${userComment}\n\nnostr:${window.NostrTools.nip19.noteEncode(currentRepostPost.id)}`;
 
@@ -3603,8 +3620,8 @@ async function doQuoteRepost() {
         kind: 1,
         created_at: Math.floor(Date.now() / 1000),
         tags: [
-            ['e', currentRepostPost.id, '', 'mention'],
-            ['p', currentRepostPost.pubkey],
+            ['e', currentRepostPost.id, relayHint, 'mention'],
+            ['p', currentRepostPost.pubkey, relayHint],
             ['q', currentRepostPost.id], // Quote tag
             ['client', 'nosmero']
         ],
@@ -3612,7 +3629,11 @@ async function doQuoteRepost() {
     };
 
     const signedEvent = await Utils.signEvent(eventTemplate);
-    await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+
+    // Publish to your write relays + original author's read relays (inbox)
+    const authorInbox = await Relays.getInboxRelays(currentRepostPost.pubkey);
+    const publishRelays = [...new Set([...Relays.getWriteRelays(), ...authorInbox])];
+    await State.pool.publish(publishRelays, signedEvent);
 
     // Track quote note event
     trackClientEvent(1, State.publicKey, signedEvent.id);
@@ -3716,26 +3737,38 @@ export async function sendReply(replyToId) {
         if (mediaUrl) {
             replyContent = content ? `${content}\n\n${mediaUrl}` : mediaUrl;
         }
-        
-        // Create reply event
+
+        // Get relay hint for the recipient (NIP-65 outbox model)
+        const relayHint = await Relays.getPrimaryRelayHint(originalPost.pubkey);
+
+        // Create reply event with relay hints in tags
         const eventTemplate = {
             kind: 1,
             created_at: Math.floor(Date.now() / 1000),
             tags: [
-                ['e', replyToId, '', 'reply'],
-                ['p', originalPost.pubkey],
+                ['e', replyToId, relayHint, 'reply'],
+                ['p', originalPost.pubkey, relayHint],
                 ['client', 'nosmero']
             ],
             content: replyContent
         };
-        
+
         // Add Monero address if set
         if (State.userMoneroAddress) {
             eventTemplate.tags.push(['monero', State.userMoneroAddress]);
         }
 
         const signedEvent = await Utils.signEvent(eventTemplate);
-        await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+
+        // Publish to your write relays + recipient's read relays (inbox)
+        const recipientInbox = await Relays.getInboxRelays(originalPost.pubkey);
+        const myWriteRelays = Relays.getWriteRelays();
+        const publishRelays = [...new Set([...myWriteRelays, ...recipientInbox])];
+        console.log('📤 Reply publishing (NIP-65 outbox model):');
+        console.log('  Your write relays:', myWriteRelays.length);
+        console.log('  Recipient inbox relays:', recipientInbox);
+        console.log('  Combined publish relays:', publishRelays.length, publishRelays);
+        await State.pool.publish(publishRelays, signedEvent);
 
         // Track reply event
         trackClientEvent(1, State.publicKey, signedEvent.id);
@@ -6054,13 +6087,16 @@ export async function sendReplyDirect(replyToId, content) {
     }
 
     try {
-        // Create reply event
+        // Get relay hint for the recipient (NIP-65 outbox model)
+        const relayHint = await Relays.getPrimaryRelayHint(originalPost.pubkey);
+
+        // Create reply event with relay hints
         const eventTemplate = {
             kind: 1,
             created_at: Math.floor(Date.now() / 1000),
             tags: [
-                ['e', replyToId, '', 'reply'],
-                ['p', originalPost.pubkey],
+                ['e', replyToId, relayHint, 'reply'],
+                ['p', originalPost.pubkey, relayHint],
                 ['client', 'nosmero']
             ],
             content: content.trim()
@@ -6072,7 +6108,16 @@ export async function sendReplyDirect(replyToId, content) {
         }
 
         const signedEvent = await Utils.signEvent(eventTemplate);
-        await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+
+        // Publish to your write relays + recipient's read relays (inbox)
+        const recipientInbox = await Relays.getInboxRelays(originalPost.pubkey);
+        const myWriteRelays = Relays.getWriteRelays();
+        const publishRelays = [...new Set([...myWriteRelays, ...recipientInbox])];
+        console.log('📤 Reply publishing (NIP-65 outbox model):');
+        console.log('  Your write relays:', myWriteRelays.length);
+        console.log('  Recipient inbox relays:', recipientInbox);
+        console.log('  Combined publish relays:', publishRelays.length, publishRelays);
+        await State.pool.publish(publishRelays, signedEvent);
 
         // Track reply event
         trackClientEvent(1, State.publicKey, signedEvent.id);
