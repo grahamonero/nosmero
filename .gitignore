@@ -47,3 +47,6 @@ nosmeroav.png
 # System files
 .DS_Store
 Thumbs.db
+
+# Dependencies
+node_modules/
