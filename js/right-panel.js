@@ -442,7 +442,7 @@ const RightPanel = {
         if (!posts || posts.length === 0) {
             this.defaultFeed.innerHTML = `
                 <div style="padding: 20px; text-align: center; color: var(--text-secondary);">
-                    No posts found
+                    No notes found
                 </div>
             `;
             return;
@@ -1101,8 +1101,8 @@ const RightPanel = {
     /**
      * Render thread in panel
      */
-    async renderThread(noteId) {
-        if (!noteId) return;
+    async renderThread(noteIdOrNevent) {
+        if (!noteIdOrNevent) return;
 
         // Ensure content element exists
         if (!this.content) {
@@ -1129,8 +1129,26 @@ const RightPanel = {
         }
 
         try {
+            // Check if this is a nevent (starts with 'nevent1') and decode it
+            let noteId = noteIdOrNevent;
+            let relayHints = [];
+
+            if (noteIdOrNevent.startsWith('nevent1') || noteIdOrNevent.startsWith('note1')) {
+                try {
+                    const { nip19 } = window.NostrTools;
+                    const decoded = nip19.decode(noteIdOrNevent);
+                    noteId = decoded.data.id || decoded.data;
+                    if (decoded.data.relays && decoded.data.relays.length > 0) {
+                        relayHints = decoded.data.relays;
+                        console.log('📍 Thread relay hints from nevent:', relayHints);
+                    }
+                } catch (decodeError) {
+                    console.warn('Could not decode as nevent/note, using as raw ID:', decodeError);
+                }
+            }
+
             // Fetch and render thread
-            await this.fetchAndRenderThread(noteId, section);
+            await this.fetchAndRenderThread(noteId, section, relayHints);
         } catch (error) {
             console.error('Error loading thread:', error);
             section.innerHTML = '<div style="padding: 20px; color: var(--danger);">Failed to load thread</div>';
@@ -1139,10 +1157,30 @@ const RightPanel = {
 
     /**
      * Fetch and render thread manually
+     * @param {string} noteId - The note ID to fetch
+     * @param {HTMLElement} container - Container element to render into
+     * @param {string[]} relayHints - Optional relay hints from nevent
      */
-    async fetchAndRenderThread(noteId, container) {
+    async fetchAndRenderThread(noteId, container, relayHints = []) {
         const pool = window.NostrState?.pool;
-        const relays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.getActiveRelays?.();
+        const userRelays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.getActiveRelays?.() || [];
+
+        // Fallback relays for better coverage
+        const fallbackRelays = [
+            'wss://relay.damus.io',
+            'wss://relay.nostr.band',
+            'wss://nos.lol',
+            'wss://relay.snort.social'
+        ];
+
+        // Combine: hints first, then user relays, then fallbacks
+        const relays = [...new Set([
+            ...relayHints,
+            ...userRelays,
+            ...fallbackRelays
+        ])];
+
+        console.log('📡 Thread fetch using', relays.length, 'relays (hints:', relayHints.length, ')');
 
         if (!pool || !relays?.length) {
             container.innerHTML = '<div style="padding: 20px;">Cannot load thread - no relay connection</div>';
@@ -1456,10 +1494,10 @@ const RightPanel = {
                     </div>
                 </div>
                 <div style="border-top: 1px solid var(--border-color); padding: 8px 16px; background: rgba(0,0,0,0.2);">
-                    <span style="color: #888; font-size: 13px;">Recent Posts</span>
+                    <span style="color: #888; font-size: 13px;">Recent Notes</span>
                 </div>
                 <div id="panelProfilePosts" style="padding: 0;">
-                    <div class="loading" style="padding: 20px; text-align: center;">Loading posts...</div>
+                    <div class="loading" style="padding: 20px; text-align: center;">Loading notes...</div>
                 </div>
             `;
 
@@ -1549,14 +1587,42 @@ const RightPanel = {
         if (!container) return;
 
         const pool = window.NostrState?.pool;
-        const relays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.getActiveRelays?.();
+        const userRelays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.getActiveRelays?.() || [];
 
-        if (!pool || !relays?.length) {
+        if (!pool) {
             container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No relay connection</div>';
             return;
         }
 
         try {
+            // Get the author's outbox relays (where they publish their posts)
+            let authorOutboxRelays = [];
+            if (window.NostrRelays?.getOutboxRelays) {
+                try {
+                    authorOutboxRelays = await window.NostrRelays.getOutboxRelays(pubkey);
+                    console.log('📤 Author outbox relays:', authorOutboxRelays.length);
+                } catch (e) {
+                    console.warn('Could not fetch author outbox relays:', e);
+                }
+            }
+
+            // Fallback relays for better coverage
+            const fallbackRelays = [
+                'wss://relay.damus.io',
+                'wss://relay.nostr.band',
+                'wss://nos.lol',
+                'wss://relay.snort.social'
+            ];
+
+            // Combine: author's outbox first, then user relays, then fallbacks
+            const relays = [...new Set([
+                ...authorOutboxRelays,
+                ...userRelays,
+                ...fallbackRelays
+            ])];
+
+            console.log('📡 Fetching profile notes from', relays.length, 'relays (outbox:', authorOutboxRelays.length, ')');
+
             const posts = await pool.querySync(relays, {
                 kinds: [1],
                 authors: [pubkey],
@@ -1564,7 +1630,7 @@ const RightPanel = {
             });
 
             if (!posts || posts.length === 0) {
-                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No posts found</div>';
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No notes found</div>';
                 return;
             }
 

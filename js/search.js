@@ -2,7 +2,7 @@
 // Phase 8: Search & Discovery
 // Functions for user search, hashtag search, content discovery, and search results
 
-import { showNotification, escapeHtml } from './utils.js';
+import { showNotification, escapeHtml, parseContent as utilsParseContent } from './utils.js';
 import { SEARCH_RELAYS } from './relays.js';
 import { showSkeletonLoader, hideSkeletonLoader } from './ui/index.js';
 import {
@@ -308,7 +308,7 @@ export async function performSearch() {
             const postIds = currentSearchResults.map(post => post.id);
             searchEngagementData = await Posts.fetchEngagementCounts(postIds);
             console.log('📊 Engagement data fetched for search results');
-            renderSearchResults(); // Re-render with engagement counts
+            await renderSearchResults(); // Re-render with engagement counts
         }
 
         // Update final status
@@ -1867,7 +1867,7 @@ export async function addSearchResult(post) {
     }
 
     // Render results based on current sort mode
-    renderSearchResults();
+    await renderSearchResults();
 }
 
 // Update the results count display
@@ -1906,11 +1906,11 @@ export async function setSortMode(mode) {
         console.log('📊 Engagement data fetched for', postIds.length, 'search results');
     }
 
-    renderSearchResults();
+    await renderSearchResults();
 }
 
 // Render all results based on current sort mode
-function renderSearchResults() {
+async function renderSearchResults() {
     const resultsEl = document.getElementById('searchResultsList');
     if (!resultsEl) return;
 
@@ -1948,6 +1948,20 @@ function renderSearchResults() {
     const resultsToShow = sortedResults.slice(0, displayedResultsCount);
     const hasMoreResults = sortedResults.length > displayedResultsCount;
 
+    // Fetch missing profiles before rendering
+    const missingPubkeys = resultsToShow
+        .filter(post => !profileCache[post.pubkey])
+        .map(post => post.pubkey);
+
+    if (missingPubkeys.length > 0) {
+        try {
+            const Posts = await import('./posts.js');
+            await Posts.fetchProfiles([...new Set(missingPubkeys)]); // Dedupe pubkeys
+        } catch (e) {
+            console.warn('[Search] Error fetching profiles:', e);
+        }
+    }
+
     resultsEl.innerHTML = resultsToShow.map(post => {
         const engagement = searchEngagementData[post.id] || { reactions: 0, reposts: 0, replies: 0 };
         return renderSingleResult(post, engagement);
@@ -1976,12 +1990,29 @@ function renderSearchResults() {
     } catch (e) {
         console.warn('[Search] Paywall processing error:', e);
     }
+
+    // Process embedded notes (fetch and render nostr:nevent and nostr:note references)
+    try {
+        if (window.NostrUtils?.processEmbeddedNotes) {
+            window.NostrUtils.processEmbeddedNotes('searchResultsList');
+        }
+    } catch (e) {
+        console.warn('[Search] Embedded notes processing error:', e);
+    }
+
+    // Add trust badges to search results
+    try {
+        const TrustBadges = await import('./trust-badges.js');
+        await TrustBadges.addTrustBadgesToContainer(resultsEl);
+    } catch (e) {
+        console.warn('[Search] Trust badges error:', e);
+    }
 }
 
 // Load more search results
-export function loadMoreSearchResults() {
+export async function loadMoreSearchResults() {
     displayedResultsCount += RESULTS_PER_PAGE;
-    renderSearchResults();
+    await renderSearchResults();
 
     // Scroll to where new results start (optional - can remove if jarring)
     const loadMoreBtn = document.getElementById('loadMoreContainer');
@@ -2021,7 +2052,7 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
                     `<div class="avatar" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; background: #333; display: flex; align-items: center; justify-content: center; cursor: pointer;" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();">${author.name ? escapeHtml(author.name.charAt(0).toUpperCase()) : '?'}</div>`
                 }
                 <div class="post-info">
-                    <span class="username" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="cursor: pointer; color: #fff; font-weight: bold; margin-right: 8px;">${escapeHtml(author.name)}</span>
+                    <span class="username" data-pubkey="${post.pubkey}" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="cursor: pointer; color: #fff; font-weight: bold; margin-right: 8px;">${escapeHtml(author.name)}</span>
                     <span class="handle" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="cursor: pointer; color: #999; margin-right: 8px;">@${escapeHtml(author.handle)}</span>
                     <span class="timestamp" style="color: #666;">${formatTime(post.created_at)}</span>
                 </div>
@@ -2128,9 +2159,11 @@ function getLightningAddress(post) {
     return null;
 }
 
-// Parse content (placeholder - would use actual function)
+// Parse content using the full utils.js implementation
 function parseContent(content) {
-    return content; // Simplified for now
+    // Use the real parseContent from utils.js that handles images, videos, mentions, embedded notes, etc.
+    // Don't skip embedded notes - they'll show as placeholders which is better than raw text
+    return utilsParseContent(content, false);
 }
 
 // Format time (placeholder - would use actual function)

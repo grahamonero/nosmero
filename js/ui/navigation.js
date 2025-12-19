@@ -71,8 +71,9 @@ export async function handleFeedTabClick(feedType, event) {
     // First, navigate to home page (this will hide thread/messages/profile/etc and show feed)
     // Only navigate if we're not already on home page
     // Use skipHistory=true since we're about to push our own history state
+    // Use skipFeedLoad=true to prevent loading the default Following feed (we'll load the correct feed below)
     if (StateModule.currentPage !== 'home' && typeof window.navigateTo === 'function') {
-        window.navigateTo('home', true);
+        window.navigateTo('home', true, true); // skipHistory=true, skipFeedLoad=true
         // Wait for page transition and following list to load (needed for Web of Trust feed)
         // Web of Trust requires State.followingUsers to be populated
         if (feedType === 'global' && StateModule.publicKey) {

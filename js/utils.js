@@ -305,11 +305,17 @@ export async function processEmbeddedNotes(containerId) {
 
         try {
             let eventId;
+            let relayHints = [];
 
             if (nevent) {
                 const { nip19 } = window.NostrTools;
                 const decoded = nip19.decode(nevent);
                 eventId = decoded.data.id || decoded.data;
+                // Extract relay hints from nevent (NIP-19)
+                if (decoded.data.relays && decoded.data.relays.length > 0) {
+                    relayHints = decoded.data.relays;
+                    console.log('📍 Relay hints from nevent:', relayHints);
+                }
             } else if (noteid) {
                 eventId = noteid;
             }
@@ -327,8 +333,8 @@ export async function processEmbeddedNotes(containerId) {
 
             if (!event) {
                 console.log('📡 Event not in cache, fetching from relays...');
-                // Try to fetch from relays
-                event = await fetchEventById(eventId);
+                // Try to fetch from relays, using relay hints if available
+                event = await fetchEventById(eventId, relayHints);
             } else {
                 console.log('✅ Event found in cache');
             }
@@ -371,19 +377,41 @@ export async function processEmbeddedNotes(containerId) {
 }
 
 // Fetch a single event by ID from relays
-async function fetchEventById(eventId) {
+// relayHints: optional array of relay URLs where the event is known to exist
+async function fetchEventById(eventId, relayHints = []) {
     try {
         const Relays = await import('./relays.js');
         const State = await import('./state.js');
         const readRelays = Relays.getReadRelays();
 
+        // Combine relay hints with user's read relays, prioritizing hints
+        // Also add some fallback discovery relays for better coverage
+        const fallbackRelays = [
+            'wss://relay.damus.io',
+            'wss://relay.nostr.band',
+            'wss://nos.lol',
+            'wss://relay.snort.social'
+        ];
+
+        // Build relay list: hints first, then user relays, then fallbacks
+        const allRelays = [...new Set([
+            ...relayHints,
+            ...readRelays,
+            ...fallbackRelays
+        ])];
+
+        console.log('📡 Fetching event from relays:', allRelays.length, 'relays (hints:', relayHints.length, ')');
+
         return new Promise((resolve) => {
             let found = false;
             const timeout = setTimeout(() => {
-                if (!found) resolve(null);
-            }, 3000); // 3 second timeout
+                if (!found) {
+                    console.log('⏱️ Event fetch timed out');
+                    resolve(null);
+                }
+            }, 5000); // 5 second timeout (increased from 3)
 
-            const sub = State.pool.subscribeMany(readRelays, [
+            const sub = State.pool.subscribeMany(allRelays, [
                 { ids: [eventId] }
             ], {
                 onevent(event) {
@@ -393,15 +421,13 @@ async function fetchEventById(eventId) {
                         sub.close();
                         // Cache the event
                         State.eventCache[eventId] = event;
+                        console.log('✅ Event found:', eventId.slice(0, 8));
                         resolve(event);
                     }
                 },
                 oneose() {
-                    if (!found) {
-                        clearTimeout(timeout);
-                        sub.close();
-                        resolve(null);
-                    }
+                    // Don't resolve on first EOSE - wait for all relays or timeout
+                    // This gives slower relays a chance to respond
                 }
             });
         });

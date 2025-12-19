@@ -589,9 +589,18 @@ async function handleNavigation(event) {
     }
 
     // Navigate to requested page
+    // skipFeedLoad is used when switching feed tabs to prevent loading the default feed
+    const skipFeedLoad = event.currentTarget.dataset.skipFeedLoad === 'true';
+
     switch (tab) {
         case 'home':
-            await loadHomeFeed();
+            if (!skipFeedLoad) {
+                await loadHomeFeed();
+            } else {
+                // Just set current page without loading feed
+                State.setCurrentPage('home');
+                console.log('📋 Home page shown (feed load skipped for tab switch)');
+            }
             break;
         case 'search':
             await Search.loadSearch();
@@ -3386,8 +3395,9 @@ function closeMobileMenu() {
  * This enables back/forward buttons to work within the app
  * @param {string} page - Page name (home, search, messages, notifications, profile, settings)
  * @param {boolean} skipHistory - If true, don't push to history (used by popstate)
+ * @param {boolean} skipFeedLoad - If true, don't load feed content (used when switching feed tabs)
  */
-function navigateTo(page, skipHistory = false) {
+function navigateTo(page, skipHistory = false, skipFeedLoad = false) {
     // Update browser history (unless we're responding to popstate)
     if (!skipHistory) {
         const url = page === 'home' ? '/' : `/${page}`;
@@ -3403,7 +3413,8 @@ function navigateTo(page, skipHistory = false) {
     const syntheticEvent = {
         currentTarget: {
             dataset: {
-                tab: page
+                tab: page,
+                skipFeedLoad: skipFeedLoad ? 'true' : ''
             },
             classList: {
                 add: () => {},
