@@ -536,6 +536,16 @@ async function handleNavigation(event) {
     const feed = document.getElementById('feed');
     if (feed) {
         feed.style.display = 'block';
+
+        // Restore proper feed structure if it was destroyed (e.g., by Tip Activity)
+        // Check if homeFeedList exists, if not, recreate the structure
+        if (!document.getElementById('homeFeedList')) {
+            feed.innerHTML = `
+                <div id="homeFeedHeader" style="display: none;"></div>
+                <div id="homeFeedList"></div>
+                <div id="loadMoreContainer" style="display: none;"></div>
+            `;
+        }
     }
 
     // Navigate to requested page
@@ -1320,7 +1330,7 @@ function displayUserPosts(posts) {
             }
 
             // Fetch parent posts and their authors for replies
-            const parentPostsMap = await Posts.fetchParentPosts(posts);
+            const parentPostsMap = await Posts.fetchParentPosts(posts, Posts.getParentPostRelays());
             const parentAuthors = Object.values(parentPostsMap)
                 .filter(parent => parent)
                 .map(parent => parent.pubkey);
@@ -1440,7 +1450,7 @@ async function loadMoreOwnPosts() {
 
         // Fetch parent posts, disclosed tips, and engagement counts
         const [parentPostsMap, disclosedTipsData, engagementData] = await Promise.all([
-            Posts.fetchParentPosts(postsToRender),
+            Posts.fetchParentPosts(postsToRender, Posts.getParentPostRelays()),
             Posts.fetchDisclosedTips(postsToRender),
             Posts.fetchEngagementCounts(postsToRender.map(p => p.id))
         ]);

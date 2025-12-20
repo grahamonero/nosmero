@@ -2257,7 +2257,7 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
 
         // Fetch parent posts, disclosed tips, and engagement counts
         const [parentPostsMap, disclosedTipsData, engagementData] = await Promise.all([
-            PostsModule.fetchParentPosts(posts),
+            PostsModule.fetchParentPosts(posts, PostsModule.getParentPostRelays()),
             PostsModule.fetchDisclosedTips(posts),
             PostsModule.fetchEngagementCounts(posts.map(p => p.id))
         ]);
@@ -2353,7 +2353,7 @@ async function loadMoreProfilePosts() {
 
         // Fetch parent posts, disclosed tips, and engagement counts
         const [parentPostsMap, disclosedTipsData, engagementData] = await Promise.all([
-            PostsModule.fetchParentPosts(postsToRender),
+            PostsModule.fetchParentPosts(postsToRender, PostsModule.getParentPostRelays()),
             PostsModule.fetchDisclosedTips(postsToRender),
             PostsModule.fetchEngagementCounts(postsToRender.map(p => p.id))
         ]);
@@ -2525,7 +2525,7 @@ export async function viewUserProfilePage(pubkey) {
                         <button onclick="copyUserNpub('${pubkey}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 8px 16px; cursor: pointer; font-size: 14px;">📋 Copy npub</button>
                     </div>
                 </div>
-                <div id="userPostsContainer" style="word-break: break-word; overflow-wrap: break-word; max-width: 100%;">
+                <div id="userPostsContainer" style="word-break: break-word; overflow-wrap: break-word; max-width: 100%; padding-bottom: 80px;">
                     <div style="text-align: center; color: #666; padding: 40px;">
                         <p>Loading user posts...</p>
                     </div>
