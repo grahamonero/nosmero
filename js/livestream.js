@@ -282,6 +282,22 @@ export async function postChatMessage(stream, content) {
 // ==================== UI RENDERING ====================
 
 /**
+ * Validate image URL to prevent XSS attacks
+ * Only allow http/https protocols
+ */
+function isSafeImageUrl(url) {
+    if (!url || typeof url !== 'string') {
+        return false;
+    }
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Render a livestream card for the feed
  */
 export function renderStreamCard(stream, profile) {
@@ -289,6 +305,9 @@ export function renderStreamCard(stream, profile) {
     const profilePic = profile?.picture || '/default-avatar.png';
     const displayName = profile?.name || profile?.display_name || stream.pubkey.slice(0, 8) + '...';
     const viewerText = stream.viewerCount ? `${stream.viewerCount} viewers` : '';
+
+    // Validate image URL before using it
+    const safeImageUrl = stream.image && isSafeImageUrl(stream.image) ? Utils.escapeHtml(stream.image) : null;
 
     return `
         <div class="livestream-card ${isLive ? 'is-live' : ''}" data-stream-id="${stream.id}" onclick="window.NostrLivestream.openStream('${stream.id}')">
@@ -301,8 +320,8 @@ export function renderStreamCard(stream, profile) {
                 </div>
             </div>
             <div class="livestream-thumbnail">
-                ${stream.image
-                    ? `<img src="${Utils.escapeHtml(stream.image)}" alt="Stream thumbnail" onerror="this.parentElement.innerHTML='<div class=\\'no-thumbnail\\'>No Preview</div>'">`
+                ${safeImageUrl
+                    ? `<img src="${safeImageUrl}" alt="Stream thumbnail" onerror="this.parentElement.innerHTML='<div class=\\'no-thumbnail\\'>No Preview</div>'">`
                     : '<div class="no-thumbnail">No Preview</div>'
                 }
                 ${isLive ? '<div class="play-overlay">▶ Watch</div>' : ''}
@@ -460,6 +479,14 @@ function renderStreamInRightPanel(stream, profile) {
 
     if (!rightPanel || !rightPanelContent) return;
 
+    // Hide the default feed (don't destroy it)
+    const defaultFeed = document.getElementById('rightPanelDefaultFeed');
+    if (defaultFeed) defaultFeed.style.display = 'none';
+
+    // Remove any existing stream view
+    const existingStreamView = document.getElementById('livestreamRightPanelView');
+    if (existingStreamView) existingStreamView.remove();
+
     // Show right panel
     rightPanel.classList.add('active');
 
@@ -467,7 +494,13 @@ function renderStreamInRightPanel(stream, profile) {
     const profilePic = profile?.picture || '/default-avatar.png';
     const isLive = stream.status === 'live';
 
-    rightPanelContent.innerHTML = `
+    // Validate image URL before using it
+    const safeImageUrl = stream.image && isSafeImageUrl(stream.image) ? Utils.escapeHtml(stream.image) : null;
+
+    // Create stream view container (don't use innerHTML to preserve defaultFeed)
+    const streamViewContainer = document.createElement('div');
+    streamViewContainer.id = 'livestreamRightPanelView';
+    streamViewContainer.innerHTML = `
         <div class="stream-view">
             <div class="stream-view-header">
                 <button class="back-btn" onclick="window.NostrLivestream.closeStreamView()">← Back</button>
@@ -478,7 +511,7 @@ function renderStreamInRightPanel(stream, profile) {
                 ${stream.streamUrl && isLive
                     ? `<video id="streamPlayer" class="stream-player" controls autoplay playsinline></video>`
                     : `<div class="stream-offline">
-                        ${stream.image ? `<img src="${Utils.escapeHtml(stream.image)}" alt="Stream thumbnail">` : ''}
+                        ${safeImageUrl ? `<img src="${safeImageUrl}" alt="Stream thumbnail">` : ''}
                         <div class="offline-overlay">${isLive ? 'Loading...' : 'Stream Ended'}</div>
                        </div>`
                 }
@@ -517,6 +550,9 @@ function renderStreamInRightPanel(stream, profile) {
         </div>
     `;
 
+    // Append the stream view container to the right panel
+    rightPanelContent.appendChild(streamViewContainer);
+
     // Initialize HLS player if stream is live
     if (stream.streamUrl && isLive) {
         initializePlayer(stream.streamUrl);
@@ -546,6 +582,9 @@ function renderStreamModal(stream, profile) {
     const profilePic = profile?.picture || '/default-avatar.png';
     const isLive = stream.status === 'live';
 
+    // Validate image URL before using it
+    const safeImageUrl = stream.image && isSafeImageUrl(stream.image) ? Utils.escapeHtml(stream.image) : null;
+
     const modal = document.createElement('div');
     modal.id = 'streamModal';
     modal.className = 'stream-modal';
@@ -560,7 +599,7 @@ function renderStreamModal(stream, profile) {
                 ${stream.streamUrl && isLive
                     ? `<video id="streamPlayer" class="stream-player" controls autoplay playsinline></video>`
                     : `<div class="stream-offline">
-                        ${stream.image ? `<img src="${Utils.escapeHtml(stream.image)}" alt="">` : ''}
+                        ${safeImageUrl ? `<img src="${safeImageUrl}" alt="">` : ''}
                         <div class="offline-overlay">${isLive ? 'Loading...' : 'Stream Ended'}</div>
                        </div>`
                 }
@@ -796,13 +835,13 @@ export function closeStreamView() {
         return;
     }
 
-    // Hide right panel
-    const rightPanel = document.getElementById('rightPanel');
-    if (rightPanel) {
-        rightPanel.classList.remove('active');
-        const content = document.getElementById('rightPanelContent');
-        if (content) content.innerHTML = '';
-    }
+    // Remove stream view container (don't clear innerHTML - that destroys defaultFeed)
+    const streamView = document.getElementById('livestreamRightPanelView');
+    if (streamView) streamView.remove();
+
+    // Show the default feed (dashboard)
+    const defaultFeed = document.getElementById('rightPanelDefaultFeed');
+    if (defaultFeed) defaultFeed.style.display = '';
 }
 
 /**
@@ -956,8 +995,9 @@ export async function sendTip() {
     const streamerPubkey = modal.dataset.streamerPubkey;
     const streamEventRef = modal.dataset.streamEventRef;
 
-    if (!amount || amount < 0.001) {
-        Utils.showNotification('Minimum tip is 0.001 XMR', 'error');
+    // Comprehensive amount validation
+    if (isNaN(amount) || !isFinite(amount) || amount < 0.001 || amount > 1000000) {
+        Utils.showNotification('Invalid amount. Minimum: 0.001 XMR, Maximum: 1,000,000 XMR', 'error');
         return;
     }
 
@@ -971,8 +1011,13 @@ export async function sendTip() {
     try {
         const MoneroClient = window.MoneroClient;
 
-        // Convert to atomic units (piconero)
-        const atomicAmount = BigInt(Math.floor(amount * 1e12));
+        // Convert to atomic units (piconero) - use Math.round to avoid precision issues
+        const atomicUnits = Math.round(amount * 1e12);
+        // Validate before converting to BigInt
+        if (!Number.isInteger(atomicUnits) || atomicUnits < 0) {
+            throw new Error('Invalid amount conversion');
+        }
+        const atomicAmount = BigInt(atomicUnits);
 
         // Create and preview the transaction
         statusDiv.textContent = 'Preparing transaction...';
@@ -1008,11 +1053,13 @@ export async function sendTip() {
 
     } catch (error) {
         console.error('Tip failed:', error);
-        statusDiv.textContent = `Error: ${error.message}`;
+        // Use textContent to prevent XSS
+        statusDiv.textContent = 'Error: ' + (error.message || 'Unknown error');
         statusDiv.className = 'tip-status error';
         sendBtn.disabled = false;
         sendBtn.textContent = 'Send Tip';
-        Utils.showNotification('Tip failed: ' + error.message, 'error');
+        // Safe notification - Utils.showNotification should handle escaping
+        Utils.showNotification('Tip failed: ' + (error.message || 'Unknown error'), 'error');
     }
 }
 
@@ -1060,12 +1107,20 @@ async function publishStreamTip({ streamerPubkey, streamEventRef, amount, messag
  * Generate a consistent color from a string (for chat names)
  */
 function stringToColor(str) {
+    if (!str || typeof str !== 'string') {
+        return 'hsl(0, 70%, 60%)';
+    }
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
         hash = str.charCodeAt(i) + ((hash << 5) - hash);
     }
-    const hue = hash % 360;
-    return `hsl(${hue}, 70%, 60%)`;
+    // Ensure hue is a safe integer between 0 and 360
+    const hue = Math.abs(hash % 360);
+    // Validate output format - return safe HSL string
+    if (!Number.isFinite(hue)) {
+        return 'hsl(0, 70%, 60%)';
+    }
+    return `hsl(${Math.floor(hue)}, 70%, 60%)`;
 }
 
 // ==================== CLEANUP ====================

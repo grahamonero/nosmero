@@ -5,6 +5,87 @@
 // Cache for NIP-05 verification results (1 hour TTL)
 let nip05Cache = {};
 const CACHE_DURATION = 3600000; // 1 hour in milliseconds
+const MAX_CACHE_SIZE = 1000; // Maximum number of cache entries
+const MAX_RESPONSE_SIZE = 100 * 1024; // 100KB maximum response size
+
+// Sanitize HTML to prevent XSS attacks
+function sanitizeForHTML(str) {
+    if (typeof str !== 'string') return '';
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+        .replace(/\//g, '&#x2F;');
+}
+
+// Check if domain is allowed (SSRF protection)
+function isAllowedDomain(domain) {
+    if (!domain || typeof domain !== 'string') {
+        return false;
+    }
+
+    // Convert to lowercase for comparison
+    const lowerDomain = domain.toLowerCase();
+
+    // Block localhost variants
+    if (lowerDomain === 'localhost' ||
+        lowerDomain.endsWith('.localhost') ||
+        lowerDomain === '127.0.0.1' ||
+        lowerDomain.startsWith('127.')) {
+        return false;
+    }
+
+    // Block private IP ranges (10.x.x.x, 192.168.x.x, 172.16-31.x.x)
+    const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+    const ipMatch = lowerDomain.match(ipv4Regex);
+    if (ipMatch) {
+        const firstOctet = parseInt(ipMatch[1]);
+        const secondOctet = parseInt(ipMatch[2]);
+
+        // 10.0.0.0/8
+        if (firstOctet === 10) return false;
+
+        // 192.168.0.0/16
+        if (firstOctet === 192 && secondOctet === 168) return false;
+
+        // 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+        if (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) return false;
+
+        // 169.254.0.0/16 (link-local)
+        if (firstOctet === 169 && secondOctet === 254) return false;
+    }
+
+    // Block metadata endpoints
+    if (lowerDomain === '169.254.169.254' || // AWS/Azure/GCP metadata
+        lowerDomain === 'metadata.google.internal' ||
+        lowerDomain.includes('metadata')) {
+        return false;
+    }
+
+    return true;
+}
+
+// Validate name format to prevent path traversal and injection
+function isValidNameFormat(name) {
+    if (!name || typeof name !== 'string') {
+        return false;
+    }
+
+    // Only allow alphanumeric, underscore, hyphen, and dot
+    const validPattern = /^[a-z0-9_\-\.]+$/i;
+    if (!validPattern.test(name)) {
+        return false;
+    }
+
+    // Reject path traversal patterns
+    if (name.includes('..') || name.includes('//')) {
+        return false;
+    }
+
+    return true;
+}
 
 // Verify NIP-05 identifier against a public key
 export async function verifyNip05(nip05, pubkey) {
@@ -19,7 +100,17 @@ export async function verifyNip05(nip05, pubkey) {
         if (!name || !domain) {
             return { valid: false, error: 'Invalid NIP-05 format' };
         }
-        
+
+        // Validate name format to prevent path traversal and injection attacks
+        if (!isValidNameFormat(name)) {
+            return { valid: false, error: 'Invalid name format' };
+        }
+
+        // Validate domain to prevent SSRF attacks
+        if (!isAllowedDomain(domain)) {
+            return { valid: false, error: 'Domain not allowed' };
+        }
+
         // Construct the well-known URL for verification
         const url = `https://${domain}/.well-known/nostr.json?name=${encodeURIComponent(name)}`;
         
@@ -36,12 +127,21 @@ export async function verifyNip05(nip05, pubkey) {
         });
         
         if (!response.ok) {
-            return { 
-                valid: false, 
-                error: `Failed to fetch verification (${response.status})` 
+            return {
+                valid: false,
+                error: `Failed to fetch verification (${response.status})`
             };
         }
-        
+
+        // Check response size to prevent DoS attacks
+        const contentLength = response.headers.get('content-length');
+        if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
+            return {
+                valid: false,
+                error: 'Response too large'
+            };
+        }
+
         const data = await response.json();
         
         // Validate the response structure
@@ -70,11 +170,11 @@ export async function verifyNip05(nip05, pubkey) {
         }
         
         console.log('NIP-05 verification successful for', nip05);
-        return { 
-            valid: true, 
+        return {
+            valid: true,
             verified: true,
-            domain: domain,
-            name: name
+            domain: sanitizeForHTML(domain),
+            name: sanitizeForHTML(name)
         };
         
     } catch (error) {
@@ -103,11 +203,29 @@ export async function getNip05Verification(nip05, pubkey) {
     
     // Perform verification and cache result
     const result = await verifyNip05(nip05, pubkey);
+
+    // Implement LRU eviction if cache is full
+    const cacheKeys = Object.keys(nip05Cache);
+    if (cacheKeys.length >= MAX_CACHE_SIZE) {
+        // Find and remove the oldest entry
+        let oldestKey = null;
+        let oldestTime = Date.now();
+        for (const key of cacheKeys) {
+            if (nip05Cache[key].timestamp < oldestTime) {
+                oldestTime = nip05Cache[key].timestamp;
+                oldestKey = key;
+            }
+        }
+        if (oldestKey) {
+            delete nip05Cache[oldestKey];
+        }
+    }
+
     nip05Cache[cacheKey] = {
         result: result,
         timestamp: Date.now()
     };
-    
+
     return result;
 }
 
@@ -124,17 +242,22 @@ export function isValidNip05Format(nip05) {
     }
     
     const [name, domain] = parts;
-    
-    // Name part validation (basic)
-    if (!name || name.length === 0) {
+
+    // Name part validation
+    if (!isValidNameFormat(name)) {
         return false;
     }
-    
-    // Domain part validation (basic)
+
+    // Domain part validation
     if (!domain || domain.length === 0 || !domain.includes('.')) {
         return false;
     }
-    
+
+    // Validate domain to prevent SSRF
+    if (!isAllowedDomain(domain)) {
+        return false;
+    }
+
     return true;
 }
 

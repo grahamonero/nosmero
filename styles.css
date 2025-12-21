@@ -1576,7 +1576,7 @@
         
         .message-composer {
             padding: 20px;
-            margin-bottom: 100px; /* Space for bottom nav */
+            margin-bottom: 150px; /* Space for bottom nav */
             border-top: 1px solid #333;
             background: #0a0a0a;
             display: flex;

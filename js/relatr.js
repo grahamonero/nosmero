@@ -33,6 +33,20 @@ export const TRUST_LEVELS = {
 // ==================== CORE FUNCTIONS ====================
 
 /**
+ * Validate pubkey format (prevents ReDoS attacks)
+ * @param {string} pubkey - Pubkey to validate
+ * @returns {boolean} True if valid hex pubkey
+ */
+function isValidPubkey(pubkey) {
+  // Check length first to prevent ReDoS on malformed input
+  if (!pubkey || typeof pubkey !== 'string' || pubkey.length !== 64) {
+    return false;
+  }
+  // Safe to use regex after length validation
+  return /^[0-9a-f]{64}$/i.test(pubkey);
+}
+
+/**
  * Get trust score for a single pubkey
  * @param {string} pubkey - Nostr public key (hex)
  * @param {string} sourcePubkey - Optional: perspective pubkey (defaults to current user)
@@ -47,9 +61,15 @@ export async function getTrustScore(pubkey, sourcePubkey = null) {
   }
 
   // Validate pubkey format
-  if (!pubkey || !/^[0-9a-f]{64}$/i.test(pubkey)) {
+  if (!isValidPubkey(pubkey)) {
     console.warn('[Relatr] Invalid pubkey format:', pubkey);
     return { score: 0, distance: -1, cached: false, error: 'Invalid pubkey' };
+  }
+
+  // Validate sourcePubkey if provided
+  if (sourcePubkey && !isValidPubkey(sourcePubkey)) {
+    console.warn('[Relatr] Invalid sourcePubkey format:', sourcePubkey);
+    sourcePubkey = null; // Ignore invalid source
   }
 
   // Check if personalization is enabled
@@ -122,8 +142,14 @@ export async function getTrustScores(pubkeys, sourcePubkey = null) {
   const personalizeScores = localStorage.getItem('personalizeScores') !== 'false'; // Default: true
   const effectiveSource = personalizeScores ? sourcePubkey : null;
 
+  // Validate sourcePubkey if provided
+  if (sourcePubkey && !isValidPubkey(sourcePubkey)) {
+    console.warn('[Relatr] Invalid sourcePubkey format:', sourcePubkey);
+    sourcePubkey = null; // Ignore invalid source
+  }
+
   // Filter valid pubkeys
-  const validPubkeys = pubkeys.filter(pk => /^[0-9a-f]{64}$/i.test(pk));
+  const validPubkeys = pubkeys.filter(pk => isValidPubkey(pk));
 
   if (validPubkeys.length === 0) {
     console.warn('[Relatr] No valid pubkeys in batch request');
@@ -180,6 +206,12 @@ export async function getTrustScores(pubkeys, sourcePubkey = null) {
  */
 async function fetchBatch(pubkeys, sourcePubkey = null) {
   try {
+    // Validate sourcePubkey before using in API request
+    if (sourcePubkey && !isValidPubkey(sourcePubkey)) {
+      console.warn('[Relatr] Invalid sourcePubkey in fetchBatch:', sourcePubkey);
+      sourcePubkey = null; // Ignore invalid source
+    }
+
     // Check if user opted out of data sharing
     const shareData = localStorage.getItem('shareDataWithRelatr') === 'true'; // Default: false
     const headers = {
@@ -243,7 +275,7 @@ async function fetchBatch(pubkeys, sourcePubkey = null) {
  * @param {string} sourcePubkey - Optional: perspective pubkey
  */
 export function queueTrustScoreRequest(pubkey, sourcePubkey = null) {
-  if (!/^[0-9a-f]{64}$/i.test(pubkey)) {
+  if (!isValidPubkey(pubkey)) {
     return;
   }
 
@@ -331,7 +363,8 @@ export function getTrustBadge(score) {
  * Call when user logs out or switches accounts
  */
 export function clearTrustScoreCache() {
-  trustScoreCache = {};
+  // Clear cache by deleting keys (avoid mutation issues)
+  Object.keys(trustScoreCache).forEach(key => delete trustScoreCache[key]);
   pendingPubkeys.clear();
   if (batchTimeout) {
     clearTimeout(batchTimeout);

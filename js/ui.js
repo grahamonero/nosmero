@@ -4257,6 +4257,19 @@ export function showToast(message, type = 'info', duration = 3000, title = '') {
 
     const toastId = ++toastIdCounter;
 
+    // Whitelist valid type values
+    const validTypes = ['success', 'error', 'info', 'warning'];
+    const sanitizedType = validTypes.includes(type) ? type : 'info';
+
+    // Validate duration parameter
+    let sanitizedDuration = duration;
+    if (typeof duration !== 'number' || isNaN(duration) || !isFinite(duration)) {
+        sanitizedDuration = 3000;
+    } else {
+        // Clamp to reasonable range (0-3600000 ms = 0-1 hour)
+        sanitizedDuration = Math.max(0, Math.min(3600000, duration));
+    }
+
     // Icon mapping
     const icons = {
         success: '✅',
@@ -4267,29 +4280,29 @@ export function showToast(message, type = 'info', duration = 3000, title = '') {
 
     // Create toast element
     const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
+    toast.className = `toast ${sanitizedType}`;
     toast.setAttribute('data-toast-id', toastId);
 
     toast.innerHTML = `
-        <div class="toast-icon">${icons[type] || 'ℹ️'}</div>
+        <div class="toast-icon">${icons[sanitizedType]}</div>
         <div class="toast-content">
             ${title ? `<div class="toast-title">${escapeHtml(title)}</div>` : ''}
             <div class="toast-message">${escapeHtml(message)}</div>
         </div>
         <button class="toast-close" data-action="dismiss-toast" data-toast-id="${toastId}">×</button>
-        ${duration > 0 ? `<div class="toast-progress" style="animation-duration: ${duration}ms;"></div>` : ''}
+        ${sanitizedDuration > 0 ? `<div class="toast-progress" style="animation-duration: ${sanitizedDuration}ms;"></div>` : ''}
     `;
 
-    // Add event listeners
-    const closeBtn = toast.querySelector('[data-action="dismiss-toast"]');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', (e) => {
+    // Add event listener for dismiss button
+    const closeButton = toast.querySelector('[data-action="dismiss-toast"]');
+    if (closeButton) {
+        closeButton.addEventListener('click', (e) => {
             e.stopPropagation();
-            const tid = parseInt(closeBtn.dataset.toastId, 10);
-            dismissToast(tid);
+            dismissToast(toastId);
         });
     }
 
+    // Add click to dismiss
     toast.addEventListener('click', (e) => {
         if (!e.target.classList.contains('toast-close')) {
             dismissToast(toastId);
@@ -4300,10 +4313,10 @@ export function showToast(message, type = 'info', duration = 3000, title = '') {
     activeToasts.set(toastId, toast);
 
     // Auto-dismiss after duration
-    if (duration > 0) {
+    if (sanitizedDuration > 0) {
         setTimeout(() => {
             dismissToast(toastId);
-        }, duration);
+        }, sanitizedDuration);
     }
 
     return toastId;

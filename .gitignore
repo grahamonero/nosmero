@@ -54,4 +54,3 @@ PENDING_FIXES.md
 # Dev-only files (never push to production or GitHub)
 analytics.html
 test-client-tags.html
-node_modules/
