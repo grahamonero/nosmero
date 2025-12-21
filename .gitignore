@@ -47,3 +47,7 @@ nosmeroav.png
 # System files
 .DS_Store
 Thumbs.db
+
+# Test and trigger scripts (development only)
+api/test-*.js
+api/trigger-*.js
