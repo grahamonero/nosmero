@@ -12,6 +12,14 @@ import { showSuccessToast, showErrorToast } from '../ui.js';
 let emailCheckTimer = null;
 let usernameCheckTimer = null;
 
+// Module-level closure to hold sensitive data temporarily (not exposed in DOM/sessionStorage)
+let pendingAuth = {
+  nsec: null,
+  npub: null,
+  displayName: null,
+  hasPassword: false
+};
+
 // ==================== Modal State Management ====================
 
 /**
@@ -122,9 +130,9 @@ export async function handleLogin(e) {
     if (window.completeLoginWithNsec) {
       await window.completeLoginWithNsec(result.nsec, null, { skipPin: true });
     } else {
-      // Fallback - store in sessionStorage and reload
+      // Fallback - store temporarily in module closure and reload
       console.warn('completeLoginWithNsec not available, using fallback');
-      sessionStorage.setItem('nostr-session-key', result.nsec);
+      pendingAuth.nsec = result.nsec;
       window.location.reload();
     }
 
@@ -305,11 +313,11 @@ function showKeyDisplay(nsec, npub, displayName, hasPassword = false) {
   if (privateKeyDisplay) privateKeyDisplay.textContent = nsec;
   if (publicKeyDisplay) publicKeyDisplay.textContent = npub;
 
-  // Store temporarily for proceedToApp
-  keySection.dataset.nsec = nsec;
-  keySection.dataset.npub = npub;
-  keySection.dataset.displayName = displayName;
-  keySection.dataset.hasPassword = hasPassword ? 'true' : 'false';
+  // Store temporarily in module closure (not in DOM)
+  pendingAuth.nsec = nsec;
+  pendingAuth.npub = npub;
+  pendingAuth.displayName = displayName;
+  pendingAuth.hasPassword = hasPassword;
 
   keySection?.classList.remove('hidden');
 }
@@ -318,10 +326,7 @@ function showKeyDisplay(nsec, npub, displayName, hasPassword = false) {
  * User confirmed they saved keys - proceed to app
  */
 export async function proceedToApp() {
-  const keySection = document.getElementById('keyDisplaySection');
-  const nsec = keySection?.dataset.nsec;
-  const displayName = keySection?.dataset.displayName;
-  const hasPassword = keySection?.dataset.hasPassword === 'true';
+  const { nsec, displayName, hasPassword } = pendingAuth;
 
   if (!nsec) {
     showErrorToast('No keys found. Please try again.');
@@ -332,9 +337,17 @@ export async function proceedToApp() {
   // skipPin if user registered with password (password already protects their key on server)
   if (window.completeLoginWithNsec) {
     await window.completeLoginWithNsec(nsec, displayName, { skipPin: hasPassword });
+
+    // Clear sensitive data after successful login
+    pendingAuth = {
+      nsec: null,
+      npub: null,
+      displayName: null,
+      hasPassword: false
+    };
   } else {
-    sessionStorage.setItem('nostr-session-key', nsec);
-    if (displayName) sessionStorage.setItem('temp-display-name', displayName);
+    // Fallback - data already in module closure, just reload
+    console.warn('completeLoginWithNsec not available, using fallback');
     window.location.reload();
   }
 }
