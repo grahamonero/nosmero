@@ -2,7 +2,7 @@
 // Phase 7: Messages & Notifications
 // Functions for direct messages, conversations, notifications, and real-time subscriptions
 
-import { showNotification, escapeHtml, parseContent, signEvent } from './utils.js';
+import { showNotification, escapeHtml, parseContent, signEvent, renderLoginRequired } from './utils.js';
 import { encryptMessage, decryptMessage, wrapGiftMessage, wrapGiftMessageWithRecipient, unwrapGiftMessage } from './crypto.js';
 import * as State from './state.js';
 import * as Relays from './relays.js';
@@ -24,13 +24,105 @@ export let currentConversation = null;
 export let messagesSubscription = null;
 export let notificationType = 'all';
 
+// ==================== TIMEOUT CONSTANTS ====================
+const TIMEOUTS = {
+    MESSAGE_PROCESS: 3000,      // Processing single messages
+    SUBSCRIPTION_SHORT: 5000,   // Short subscription close
+    SUBSCRIPTION_LONG: 8000,    // Long subscription close
+    NOTE_FETCH_WAIT: 10000,     // Waiting for notes to load
+    PROFILE_FETCH: 12000        // Profile fetching
+};
+
+// ==================== DEBUG LOGGING ====================
+const DEBUG = localStorage.getItem('debug-messages') === 'true';
+function debugLog(...args) {
+    if (DEBUG) console.log('[Messages]', ...args);
+}
+
+// ==================== DM DECRYPTION HELPER ====================
+
+/**
+ * Decrypt a DM event (NIP-04 or NIP-17)
+ * @param {Object} event - The Nostr event to decrypt
+ * @returns {Promise<Object|null>} Decrypted message data or null if not for us/failed
+ */
+async function decryptDmEvent(event) {
+    try {
+        let otherPubkey, content, timestamp, sent, method;
+
+        // Handle NIP-17 gift-wrapped messages (kind 1059)
+        if (event.kind === 1059) {
+            const unwrapped = unwrapGiftMessage(event, State.getPrivateKeyForSigning());
+
+            if (!unwrapped || !unwrapped.content) {
+                return null; // Not for us
+            }
+
+            content = unwrapped.content;
+            method = 'NIP-17';
+            timestamp = unwrapped.created_at;
+
+            // Determine conversation partner
+            if (unwrapped.pubkey === State.publicKey) {
+                // My sent message backup - get recipient from 'p' tag
+                otherPubkey = unwrapped.tags?.find(t => t[0] === 'p')?.[1];
+                if (!otherPubkey) {
+                    console.warn('No recipient found in NIP-17 sent message:', event.id);
+                    return null;
+                }
+                sent = true;
+            } else {
+                // Received message from someone else
+                otherPubkey = unwrapped.pubkey;
+                sent = false;
+            }
+        }
+        // Handle NIP-04 encrypted messages (kind 4)
+        else if (event.kind === 4) {
+            if (event.pubkey === State.publicKey) {
+                // I sent this message
+                otherPubkey = event.tags.find(t => t[0] === 'p')?.[1];
+                sent = true;
+            } else {
+                // I received this message
+                otherPubkey = event.pubkey;
+                sent = false;
+            }
+
+            if (!otherPubkey) {
+                console.warn('No recipient found for NIP-04 message:', event.id);
+                return null;
+            }
+
+            content = await decryptMessage(event.content, otherPubkey, State.getPrivateKeyForSigning());
+            method = 'NIP-04';
+            timestamp = event.created_at;
+
+            if (!content) {
+                console.warn('Failed to decrypt NIP-04 message:', event.id);
+                return null;
+            }
+        }
+        else {
+            console.warn('Unknown message kind:', event.kind);
+            return null;
+        }
+
+        return { otherPubkey, content, timestamp, sent, method };
+
+    } catch (error) {
+        // Not for us (invalid MAC/base64) or decryption failed
+        return null;
+    }
+}
+
 // ==================== PROFILE FETCHING ====================
 
 // Fetch profiles for conversation participants
 async function fetchConversationProfiles(pubkeys) {
     if (!pubkeys || pubkeys.length === 0) return;
     
-    console.log('Fetching profiles for conversation participants:', pubkeys.length);
+    debugLog('Fetching profiles for conversation participants:', pubkeys.length);
     
     // Filter out pubkeys we already have profiles for
     const unknownPubkeys = pubkeys.filter(pubkey => !State.profileCache[pubkey]);
@@ -45,7 +137,7 @@ async function fetchConversationProfiles(pubkeys) {
         return;
     }
     
-    console.log('Fetching', unknownPubkeys.length, 'unknown profiles');
+    debugLog('Fetching', unknownPubkeys.length, 'unknown profiles');
     
     try {
         let profilesReceived = 0;
@@ -75,7 +167,7 @@ async function fetchConversationProfiles(pubkeys) {
                     }
                     
                     profilesReceived++;
-                    console.log('Received profile for conversation participant:', profile.name || 'Unknown', `(${profilesReceived}/${expectedProfiles})`);
+                    debugLog('Received profile for conversation participant:', profile.name || 'Unknown', `(${profilesReceived}/${expectedProfiles})`);
                     
                     // Re-render conversations with updated profiles
                     renderConversations();
@@ -84,7 +176,7 @@ async function fetchConversationProfiles(pubkeys) {
                 }
             },
             oneose() {
-                console.log('Profile fetch complete for conversation participants');
+                debugLog('Profile fetch complete for conversation participants');
                 sub.close();
             }
         });
@@ -92,8 +184,8 @@ async function fetchConversationProfiles(pubkeys) {
         // Timeout after 5 seconds
         setTimeout(() => {
             sub.close();
-            console.log('Profile fetch timeout for conversation participants');
-        }, 5000);
+            debugLog('Profile fetch timeout for conversation participants');
+        }, TIMEOUTS.SUBSCRIPTION_SHORT);
         
     } catch (error) {
         console.error('Error fetching conversation profiles:', error);
@@ -120,7 +212,7 @@ export async function fetchMessagesInBackground() {
         const dmEvents = [];
         const processedIds = new Set();
         let hasProcessed = false;
-        console.log('Fetching messages in background for pubkey:', State.publicKey);
+        debugLog('Fetching messages in background for pubkey:', State.publicKey);
 
         // Check if pool is initialized
         if (!State.pool) {
@@ -133,11 +225,7 @@ export async function fetchMessagesInBackground() {
         let relaysToUse = readRelays.length > 0 ? readRelays : State.relays;
 
         // Always include Nosmero relay for NIP-17 DMs
-        // Use wss:// for production and dev (both HTTPS), ws:// only for localhost
-        const nosmeroRelay = window.location.protocol === 'https:'
-            ? 'wss://nosmero.com/nip78-relay'
-            : 'ws://nosmero.com:8080/nip78-relay';
-
+        const nosmeroRelay = Relays.getNosmeroRelay();
         if (!relaysToUse.includes(nosmeroRelay)) {
             relaysToUse = [...relaysToUse, nosmeroRelay];
         }
@@ -164,7 +252,7 @@ export async function fetchMessagesInBackground() {
                 }
             },
             oneose() {
-                console.log('Background DM fetch complete:', dmEvents.length, 'events');
+                debugLog('Background DM fetch complete:', dmEvents.length, 'events');
             }
         });
 
@@ -174,7 +262,7 @@ export async function fetchMessagesInBackground() {
                 hasProcessed = true;
                 processMessages(dmEvents);
             }
-        }, 3000);
+        }, TIMEOUTS.MESSAGE_PROCESS);
 
     } catch (error) {
         console.error('Error fetching messages in background:', error);
@@ -188,37 +276,7 @@ export async function loadMessages() {
     if (!State.publicKey) {
         document.getElementById('messagesPage').style.display = 'none';
         document.getElementById('feed').style.display = 'block';
-        document.getElementById('feed').innerHTML = `
-            <div style="padding: 40px; text-align: center; max-width: 500px; margin: 0 auto;">
-                <h2 style="color: #FF6600; margin-bottom: 30px;">Login Required</h2>
-                <p style="color: #ccc; margin-bottom: 40px; line-height: 1.6;">
-                    Please login to access encrypted messages
-                </p>
-                
-                <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 30px;">
-                    <button onclick="createNewAccount()" 
-                            style="padding: 16px 24px; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold; font-size: 16px;">
-                        🎭 Create New Account
-                    </button>
-                    
-                    <button onclick="showLoginWithNsec()" 
-                            style="padding: 16px 24px; border: none; border-radius: 12px; cursor: pointer; background: #333; color: #fff; font-weight: bold; font-size: 16px;">
-                        🔑 Login with Private Key
-                    </button>
-                    
-                    <button onclick="loginWithExtension()" 
-                            style="padding: 16px 24px; border: none; border-radius: 12px; cursor: pointer; background: #6B73FF; color: #fff; font-weight: bold; font-size: 16px;">
-                        🔌 Connect Browser Extension
-                    </button>
-                </div>
-                
-                <div style="font-size: 14px; color: #666; line-height: 1.4;">
-                    <p>New to Nostr? Create a new account to get started.</p>
-                    <p>Have an existing key? Login with your nsec private key.</p>
-                    <p>Using nos2x or Alby? Connect your browser extension.</p>
-                </div>
-            </div>
-        `;
+        renderLoginRequired(document.getElementById('feed'), 'Please login to access encrypted messages');
         return;
     }
     
@@ -236,7 +294,7 @@ export async function loadMessages() {
         const dmEvents = [];
         const processedIds = new Set();
         let hasProcessed = false;
-        console.log('Loading messages for pubkey:', State.publicKey);
+        debugLog('Loading messages for pubkey:', State.publicKey);
         
         // Check if pool is initialized
         if (!State.pool) {
@@ -251,20 +309,16 @@ export async function loadMessages() {
         let relaysToUse = readRelays.length > 0 ? readRelays : State.relays;
 
         // Always include Nosmero relay for NIP-17 DMs
-        // Use wss:// for production and dev (both HTTPS), ws:// only for localhost
-        const nosmeroRelay = window.location.protocol === 'https:'
-            ? 'wss://nosmero.com/nip78-relay'
-            : 'ws://nosmero.com:8080/nip78-relay';
-
+        const nosmeroRelay = Relays.getNosmeroRelay();
         if (!relaysToUse.includes(nosmeroRelay)) {
             relaysToUse = [...relaysToUse, nosmeroRelay];
-            console.log('📨 Added Nosmero relay for receiving NIP-17 DMs');
+            debugLog('📨 Added Nosmero relay for receiving NIP-17 DMs');
         }
 
-        console.log('Subscribing to DMs on relays:', relaysToUse);
-        console.log('Read relays:', readRelays);
-        console.log('State.relays:', State.relays);
-        console.log('User pubkey:', State.publicKey);
+        debugLog('Subscribing to DMs on relays:', relaysToUse);
+        debugLog('Read relays:', readRelays);
+        debugLog('State.relays:', State.relays);
+        debugLog('User pubkey:', State.publicKey);
 
         // Get timestamp for messages from last 30 days
         const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
@@ -283,19 +337,19 @@ export async function loadMessages() {
         ], {
             onevent(event) {
                 if (!processedIds.has(event.id)) {
-                    console.log('📨 Received DM event:', event.id, 'kind:', event.kind, 'from:', event.pubkey);
+                    debugLog('📨 Received DM event:', event.id, 'kind:', event.kind, 'from:', event.pubkey);
                     dmEvents.push(event);
                     processedIds.add(event.id);
                     
                     // Handle real-time messages
                     if (hasProcessed) {
-                        console.log('Processing real-time message');
+                        debugLog('Processing real-time message');
                         processSingleMessage(event);
                     }
                 }
             },
             oneose() {
-                console.log('End of stored events, received', dmEvents.length, 'DM events');
+                debugLog('End of stored events, received', dmEvents.length, 'DM events');
             }
         });
         
@@ -303,10 +357,10 @@ export async function loadMessages() {
         setTimeout(() => {
             if (!hasProcessed) {
                 hasProcessed = true;
-                console.log('Processing all messages, total events:', dmEvents.length);
+                debugLog('Processing all messages, total events:', dmEvents.length);
                 processMessages(dmEvents);
             }
-        }, 3000);
+        }, TIMEOUTS.MESSAGE_PROCESS);
         
     } catch (error) {
         console.error('Error loading messages:', error);
@@ -319,7 +373,7 @@ export async function loadMessages() {
 
 // Process and decrypt messages
 export async function processMessages(events) {
-    console.log('Processing', events.length, 'message events');
+    debugLog('Processing', events.length, 'message events');
 
     // Reset conversations - we'll recalculate unread counts from timestamps
     conversations = {};
@@ -327,80 +381,13 @@ export async function processMessages(events) {
 
     for (const event of events) {
         try {
-            console.log('Processing event:', event.id, 'kind:', event.kind, 'from:', event.pubkey);
+            debugLog('Processing event:', event.id, 'kind:', event.kind, 'from:', event.pubkey);
 
-            let otherPubkey, decryptedContent, encryptionMethod, realTimestamp, messageSent;
+            // Decrypt the DM event using shared helper
+            const decrypted = await decryptDmEvent(event);
+            if (!decrypted) continue; // Not for us or decryption failed
 
-            // Handle NIP-17 gift-wrapped messages (kind 1059)
-            if (event.kind === 1059) {
-                try {
-                    const unwrapped = unwrapGiftMessage(event, State.privateKey);
-
-                    if (!unwrapped || !unwrapped.content) {
-                        // Not for us, silently skip
-                        continue;
-                    }
-
-                    // The unwrapped message contains the actual content and sender info
-                    decryptedContent = unwrapped.content;
-                    encryptionMethod = 'NIP-17';
-                    realTimestamp = unwrapped.created_at; // Use real timestamp from unwrapped rumor
-
-                    // Determine conversation partner:
-                    // If unwrapped.pubkey is ME, this is my sent message backup - get recipient from 'p' tag
-                    // If unwrapped.pubkey is someone else, this is a received message - they are the other person
-                    if (unwrapped.pubkey === State.publicKey) {
-                        // This is MY sent message backup copy
-                        otherPubkey = unwrapped.tags?.find(t => t[0] === 'p')?.[1];
-                        if (!otherPubkey) {
-                            console.warn('No recipient found in NIP-17 sent message:', event.id);
-                            continue;
-                        }
-                        messageSent = true;
-                    } else {
-                        // This is a received message from someone else
-                        otherPubkey = unwrapped.pubkey;
-                        messageSent = false;
-                    }
-
-                    console.log('✅ Unwrapped NIP-17 message, conversation with:', otherPubkey, 'sent:', messageSent);
-                } catch (error) {
-                    // Not for us (invalid MAC/base64), silently skip
-                    continue;
-                }
-            }
-            // Handle NIP-04 encrypted messages (kind 4)
-            else if (event.kind === 4) {
-                // Determine the other party's pubkey and whether this is sent or received
-                if (event.pubkey === State.publicKey) {
-                    // I sent this message
-                    otherPubkey = event.tags.find(t => t[0] === 'p')?.[1];
-                    messageSent = true;
-                } else {
-                    // I received this message
-                    otherPubkey = event.pubkey;
-                    messageSent = false;
-                }
-
-                if (!otherPubkey) {
-                    console.warn('No recipient found for NIP-04 message:', event.id);
-                    continue;
-                }
-
-                // Decrypt the NIP-04 message
-                decryptedContent = await decryptMessage(event.content, otherPubkey, State.privateKey);
-                encryptionMethod = 'NIP-04';
-                realTimestamp = event.created_at; // Use event timestamp for NIP-04
-
-                if (!decryptedContent) {
-                    console.warn('Failed to decrypt NIP-04 message:', event.id);
-                    continue;
-                }
-            }
-            else {
-                console.warn('Unknown message kind:', event.kind);
-                continue;
-            }
+            const { otherPubkey, content: decryptedContent, timestamp: realTimestamp, sent: messageSent, method: encryptionMethod } = decrypted;
 
             // Collect participant pubkeys for profile fetching
             participantPubkeys.add(otherPubkey);
@@ -448,7 +435,7 @@ export async function processMessages(events) {
         conv.messages.sort((a, b) => a.timestamp - b.timestamp);
     });
     
-    console.log('Processed conversations:', Object.keys(conversations).length);
+    debugLog('Processed conversations:', Object.keys(conversations).length);
 
     // Fetch profiles for conversation participants
     if (participantPubkeys.size > 0) {
@@ -461,72 +448,13 @@ export async function processMessages(events) {
 // Process a single message (for real-time updates)
 export async function processSingleMessage(event) {
     try {
-        console.log('Processing single message:', event.id, 'kind:', event.kind);
+        debugLog('Processing single message:', event.id, 'kind:', event.kind);
 
-        let otherPubkey, decryptedContent, encryptionMethod, realTimestamp, messageSent;
+        // Decrypt the DM event using shared helper
+        const decrypted = await decryptDmEvent(event);
+        if (!decrypted) return; // Not for us or decryption failed
 
-        // Handle NIP-17 gift-wrapped messages (kind 1059)
-        if (event.kind === 1059) {
-            try {
-                const unwrapped = unwrapGiftMessage(event, State.privateKey);
-
-                if (!unwrapped || !unwrapped.content) {
-                    // Not for us, silently skip
-                    return;
-                }
-
-                decryptedContent = unwrapped.content;
-                encryptionMethod = 'NIP-17';
-                realTimestamp = unwrapped.created_at; // Use real timestamp from unwrapped rumor
-
-                // Determine conversation partner:
-                // If unwrapped.pubkey is ME, this is my sent message backup - get recipient from 'p' tag
-                // If unwrapped.pubkey is someone else, this is a received message - they are the other person
-                if (unwrapped.pubkey === State.publicKey) {
-                    // This is MY sent message backup copy
-                    otherPubkey = unwrapped.tags?.find(t => t[0] === 'p')?.[1];
-                    if (!otherPubkey) {
-                        console.warn('No recipient found in NIP-17 real-time sent message:', event.id);
-                        return;
-                    }
-                    messageSent = true;
-                } else {
-                    // This is a received message from someone else
-                    otherPubkey = unwrapped.pubkey;
-                    messageSent = false;
-                }
-
-                console.log('✅ Unwrapped real-time NIP-17 message, conversation with:', otherPubkey, 'sent:', messageSent);
-            } catch (error) {
-                // Not for us (invalid MAC/base64), silently skip
-                return;
-            }
-        }
-        // Handle NIP-04 encrypted messages (kind 4)
-        else if (event.kind === 4) {
-            // Determine the other party's pubkey and whether this is sent or received
-            if (event.pubkey === State.publicKey) {
-                // I sent this message
-                otherPubkey = event.tags.find(t => t[0] === 'p')?.[1];
-                messageSent = true;
-            } else {
-                // I received this message
-                otherPubkey = event.pubkey;
-                messageSent = false;
-            }
-
-            if (!otherPubkey) return;
-
-            decryptedContent = await decryptMessage(event.content, otherPubkey, State.privateKey);
-            encryptionMethod = 'NIP-04';
-            realTimestamp = event.created_at; // Use event timestamp for NIP-04
-
-            if (!decryptedContent) return;
-        }
-        else {
-            console.warn('Unknown real-time message kind:', event.kind);
-            return;
-        }
+        const { otherPubkey, content: decryptedContent, timestamp: realTimestamp, sent: messageSent, method: encryptionMethod } = decrypted;
 
         // Initialize conversation if needed
         if (!conversations[otherPubkey]) {
@@ -581,7 +509,7 @@ export async function processSingleMessage(event) {
 
 // Render conversations in the sidebar
 export function renderConversations() {
-    console.log('Rendering conversations:', Object.keys(conversations).length, 'conversations');
+    debugLog('Rendering conversations:', Object.keys(conversations).length, 'conversations');
 
     // Update messages badge in nav menu (do this even if not on messages page)
     updateMessagesBadge();
@@ -615,7 +543,8 @@ export function renderConversations() {
         const preview = lastMsg ? (lastMsg.content.length > 50 ?
             lastMsg.content.substring(0, 50) + '...' : lastMsg.content) : '';
 
-        const displayName = profile.name || profile.display_name || 'Unknown User';
+        const displayName = escapeHtml(profile.name || profile.display_name || 'Unknown User');
+        const safePreview = escapeHtml(preview);
         const unreadBadge = (conv.unread && conv.unread > 0) ?
             `<div style="position: absolute; top: 12px; right: 12px; width: 10px; height: 10px; background: #FF6600; border-radius: 50%; box-shadow: 0 0 4px #FF6600;"></div>` : '';
 
@@ -630,7 +559,7 @@ export function renderConversations() {
                 }
                 <div class="conversation-info">
                     <div class="conversation-name">${displayName}</div>
-                    <div class="conversation-preview">${preview}</div>
+                    <div class="conversation-preview">${safePreview}</div>
                 </div>
             </div>
         `;
@@ -667,7 +596,7 @@ export function selectConversation(pubkey, clickedElement = null) {
     if (!conversation) return;
     
     const profile = conversation.profile || State.profileCache[pubkey] || { name: 'Unknown User' };
-    const displayName = profile.name || profile.display_name || 'Unknown User';
+    const displayName = escapeHtml(profile.name || profile.display_name || 'Unknown User');
     messageHeader.innerHTML = `<span>💬 ${displayName}</span>`;
     
     // Show messages with encryption method badges
@@ -724,11 +653,16 @@ export function startNewMessage() {
             conversations[recipientPubkey] = {
                 messages: [],
                 lastMessage: null,
-                profile: profileCache[recipientPubkey] || null,
+                profile: State.profileCache[recipientPubkey] || null,
                 unread: 0
             };
         }
-        
+
+        // Fetch profile if not cached
+        if (!State.profileCache[recipientPubkey]) {
+            fetchConversationProfiles([recipientPubkey]);
+        }
+
         // Select the conversation
         selectConversation(recipientPubkey);
         renderConversations();
@@ -739,6 +673,10 @@ export function startNewMessage() {
 }
 
 // Send encrypted message (using NIP-17 by default)
+// TODO: Refactor - this function is ~200 lines. Consider extracting:
+// - createNip17Message() for NIP-17 gift wrapping logic
+// - createNip04Message() for NIP-04 encryption logic
+// - publishDmToRelays() for relay publishing logic
 export async function sendMessage() {
     if (!currentConversation) return;
 
@@ -761,39 +699,50 @@ export async function sendMessage() {
         // Check if NIP-17 is enabled in settings
         const useNip17 = localStorage.getItem('use-nip17-dms') === 'true';
 
-        // Use NIP-17 if enabled and not using extension
-        if (useNip17 && State.privateKey !== 'extension') {
-            console.log('Sending NIP-17 gift-wrapped message to:', currentConversation);
+        // Determine if we have a local private key (hex) vs external signer
+        const hasLocalPrivateKey = State.getPrivateKeyForSigning() &&
+            State.getPrivateKeyForSigning() !== 'extension' &&
+            State.getPrivateKeyForSigning() !== 'nsec-app' &&
+            State.getPrivateKeyForSigning() !== 'amber';
+
+        // Use NIP-17 if enabled and we have a local private key
+        if (useNip17 && hasLocalPrivateKey) {
+            debugLog('Sending NIP-17 gift-wrapped message to:', currentConversation);
 
             try {
                 // Create TWO NIP-17 gift-wrapped messages per spec:
                 // 1. Recipient copy (they can decrypt)
-                recipientWrap = wrapGiftMessage(content, State.privateKey, currentConversation);
+                recipientWrap = wrapGiftMessage(content, State.getPrivateKeyForSigning(), currentConversation);
                 // 2. Sender backup copy (for retrieval after reload)
                 // Use custom function that preserves the conversation partner in the rumor's 'p' tag
-                senderWrap = wrapGiftMessageWithRecipient(content, State.privateKey, State.publicKey, currentConversation);
+                senderWrap = wrapGiftMessageWithRecipient(content, State.getPrivateKeyForSigning(), State.publicKey, currentConversation);
 
                 encryptionMethod = 'NIP-17';
                 // Use sender wrap ID for local storage (this is what we'll retrieve on reload)
                 signedEvent = senderWrap;
 
-                console.log('Created NIP-17 dual gift-wraps:');
-                console.log('  - Recipient wrap:', recipientWrap.id);
-                console.log('  - Sender wrap (backup):', senderWrap.id);
+                debugLog('Created NIP-17 dual gift-wraps:');
+                debugLog('  - Recipient wrap:', recipientWrap.id, 'created_at:', recipientWrap.created_at, 'Date:', new Date(recipientWrap.created_at * 1000).toISOString());
+                debugLog('  - Sender wrap (backup):', senderWrap.id, 'created_at:', senderWrap.created_at, 'Date:', new Date(senderWrap.created_at * 1000).toISOString());
+                console.log('🕐 DEBUG: Current client time:', Math.floor(Date.now() / 1000), 'Date:', new Date().toISOString());
             } catch (error) {
                 console.error('NIP-17 wrapping failed, falling back to NIP-04:', error);
                 // Fallback to NIP-04 if NIP-17 fails
-                const encrypted = await encryptMessage(content, currentConversation, State.privateKey);
+                const encrypted = await encryptMessage(content, currentConversation, State.getPrivateKeyForSigning());
                 const { verifyEvent } = window.NostrTools;
+
+                const clientTimestamp = Math.floor(Date.now() / 1000);
+                console.log('🕐 DEBUG: Client timestamp for NIP-04 fallback:', clientTimestamp, 'Date:', new Date(clientTimestamp * 1000).toISOString());
 
                 const eventTemplate = {
                     kind: 4,
-                    created_at: Math.floor(Date.now() / 1000),
+                    created_at: clientTimestamp,
                     tags: [['p', currentConversation]],
                     content: encrypted
                 };
 
                 signedEvent = await signEvent(eventTemplate);
+                console.log('🕐 DEBUG: Signed event created_at:', signedEvent.created_at, 'Date:', new Date(signedEvent.created_at * 1000).toISOString());
                 const isValid = verifyEvent(signedEvent);
 
                 if (!isValid) {
@@ -802,27 +751,66 @@ export async function sendMessage() {
 
                 encryptionMethod = 'NIP-04';
             }
-        } else {
-            // Extensions don't support NIP-17 yet, use NIP-04
-            console.log('Using extension, sending NIP-04 message');
+        } else if (State.getPrivateKeyForSigning() === 'extension' || State.getPrivateKeyForSigning() === 'nsec-app') {
+            // Use window.nostr for extension or nsec-app
+            debugLog('Using extension/nsec-app, sending NIP-04 message');
 
             if (!window.nostr) {
-                alert('Nostr extension not found. Please reconnect.');
+                alert('Nostr signer not found. Please reconnect.');
+                return;
+            }
+
+            if (!window.nostr.nip04?.encrypt) {
+                alert('Your signer does not support NIP-04 encryption. Please use a different login method or update your extension.');
                 return;
             }
 
             const encrypted = await window.nostr.nip04.encrypt(currentConversation, content);
 
+            const clientTimestamp = Math.floor(Date.now() / 1000);
+            console.log('🕐 DEBUG: Client timestamp for extension NIP-04:', clientTimestamp, 'Date:', new Date(clientTimestamp * 1000).toISOString());
+
             const eventTemplate = {
                 kind: 4,
-                created_at: Math.floor(Date.now() / 1000),
+                created_at: clientTimestamp,
                 tags: [['p', currentConversation]],
                 content: encrypted,
                 pubkey: State.publicKey
             };
 
             signedEvent = await window.nostr.signEvent(eventTemplate);
+            console.log('🕐 DEBUG: Signed event created_at:', signedEvent.created_at, 'Date:', new Date(signedEvent.created_at * 1000).toISOString());
             encryptionMethod = 'NIP-04';
+        } else if (hasLocalPrivateKey) {
+            // NIP-17 disabled but we have a local private key - use NIP-04
+            debugLog('NIP-17 disabled, sending NIP-04 message with local key');
+
+            const encrypted = await encryptMessage(content, currentConversation, State.getPrivateKeyForSigning());
+            const { verifyEvent } = window.NostrTools;
+
+            const clientTimestamp = Math.floor(Date.now() / 1000);
+            console.log('🕐 DEBUG: Client timestamp for local key NIP-04:', clientTimestamp, 'Date:', new Date(clientTimestamp * 1000).toISOString());
+
+            const eventTemplate = {
+                kind: 4,
+                created_at: clientTimestamp,
+                tags: [['p', currentConversation]],
+                content: encrypted
+            };
+
+            signedEvent = await signEvent(eventTemplate);
+            console.log('🕐 DEBUG: Signed event created_at:', signedEvent.created_at, 'Date:', new Date(signedEvent.created_at * 1000).toISOString());
+            const isValid = verifyEvent(signedEvent);
+
+            if (!isValid) {
+                throw new Error('Failed to sign NIP-04 message');
+            }
+
+            encryptionMethod = 'NIP-04';
+        } else {
+            // Amber or unknown signer - not yet supported for DMs
+            alert('Direct messages are not yet supported with Amber. Please use a different login method.');
+            return;
         }
 
         // Publish to relays (use write relays)
@@ -831,21 +819,17 @@ export async function sendMessage() {
 
         // If using NIP-17, add Nosmero relay for better delivery
         if (encryptionMethod === 'NIP-17') {
-            const nosmeroRelay = window.location.port === '8080'
-                ? 'ws://nosmero.com:8080/nip78-relay'
-                : 'wss://nosmero.com/nip78-relay';
-
-            // Add Nosmero relay if not already in list
+            const nosmeroRelay = Relays.getNosmeroRelay();
             if (!relaysToUse.includes(nosmeroRelay)) {
                 relaysToUse = [nosmeroRelay, ...relaysToUse];
-                console.log('📨 Added Nosmero relay for NIP-17 DM:', nosmeroRelay);
+                debugLog('📨 Added Nosmero relay for NIP-17 DM:', nosmeroRelay);
             }
         }
 
         try {
             // For NIP-17, publish BOTH gift wraps (recipient + sender backup)
             if (encryptionMethod === 'NIP-17' && recipientWrap && senderWrap) {
-                console.log('Publishing dual NIP-17 gift-wraps to relays:', relaysToUse);
+                debugLog('Publishing dual NIP-17 gift-wraps to relays:', relaysToUse);
 
                 // Publish recipient wrap
                 const recipientPromises = State.pool.publish(relaysToUse, recipientWrap);
@@ -858,33 +842,41 @@ export async function sendMessage() {
                     Promise.any(senderPromises)
                 ]);
 
-                console.log('✅ Successfully published both NIP-17 gift-wraps');
+                debugLog('✅ Successfully published both NIP-17 gift-wraps');
             } else {
                 // For NIP-04 or single event, publish normally
                 const publishPromises = State.pool.publish(relaysToUse, signedEvent);
-                console.log('Publishing to relays:', relaysToUse);
-                console.log('Event kind:', signedEvent.kind, 'ID:', signedEvent.id);
+                debugLog('Publishing to relays:', relaysToUse);
+                debugLog('Event kind:', signedEvent.kind, 'ID:', signedEvent.id);
                 await Promise.any(publishPromises);
-                console.log('Successfully published to at least one relay');
+                debugLog('Successfully published to at least one relay');
             }
         } catch (publishError) {
-            console.error('Failed to publish event:', publishError);
+            // Handle AggregateError from Promise.any when all relays fail
+            const errorMessage = publishError instanceof AggregateError
+                ? `All relays failed: ${publishError.errors[0]?.message || 'connection refused'}`
+                : publishError.message || 'Unknown error';
+            console.error('Failed to publish event:', errorMessage);
 
             // If NIP-17 failed to publish, try NIP-04 fallback
-            if (encryptionMethod === 'NIP-17' && State.privateKey !== 'extension') {
-                console.log('NIP-17 publish failed, falling back to NIP-04');
+            if (encryptionMethod === 'NIP-17' && State.getPrivateKeyForSigning() !== 'extension') {
+                debugLog('NIP-17 publish failed, falling back to NIP-04');
 
-                const encrypted = await encryptMessage(content, currentConversation, State.privateKey);
+                const encrypted = await encryptMessage(content, currentConversation, State.getPrivateKeyForSigning());
                 const { verifyEvent } = window.NostrTools;
+
+                const fallbackTimestamp = Math.floor(Date.now() / 1000);
+                console.log('🕐 DEBUG: NIP-04 fallback timestamp:', fallbackTimestamp, 'Date:', new Date(fallbackTimestamp * 1000).toISOString());
 
                 const eventTemplate = {
                     kind: 4,
-                    created_at: Math.floor(Date.now() / 1000),
+                    created_at: fallbackTimestamp,
                     tags: [['p', currentConversation]],
                     content: encrypted
                 };
 
                 signedEvent = await signEvent(eventTemplate);
+                console.log('🕐 DEBUG: Signed fallback event created_at:', signedEvent.created_at, 'Date:', new Date(signedEvent.created_at * 1000).toISOString());
                 const isValid = verifyEvent(signedEvent);
 
                 if (!isValid) {
@@ -894,10 +886,12 @@ export async function sendMessage() {
                 encryptionMethod = 'NIP-04';
 
                 // Try publishing NIP-04 version
+                console.log('🕐 DEBUG: Publishing NIP-04 fallback to relays:', relaysToUse);
                 await Promise.any(State.pool.publish(relaysToUse, signedEvent));
-                console.log('Successfully sent NIP-04 fallback message');
+                debugLog('Successfully sent NIP-04 fallback message');
             } else {
-                throw publishError; // Re-throw if not NIP-17 or already NIP-04
+                // Re-throw with better error message
+                throw new Error(errorMessage);
             }
         }
 
@@ -945,37 +939,7 @@ export async function loadNotifications() {
     
     // Check if user is logged in
     if (!State.publicKey) {
-        document.getElementById('feed').innerHTML = `
-            <div style="padding: 40px; text-align: center; max-width: 500px; margin: 0 auto;">
-                <h2 style="color: #FF6600; margin-bottom: 30px;">Login Required</h2>
-                <p style="color: #ccc; margin-bottom: 40px; line-height: 1.6;">
-                    Please login to view your notifications
-                </p>
-                
-                <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 30px;">
-                    <button onclick="createNewAccount()" 
-                            style="padding: 16px 24px; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold; font-size: 16px;">
-                        🎭 Create New Account
-                    </button>
-                    
-                    <button onclick="showLoginWithNsec()" 
-                            style="padding: 16px 24px; border: none; border-radius: 12px; cursor: pointer; background: #333; color: #fff; font-weight: bold; font-size: 16px;">
-                        🔑 Login with Private Key
-                    </button>
-                    
-                    <button onclick="loginWithExtension()" 
-                            style="padding: 16px 24px; border: none; border-radius: 12px; cursor: pointer; background: #6B73FF; color: #fff; font-weight: bold; font-size: 16px;">
-                        🔌 Connect Browser Extension
-                    </button>
-                </div>
-                
-                <div style="font-size: 14px; color: #666; line-height: 1.4;">
-                    <p>New to Nostr? Create a new account to get started.</p>
-                    <p>Have an existing key? Login with your nsec private key.</p>
-                    <p>Using nos2x or Alby? Connect your browser extension.</p>
-                </div>
-            </div>
-        `;
+        renderLoginRequired(document.getElementById('feed'), 'Please login to view your notifications');
         return;
     }
     
@@ -1068,12 +1032,12 @@ export function setNotificationType(type) {
 // Fetch notifications from relays
 export async function fetchNotifications() {
     if (!State.publicKey) {
-        console.log('No public key available for notifications');
+        debugLog('No public key available for notifications');
         return;
     }
 
     try {
-        console.log('Fetching notifications for user:', State.publicKey);
+        debugLog('Fetching notifications for user:', State.publicKey);
         const notificationEvents = [];
         const processedIds = new Set();
 
@@ -1114,16 +1078,14 @@ export async function fetchNotifications() {
 
         // Skip subscription if no filters enabled
         if (filters.length === 0) {
-            console.log('No notification types enabled');
+            debugLog('No notification types enabled');
             renderNotifications([]);
             return;
         }
 
         // Include Nosmero relay for kind 9736 tip disclosures
         const relaysToQuery = [...Relays.getActiveRelays()];
-        const nosmeroRelay = window.location.protocol === 'https:'
-            ? 'wss://nosmero.com/nip78-relay'     // Production & Dev (both HTTPS)
-            : 'ws://nosmero.com:8080/nip78-relay'; // Localhost only
+        const nosmeroRelay = Relays.getNosmeroRelay();
         if (!relaysToQuery.includes(nosmeroRelay)) {
             relaysToQuery.push(nosmeroRelay);
         }
@@ -1149,7 +1111,7 @@ export async function fetchNotifications() {
                 }
             },
             oneose() {
-                console.log('Received', notificationEvents.length, 'notification events');
+                debugLog('Received', notificationEvents.length, 'notification events');
                 processNotifications(notificationEvents);
             }
         });
@@ -1157,7 +1119,7 @@ export async function fetchNotifications() {
         // Close subscription after 8 seconds
         setTimeout(() => {
             sub.close();
-        }, 8000);
+        }, TIMEOUTS.SUBSCRIPTION_LONG);
         
     } catch (error) {
         console.error('Error fetching notifications:', error);
@@ -1166,8 +1128,12 @@ export async function fetchNotifications() {
 }
 
 // Process notification events - each event becomes its own notification entry
+// TODO: Refactor - this function is ~210 lines. Consider extracting:
+// - processNotificationEvent() for single event processing
+// - categorizeNotification() for type determination
+// - enrichNotificationWithProfile() for profile fetching
 async function processNotifications(events) {
-    console.log('Processing', events.length, 'notification events');
+    debugLog('Processing', events.length, 'notification events');
 
     // Separate follow events (kind 3) from other notification events
     // Follows need special handling via baseline comparison
@@ -1185,18 +1151,18 @@ async function processNotifications(events) {
     // Process follow events using baseline comparison
     // This ensures we only show NEW + RECENT followers, not all existing followers
     if (followEvents.length > 0) {
-        console.log('Processing', followEvents.length, 'follow events via baseline');
+        debugLog('Processing', followEvents.length, 'follow events via baseline');
         try {
             const { newFollowers, recentFollowers, isFirstTime } = await FollowerBaseline.processFollowersWithBaseline(followEvents);
 
             if (isFirstTime) {
-                console.log('First time user - follower baseline created, no follow notifications shown');
+                debugLog('First time user - follower baseline created, no follow notifications shown');
             } else {
                 // Combine new followers (just discovered) with recent followers (added in last 7 days)
                 const allFollowersToShow = [...newFollowers, ...recentFollowers];
 
                 if (allFollowersToShow.length > 0) {
-                    console.log('Found', newFollowers.length, 'new +', recentFollowers.length, 'recent followers to show');
+                    debugLog('Found', newFollowers.length, 'new +', recentFollowers.length, 'recent followers to show');
 
                     // Create notifications for new + recent followers
                     for (const { pubkey, timestamp } of allFollowersToShow) {
@@ -1216,7 +1182,7 @@ async function processNotifications(events) {
                         });
                     }
                 } else {
-                    console.log('No new or recent followers to show');
+                    debugLog('No new or recent followers to show');
                 }
             }
         } catch (error) {
@@ -1325,7 +1291,7 @@ async function processNotifications(events) {
         }
     }
 
-    console.log('Created', notifications.length, 'individual notifications');
+    debugLog('Created', notifications.length, 'individual notifications');
 
     // Show loading message while fetching
     const notificationsList = document.getElementById('notificationsList');
@@ -1352,7 +1318,7 @@ async function processNotifications(events) {
         .map(n => n.pubkey);
 
     if (allAuthorPubkeys.length > 0) {
-        console.log('Pre-fetching profiles for', allAuthorPubkeys.length, 'authors');
+        debugLog('Pre-fetching profiles for', allAuthorPubkeys.length, 'authors');
         await fetchNotificationProfilesIndividual([...new Set(allAuthorPubkeys)], notifications);
     }
 
@@ -1372,74 +1338,22 @@ async function processNotifications(events) {
         }
     });
 
-    console.log('Final processed notifications:', notifications.length);
+    debugLog('Final processed notifications:', notifications.length);
 
     // Store notifications globally for filtering
     window.currentNotifications = notifications;
     renderNotifications(notifications);
 }
-
-// Fetch original notes that were interacted with
-async function fetchOriginalNotes(noteIds, interactionsByNote) {
-    if (!noteIds || noteIds.length === 0) return;
-    
-    console.log('Fetching', noteIds.length, 'original notes for notifications');
-    
-    try {
-        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
-            { ids: noteIds }
-        ], {
-            onevent(event) {
-                try {
-                    if (interactionsByNote.has(event.id)) {
-                        const noteData = interactionsByNote.get(event.id);
-                        noteData.originalNote = event;
-                        console.log('Fetched original note:', event.id.substring(0, 8));
-                        
-                        // Progressive rendering: update notifications as notes are fetched
-                        const currentNotifications = Array.from(interactionsByNote.values())
-                            .filter(noteData => noteData.originalNote)
-                            .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
-                        
-                        // Store updated notifications globally
-                        window.currentNotifications = currentNotifications;
-                        renderNotifications(currentNotifications);
-                    }
-                } catch (error) {
-                    console.error('Error processing fetched original note:', error);
-                }
-            },
-            oneose() {
-                console.log('Finished fetching original notes');
-                sub.close();
-            }
-        });
-        
-        // Close subscription after 8 seconds
-        setTimeout(() => {
-            sub.close();
-        }, 8000);
-        
-        // Wait for notes to be fetched
-        await new Promise(resolve => {
-            setTimeout(resolve, 10000); // Give 10 seconds for notes to load
-        });
-        
-    } catch (error) {
-        console.error('Error fetching original notes:', error);
-    }
-}
-
 // Fetch profiles for notification authors (individual notifications version)
 async function fetchNotificationProfilesIndividual(pubkeys, notifications) {
     if (!pubkeys || pubkeys.length === 0) return;
 
-    console.log('Fetching profiles for notification authors:', pubkeys.length);
+    debugLog('Fetching profiles for notification authors:', pubkeys.length);
 
     const unknownPubkeys = [...new Set(pubkeys)].filter(pubkey => !State.profileCache[pubkey]);
 
     if (unknownPubkeys.length === 0) {
-        console.log('All profiles already cached');
+        debugLog('All profiles already cached');
         return;
     }
 
@@ -1476,14 +1390,14 @@ async function fetchNotificationProfilesIndividual(pubkeys, notifications) {
                 }
             },
             oneose() {
-                console.log('Profile fetch complete for notification authors');
+                debugLog('Profile fetch complete for notification authors');
                 sub.close();
             }
         });
 
         setTimeout(() => {
             sub.close();
-        }, 12000);
+        }, TIMEOUTS.PROFILE_FETCH);
 
     } catch (error) {
         console.error('Error fetching notification profiles:', error);
@@ -1494,7 +1408,7 @@ async function fetchNotificationProfilesIndividual(pubkeys, notifications) {
 async function fetchOriginalNotesIndividual(noteIds, notifications, originalNotesMap) {
     if (!noteIds || noteIds.length === 0) return;
 
-    console.log('Fetching', noteIds.length, 'original notes for notifications');
+    debugLog('Fetching', noteIds.length, 'original notes for notifications');
 
     try {
         const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
@@ -1519,7 +1433,7 @@ async function fetchOriginalNotesIndividual(noteIds, notifications, originalNote
                 }
             },
             oneose() {
-                console.log('Finished fetching original notes');
+                debugLog('Finished fetching original notes');
                 sub.close();
             }
         });
@@ -1527,80 +1441,17 @@ async function fetchOriginalNotesIndividual(noteIds, notifications, originalNote
         // Close subscription after 8 seconds
         setTimeout(() => {
             sub.close();
-        }, 8000);
+        }, TIMEOUTS.SUBSCRIPTION_LONG);
 
         // Wait for notes to be fetched
         await new Promise(resolve => {
-            setTimeout(resolve, 10000);
+            setTimeout(resolve, TIMEOUTS.NOTE_FETCH_WAIT);
         });
 
     } catch (error) {
         console.error('Error fetching original notes:', error);
     }
 }
-
-// Legacy function - kept for compatibility
-async function fetchNotificationProfiles(pubkeys, groupedNotifications) {
-    if (!pubkeys || pubkeys.length === 0) return;
-
-    console.log('Fetching profiles for notification authors:', pubkeys.length);
-
-    const unknownPubkeys = [...new Set(pubkeys)].filter(pubkey => !State.profileCache[pubkey]);
-
-    if (unknownPubkeys.length === 0) {
-        console.log('All profiles already cached');
-        return;
-    }
-
-    if (!State.pool) {
-        console.error('Pool not initialized when fetching notification profiles');
-        return;
-    }
-
-    try {
-        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
-            { kinds: [0], authors: unknownPubkeys }
-        ], {
-            onevent(event) {
-                try {
-                    const profile = JSON.parse(event.content);
-                    State.profileCache[event.pubkey] = {
-                        ...profile,
-                        pubkey: event.pubkey,
-                        name: profile.name || profile.display_name || 'Unknown',
-                        picture: profile.picture
-                    };
-
-                    // Update interaction profiles in grouped notifications
-                    groupedNotifications.forEach(noteData => {
-                        noteData.interactions.forEach(interaction => {
-                            if (interaction.pubkey === event.pubkey) {
-                                interaction.profile = State.profileCache[event.pubkey];
-                            }
-                        });
-                    });
-
-                    // Re-render with updated profiles
-                    renderNotifications(groupedNotifications);
-                } catch (error) {
-                    console.error('Error parsing profile for notifications:', error);
-                }
-            },
-            oneose() {
-                console.log('Profile fetch complete for notification authors');
-                sub.close();
-            }
-        });
-
-        setTimeout(() => {
-            sub.close();
-        }, 12000);
-
-    } catch (error) {
-        console.error('Error fetching notification profiles:', error);
-    }
-}
-
 // Update notification badge in nav menu
 export function updateNotificationBadge() {
     const badge = document.getElementById('notificationBadge');
@@ -1637,9 +1488,13 @@ export function updateMessagesBadge() {
 }
 
 // Render notifications list - each notification is a separate entry
-export function renderNotifications(notifications = []) {
+// TODO: Refactor - this function is ~176 lines. Consider extracting:
+// - renderNotificationItem() for single notification HTML
+// - getNotificationIcon() for type-based icon selection
+// - getNotificationActionText() for action description
+export function renderNotifications(notificationItems = []) {
     // Count unread notifications (newer than last viewed time)
-    const unreadCount = notifications.filter(notification => {
+    const unreadCount = notificationItems.filter(notification => {
         return notification.timestamp > State.lastViewedNotificationTime;
     }).length;
 
@@ -1650,7 +1505,7 @@ export function renderNotifications(notifications = []) {
     const notificationsList = document.getElementById('notificationsList');
     if (!notificationsList) return;
 
-    if (notifications.length === 0) {
+    if (notificationItems.length === 0) {
         notificationsList.innerHTML = `
             <div style="text-align: center; color: #666; padding: 40px;">
                 <p>No notifications yet</p>
@@ -1661,9 +1516,9 @@ export function renderNotifications(notifications = []) {
     }
 
     // Filter notifications based on current type
-    let filteredNotifications = notifications;
+    let filteredNotifications = notificationItems;
     if (notificationType !== 'all') {
-        filteredNotifications = notifications.filter(notification => {
+        filteredNotifications = notificationItems.filter(notification => {
             switch (notificationType) {
                 case 'mentions': return notification.type === 'reply' && notification.content.includes('@');
                 case 'replies': return notification.type === 'reply';
@@ -1690,7 +1545,7 @@ export function renderNotifications(notifications = []) {
 
     notificationsList.innerHTML = sortedNotifications.map(notification => {
         const profile = notification.profile || {};
-        const displayName = profile.name || profile.display_name || `User ${notification.pubkey.substring(0, 8)}...`;
+        const displayName = escapeHtml(profile.name || profile.display_name || `User ${notification.pubkey.substring(0, 8)}...`);
         // Default profile picture - fully URL-encoded SVG to prevent HTML parsing issues
         const defaultPicture = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2250%22%20fill%3D%22%23333%22%2F%3E%3Ctext%20x%3D%2250%22%20y%3D%2255%22%20text-anchor%3D%22middle%22%20fill%3D%22%23888%22%20font-size%3D%2230%22%3E%3F%3C%2Ftext%3E%3C%2Fsvg%3E';
         const profilePicture = profile.picture || defaultPicture;

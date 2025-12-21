@@ -11,6 +11,7 @@ import rateLimit from 'express-rate-limit';
 import {
   createUser,
   getUserByIdentifier,
+  getSaltByIdentifier,
   getUserByEmail,
   getUserByNpub,
   updateLastLogin,
@@ -50,6 +51,22 @@ const passwordResetLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,  // 1 hour
   max: 5,                     // 5 reset requests per hour per IP
   message: { success: false, error: 'Too many password reset requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const checkAvailabilityLimiter = rateLimit({
+  windowMs: 60 * 1000,        // 1 minute
+  max: 30,                    // 30 checks per minute per IP
+  message: { success: false, error: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const getSaltLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  max: 20,                    // 20 salt requests per 15 min per IP
+  message: { success: false, error: 'Too many requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -94,11 +111,13 @@ function isValidPassword(password) {
  *
  * Create a new user account with optional email and/or username.
  * Client generates keys and encrypts nsec before sending.
+ * Client performs PBKDF2 hashing of password before sending.
  *
  * Body: {
  *   npub: string (required),
  *   ncryptsec: string (required - NIP-49 encrypted nsec),
- *   password: string (required - for server-side bcrypt hash),
+ *   passwordHash: string (required - client-side PBKDF2 hash in hex),
+ *   passwordSalt: string (required - client-side salt in hex),
  *   email?: string (optional),
  *   username?: string (optional),
  *   display_name?: string (optional - for profile, not stored in auth db)
@@ -106,13 +125,13 @@ function isValidPassword(password) {
  */
 router.post('/signup', signupLimiter, async (req, res) => {
   try {
-    const { npub, ncryptsec, password, email, username } = req.body;
+    const { npub, ncryptsec, passwordHash, passwordSalt, email, username } = req.body;
 
     // Validate required fields
-    if (!npub || !ncryptsec || !password) {
+    if (!npub || !ncryptsec || !passwordHash || !passwordSalt) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: npub, ncryptsec, password'
+        error: 'Missing required fields: npub, ncryptsec, passwordHash, passwordSalt'
       });
     }
 
@@ -131,10 +150,19 @@ router.post('/signup', signupLimiter, async (req, res) => {
       });
     }
 
-    if (!isValidPassword(password)) {
+    // Validate passwordHash (should be 64 hex characters for PBKDF2-SHA256)
+    if (!/^[a-f0-9]{64}$/i.test(passwordHash)) {
       return res.status(400).json({
         success: false,
-        error: 'Password must be 8-128 characters'
+        error: 'Invalid passwordHash format'
+      });
+    }
+
+    // Validate passwordSalt (should be 32 hex characters for 16-byte salt)
+    if (!/^[a-f0-9]{32}$/i.test(passwordSalt)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid passwordSalt format'
       });
     }
 
@@ -184,16 +212,14 @@ router.post('/signup', signupLimiter, async (req, res) => {
       });
     }
 
-    // Hash password
-    const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-
-    // Create user
+    // Create user (password already hashed client-side)
     const user = createUser({
       npub,
       email: email || null,
       username: username || null,
       ncryptsec,
-      password_hash
+      password_hash: passwordHash,
+      password_salt: passwordSalt
     });
 
     console.log(`[Auth] New user signup: ${email || username} (${npub.slice(0, 12)}...)`);
@@ -232,24 +258,78 @@ router.post('/signup', signupLimiter, async (req, res) => {
 });
 
 /**
+ * POST /api/auth/get-salt
+ *
+ * Get user's password salt for client-side hashing before login.
+ * Returns generic error if user not found (don't reveal if user exists).
+ *
+ * Body: { identifier: string (email or username) }
+ */
+router.post('/get-salt', getSaltLimiter, async (req, res) => {
+  try {
+    const { identifier } = req.body;
+
+    if (!identifier) {
+      return res.status(400).json({
+        success: false,
+        error: 'Identifier required'
+      });
+    }
+
+    // Find user's salt by email or username
+    const result = getSaltByIdentifier(identifier.toLowerCase());
+
+    if (!result || !result.password_salt) {
+      // Use timing delay to prevent user enumeration
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return res.status(404).json({
+        success: false,
+        error: 'Invalid identifier'
+      });
+    }
+
+    return res.json({
+      success: true,
+      salt: result.password_salt
+    });
+
+  } catch (error) {
+    console.error('[Auth] Get salt error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
  * POST /api/auth/login
  *
- * Login with email/username and password.
+ * Login with email/username and password hash.
+ * Client performs PBKDF2 hashing before sending.
  * Returns encrypted nsec for client-side decryption.
  *
  * Body: {
  *   identifier: string (email or username),
- *   password: string
+ *   passwordHash: string (client-side PBKDF2 hash in hex)
  * }
  */
 router.post('/login', loginLimiter, async (req, res) => {
   try {
-    const { identifier, password } = req.body;
+    const { identifier, passwordHash } = req.body;
 
-    if (!identifier || !password) {
+    if (!identifier || !passwordHash) {
       return res.status(400).json({
         success: false,
-        error: 'Email/username and password required'
+        error: 'Email/username and passwordHash required'
+      });
+    }
+
+    // Validate passwordHash format
+    if (!/^[a-f0-9]{64}$/i.test(passwordHash)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid passwordHash format'
       });
     }
 
@@ -257,16 +337,21 @@ router.post('/login', loginLimiter, async (req, res) => {
     const user = getUserByIdentifier(identifier.toLowerCase());
 
     if (!user) {
-      // Use same delay as bcrypt compare to prevent timing attacks
-      await bcrypt.hash('dummy', BCRYPT_ROUNDS);
+      // Use timing delay to prevent user enumeration
+      await new Promise(resolve => setTimeout(resolve, 100));
       return res.status(401).json({
         success: false,
         error: 'Invalid credentials'
       });
     }
 
-    // Verify password
-    const passwordValid = await bcrypt.compare(password, user.password_hash);
+    // Verify password hash using timing-safe comparison
+    const crypto = await import('crypto');
+    const providedHash = Buffer.from(passwordHash, 'hex');
+    const storedHash = Buffer.from(user.password_hash, 'hex');
+
+    const passwordValid = providedHash.length === storedHash.length &&
+                          crypto.timingSafeEqual(providedHash, storedHash);
 
     if (!passwordValid) {
       console.log(`[Auth] Failed login attempt for ${identifier}`);
@@ -391,28 +476,39 @@ router.post('/forgot-password', passwordResetLimiter, async (req, res) => {
  *
  * Reset password using token from email.
  * Client re-encrypts nsec with new password before sending.
+ * Client performs PBKDF2 hashing of new password before sending.
  *
  * Body: {
  *   token: string,
- *   new_password: string,
+ *   newPasswordHash: string,
+ *   newPasswordSalt: string,
  *   new_ncryptsec: string
  * }
  */
 router.post('/reset-password', async (req, res) => {
   try {
-    const { token, new_password, new_ncryptsec } = req.body;
+    const { token, newPasswordHash, newPasswordSalt, new_ncryptsec } = req.body;
 
-    if (!token || !new_password || !new_ncryptsec) {
+    if (!token || !newPasswordHash || !newPasswordSalt || !new_ncryptsec) {
       return res.status(400).json({
         success: false,
-        error: 'Token, new password, and new encrypted key required'
+        error: 'Token, newPasswordHash, newPasswordSalt, and new encrypted key required'
       });
     }
 
-    if (!isValidPassword(new_password)) {
+    // Validate passwordHash format
+    if (!/^[a-f0-9]{64}$/i.test(newPasswordHash)) {
       return res.status(400).json({
         success: false,
-        error: 'Password must be 8-128 characters'
+        error: 'Invalid newPasswordHash format'
+      });
+    }
+
+    // Validate passwordSalt format
+    if (!/^[a-f0-9]{32}$/i.test(newPasswordSalt)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid newPasswordSalt format'
       });
     }
 
@@ -432,16 +528,13 @@ router.post('/reset-password', async (req, res) => {
       });
     }
 
-    // Hash new password and update
-    const password_hash = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
-
     // Update ncryptsec and password
     updateNcryptsec(tokenData.user_id, new_ncryptsec);
 
-    // Also update password hash directly
+    // Update password hash and salt
     const { db } = await import('./db.js');
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = strftime(\'%s\', \'now\') WHERE id = ?')
-      .run(password_hash, tokenData.user_id);
+    db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, updated_at = strftime(\'%s\', \'now\') WHERE id = ?')
+      .run(newPasswordHash, newPasswordSalt, tokenData.user_id);
 
     markTokenUsed(token);
 
@@ -520,26 +613,38 @@ router.get('/reset-password-info', async (req, res) => {
  * Add email/password recovery to an existing Nostr account.
  * For users who created account without recovery options.
  *
+ * DISABLED: This endpoint requires Nostr signature verification to prevent
+ * attackers from claiming ownership of npubs they don't control.
+ * See JUMPSTART.md TODO for implementation details.
+ *
  * Body: {
  *   npub: string,
  *   ncryptsec: string,
- *   password: string,
+ *   passwordHash: string,
+ *   passwordSalt: string,
  *   email?: string,
  *   username?: string,
  *   signature: string (Nostr event signature proving ownership)
  * }
  */
 router.post('/add-recovery', async (req, res) => {
+  // Endpoint disabled until Nostr signature verification is implemented
+  return res.status(501).json({
+    success: false,
+    error: 'This feature is temporarily disabled. Please use signup instead.'
+  });
+
+  /* DISABLED - Enable after implementing signature verification
   try {
-    const { npub, ncryptsec, password, email, username, signature } = req.body;
+    const { npub, ncryptsec, passwordHash, passwordSalt, email, username, signature } = req.body;
 
     // TODO: Verify Nostr signature to prove ownership of npub
     // For now, we'll implement basic version
 
-    if (!npub || !ncryptsec || !password) {
+    if (!npub || !ncryptsec || !passwordHash || !passwordSalt) {
       return res.status(400).json({
         success: false,
-        error: 'npub, ncryptsec, and password required'
+        error: 'npub, ncryptsec, passwordHash, and passwordSalt required'
       });
     }
 
@@ -657,6 +762,7 @@ router.post('/add-recovery', async (req, res) => {
       error: 'Internal server error'
     });
   }
+  END DISABLED */
 });
 
 /**
@@ -666,7 +772,7 @@ router.post('/add-recovery', async (req, res) => {
  *
  * Query: ?email=xxx or ?username=xxx
  */
-router.get('/check-availability', (req, res) => {
+router.get('/check-availability', checkAvailabilityLimiter, (req, res) => {
   const { email, username } = req.query;
 
   if (email) {

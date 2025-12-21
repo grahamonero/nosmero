@@ -114,29 +114,29 @@ function initDataFiles() {
 }
 initDataFiles();
 
-// Load data from files
-function loadPaywalls() {
+// Load data from files (async to avoid blocking event loop)
+async function loadPaywalls() {
     try {
-        return JSON.parse(fs.readFileSync(PAYWALL_DATA_FILE, 'utf8'));
+        return JSON.parse(await fs.promises.readFile(PAYWALL_DATA_FILE, 'utf8'));
     } catch (e) {
         return { paywalls: {} };
     }
 }
 
-function savePaywalls(data) {
-    fs.writeFileSync(PAYWALL_DATA_FILE, JSON.stringify(data, null, 2));
+async function savePaywalls(data) {
+    await fs.promises.writeFile(PAYWALL_DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-function loadPurchases() {
+async function loadPurchases() {
     try {
-        return JSON.parse(fs.readFileSync(PURCHASES_DATA_FILE, 'utf8'));
+        return JSON.parse(await fs.promises.readFile(PURCHASES_DATA_FILE, 'utf8'));
     } catch (e) {
         return { purchases: {}, unlocks: {} };
     }
 }
 
-function savePurchases(data) {
-    fs.writeFileSync(PURCHASES_DATA_FILE, JSON.stringify(data, null, 2));
+async function savePurchases(data) {
+    await fs.promises.writeFile(PURCHASES_DATA_FILE, JSON.stringify(data, null, 2));
 }
 
 /**
@@ -153,7 +153,7 @@ function savePurchases(data) {
  * @param {string} params.encryptedContent - Encrypted content blob (base64)
  * @returns {Object} Created paywall record
  */
-export function createPaywall({ noteId, creatorPubkey, paymentAddress, priceXmr, decryptionKey, preview, encryptedContent }) {
+export async function createPaywall({ noteId, creatorPubkey, paymentAddress, priceXmr, decryptionKey, preview, encryptedContent }) {
     // Validate inputs
     if (!noteId || typeof noteId !== 'string') {
         throw new Error('Invalid noteId');
@@ -161,7 +161,15 @@ export function createPaywall({ noteId, creatorPubkey, paymentAddress, priceXmr,
     if (!creatorPubkey || !/^[0-9a-f]{64}$/i.test(creatorPubkey)) {
         throw new Error('Invalid creator pubkey');
     }
-    if (!paymentAddress || !paymentAddress.startsWith('4')) {
+    // Validate Monero address format:
+    // - Standard/Integrated: starts with 4, 95 or 106 chars
+    // - Subaddress: starts with 8, 95 chars
+    const isValidAddress = paymentAddress && (
+        /^4[1-9A-HJ-NP-Za-km-z]{94}$/.test(paymentAddress) ||  // Standard (95 chars)
+        /^4[1-9A-HJ-NP-Za-km-z]{105}$/.test(paymentAddress) || // Integrated (106 chars)
+        /^8[1-9A-HJ-NP-Za-km-z]{94}$/.test(paymentAddress)     // Subaddress (95 chars)
+    );
+    if (!isValidAddress) {
         throw new Error('Invalid Monero payment address');
     }
     if (typeof priceXmr !== 'number' || priceXmr <= 0) {
@@ -171,7 +179,7 @@ export function createPaywall({ noteId, creatorPubkey, paymentAddress, priceXmr,
         throw new Error('Decryption key required');
     }
 
-    const data = loadPaywalls();
+    const data = await loadPaywalls();
 
     // Check if paywall already exists
     if (data.paywalls[noteId]) {
@@ -192,7 +200,7 @@ export function createPaywall({ noteId, creatorPubkey, paymentAddress, priceXmr,
     };
 
     data.paywalls[noteId] = paywall;
-    savePaywalls(data);
+    await savePaywalls(data);
 
     console.log(`[Paywall] Created paywall for note ${noteId.substring(0, 8)}... Price: ${priceXmr} XMR`);
 
@@ -211,8 +219,8 @@ export function createPaywall({ noteId, creatorPubkey, paymentAddress, priceXmr,
  * @param {string} noteId
  * @returns {Object|null}
  */
-export function getPaywallInfo(noteId) {
-    const data = loadPaywalls();
+export async function getPaywallInfo(noteId) {
+    const data = await loadPaywalls();
     const paywall = data.paywalls[noteId];
 
     if (!paywall) {
@@ -238,8 +246,8 @@ export function getPaywallInfo(noteId) {
  * @param {string[]} noteIds
  * @returns {Object} Map of noteId -> paywall info
  */
-export function getPaywallInfoBatch(noteIds) {
-    const data = loadPaywalls();
+export async function getPaywallInfoBatch(noteIds) {
+    const data = await loadPaywalls();
     const results = {};
 
     for (const noteId of noteIds) {
@@ -267,8 +275,8 @@ export function getPaywallInfoBatch(noteIds) {
  * @param {string} buyerPubkey
  * @returns {boolean}
  */
-export function hasUnlocked(noteId, buyerPubkey) {
-    const data = loadPurchases();
+export async function hasUnlocked(noteId, buyerPubkey) {
+    const data = await loadPurchases();
     const unlockKey = `${noteId}:${buyerPubkey}`;
     return !!data.unlocks[unlockKey];
 }
@@ -279,8 +287,8 @@ export function hasUnlocked(noteId, buyerPubkey) {
  * @param {string} buyerPubkey
  * @returns {string|null}
  */
-export function getUnlockedKey(noteId, buyerPubkey) {
-    const purchaseData = loadPurchases();
+export async function getUnlockedKey(noteId, buyerPubkey) {
+    const purchaseData = await loadPurchases();
     const unlockKey = `${noteId}:${buyerPubkey}`;
 
     if (!purchaseData.unlocks[unlockKey]) {
@@ -288,7 +296,7 @@ export function getUnlockedKey(noteId, buyerPubkey) {
     }
 
     // Get the decryption key from paywall data
-    const paywallData = loadPaywalls();
+    const paywallData = await loadPaywalls();
     const paywall = paywallData.paywalls[noteId];
 
     if (!paywall) {
@@ -304,8 +312,8 @@ export function getUnlockedKey(noteId, buyerPubkey) {
  * @param {string} creatorPubkey - Must match the paywall's creator
  * @returns {string|null}
  */
-export function getCreatorKey(noteId, creatorPubkey) {
-    const paywallData = loadPaywalls();
+export async function getCreatorKey(noteId, creatorPubkey) {
+    const paywallData = await loadPaywalls();
     const paywall = paywallData.paywalls[noteId];
 
     if (!paywall) {
@@ -326,8 +334,8 @@ export function getCreatorKey(noteId, creatorPubkey) {
  * @param {string} buyerPubkey
  * @returns {Object} Purchase details
  */
-export function initiatePurchase(noteId, buyerPubkey) {
-    const paywallData = loadPaywalls();
+export async function initiatePurchase(noteId, buyerPubkey) {
+    const paywallData = await loadPaywalls();
     const paywall = paywallData.paywalls[noteId];
 
     if (!paywall) {
@@ -335,11 +343,11 @@ export function initiatePurchase(noteId, buyerPubkey) {
     }
 
     // Check if already unlocked
-    if (hasUnlocked(noteId, buyerPubkey)) {
+    if (await hasUnlocked(noteId, buyerPubkey)) {
         throw new Error('Already unlocked');
     }
 
-    const purchaseData = loadPurchases();
+    const purchaseData = await loadPurchases();
     const purchaseId = crypto.randomUUID();
 
     const purchase = {
@@ -355,7 +363,7 @@ export function initiatePurchase(noteId, buyerPubkey) {
     };
 
     purchaseData.purchases[purchaseId] = purchase;
-    savePurchases(purchaseData);
+    await savePurchases(purchaseData);
 
     console.log(`[Paywall] Purchase initiated: ${purchaseId} for note ${noteId.substring(0, 8)}...`);
 
@@ -382,8 +390,8 @@ export function initiatePurchase(noteId, buyerPubkey) {
  */
 export async function verifyAndUnlock({ purchaseId, noteId, buyerPubkey, txid, txKey }) {
     // Load data
-    const purchaseData = loadPurchases();
-    const paywallData = loadPaywalls();
+    const purchaseData = await loadPurchases();
+    const paywallData = await loadPaywalls();
 
     // Find the purchase/paywall
     let purchase = null;
@@ -457,12 +465,12 @@ export async function verifyAndUnlock({ purchaseId, noteId, buyerPubkey, txid, t
         purchaseData.purchases[purchaseId].txid = txid;
     }
 
-    savePurchases(purchaseData);
+    await savePurchases(purchaseData);
 
     // Update paywall stats
     paywallData.paywalls[noteId].totalSales += 1;
     paywallData.paywalls[noteId].totalRevenue += verificationResult.receivedAmount;
-    savePaywalls(paywallData);
+    await savePaywalls(paywallData);
 
     console.log(`[Paywall] UNLOCKED: ${noteId.substring(0, 8)}... for ${buyerPubkey.substring(0, 8)}... (${verificationResult.receivedAmount} XMR)`);
 
@@ -479,8 +487,8 @@ export async function verifyAndUnlock({ purchaseId, noteId, buyerPubkey, txid, t
  * @param {string} buyerPubkey
  * @returns {Object[]} List of unlocked notes
  */
-export function getUserUnlocks(buyerPubkey) {
-    const purchaseData = loadPurchases();
+export async function getUserUnlocks(buyerPubkey) {
+    const purchaseData = await loadPurchases();
     const unlocks = [];
 
     for (const [key, unlock] of Object.entries(purchaseData.unlocks)) {
@@ -497,8 +505,8 @@ export function getUserUnlocks(buyerPubkey) {
  * @param {string} creatorPubkey
  * @returns {Object} Stats
  */
-export function getCreatorStats(creatorPubkey) {
-    const data = loadPaywalls();
+export async function getCreatorStats(creatorPubkey) {
+    const data = await loadPaywalls();
     let totalPaywalls = 0;
     let totalSales = 0;
     let totalRevenue = 0;
@@ -523,8 +531,8 @@ export function getCreatorStats(creatorPubkey) {
  * @param {string} noteId
  * @param {string} creatorPubkey
  */
-export function deletePaywall(noteId, creatorPubkey) {
-    const data = loadPaywalls();
+export async function deletePaywall(noteId, creatorPubkey) {
+    const data = await loadPaywalls();
     const paywall = data.paywalls[noteId];
 
     if (!paywall) {
@@ -536,7 +544,7 @@ export function deletePaywall(noteId, creatorPubkey) {
     }
 
     delete data.paywalls[noteId];
-    savePaywalls(data);
+    await savePaywalls(data);
 
     console.log(`[Paywall] Deleted paywall for note ${noteId.substring(0, 8)}...`);
 }
@@ -544,8 +552,8 @@ export function deletePaywall(noteId, creatorPubkey) {
 /**
  * Clean up expired purchases
  */
-export function cleanupExpiredPurchases() {
-    const data = loadPurchases();
+export async function cleanupExpiredPurchases() {
+    const data = await loadPurchases();
     const now = Date.now();
     let cleaned = 0;
 
@@ -557,10 +565,10 @@ export function cleanupExpiredPurchases() {
     }
 
     if (cleaned > 0) {
-        savePurchases(data);
+        await savePurchases(data);
         console.log(`[Paywall] Cleaned up ${cleaned} expired purchases`);
     }
 }
 
 // Run cleanup every hour
-setInterval(cleanupExpiredPurchases, 60 * 60 * 1000);
+setInterval(() => cleanupExpiredPurchases().catch(e => console.error('[Paywall] Cleanup error:', e)), 60 * 60 * 1000);

@@ -16,17 +16,33 @@ const PROFILE_POSTS_PER_PAGE = 30;
 // Track following list
 let followingList = new Set();
 
+// ==================== TIMEOUT CONSTANTS ====================
+const TIMEOUTS = {
+    POST_LOAD: 8000,           // Loading user posts
+    REPOST_FETCH: 3000,        // Fetching original posts for reposts
+    FOLLOW_COUNT: 5000,        // Following/followers count fetch
+    ANIMATION: 300             // Post removal animation
+};
+
 // ==================== UTILITY FUNCTIONS ====================
 
-function getTimeAgo(timestamp) {
-    const now = Math.floor(Date.now() / 1000);
-    const diff = now - timestamp;
+// Fallback HTML for posts that fail to render
+const POST_RENDER_ERROR_HTML = `
+    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px;">
+        <div style="color: #666; font-size: 12px;">Error rendering post</div>
+    </div>
+`;
 
-    if (diff < 60) return 'just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-    return new Date(timestamp * 1000).toLocaleDateString();
+// Generate Load More button HTML for profile posts
+function renderLoadMoreButton(remainingCount) {
+    if (remainingCount <= 0) return '';
+    return `
+        <div id="profileLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <button onclick="loadMoreProfilePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                Load More Posts (${remainingCount} available)
+            </button>
+        </div>
+    `;
 }
 
 /**
@@ -87,7 +103,7 @@ function purgeUnfollowedUserPosts(pubkey) {
 
             setTimeout(() => {
                 post.remove();
-            }, 300);
+            }, TIMEOUTS.ANIMATION);
         });
 
         if (postsToRemove.length > 0) {
@@ -129,7 +145,7 @@ async function fetchUserPosts(pubkey) {
                     </div>
                 `;
             }
-        }, 8000); // 8 second timeout
+        }, TIMEOUTS.POST_LOAD);
 
         if (!StateModule.pool) {
             throw new Error('Relay pool not initialized');
@@ -245,7 +261,7 @@ async function fetchUserPosts(pubkey) {
             userPostsContainer.innerHTML = `
                 <div style="text-align: center; color: #666; padding: 40px;">
                     <p>Error loading posts</p>
-                    <p style="font-size: 12px; margin-top: 10px;">${error.message}</p>
+                    <p style="font-size: 12px; margin-top: 10px;">${UtilsModule.escapeHtml(error.message)}</p>
                 </div>
             `;
         }
@@ -262,7 +278,7 @@ async function fetchOriginalPostsForReposts(StateModule, RelaysModule, eventIds)
         const timeout = setTimeout(() => {
             console.log('Timeout fetching original posts for reposts, got', Object.keys(results).length, 'of', eventIds.length);
             resolve(results);
-        }, 3000);
+        }, TIMEOUTS.REPOST_FETCH);
 
         const sub = StateModule.pool.subscribeMany(RelaysModule.getActiveRelays(), [
             { ids: eventIds }
@@ -318,7 +334,7 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
 
         // Fetch parent posts, disclosed tips, and engagement counts
         const [parentPostsMap, disclosedTipsData, engagementData] = await Promise.all([
-            PostsModule.fetchParentPosts(posts),
+            PostsModule.fetchParentPosts(posts, PostsModule.getParentPostRelays()),
             PostsModule.fetchDisclosedTips(posts),
             PostsModule.fetchEngagementCounts(posts.map(p => p.id))
         ]);
@@ -339,12 +355,7 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
                 return await PostsModule.renderSinglePost(post, 'feed', engagementData, parentPostsMap, post._repostContext || null);
             } catch (error) {
                 console.error('Error rendering profile post:', error);
-                // Fallback to basic rendering if renderSinglePost fails
-                return `
-                    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px;">
-                        <div style="color: #666; font-size: 12px;">Error rendering post</div>
-                    </div>
-                `;
+                return POST_RENDER_ERROR_HTML;
             }
         }));
 
@@ -352,19 +363,9 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
         displayedProfilePostCount += posts.length;
 
         // Check if there are more posts to load
-        const hasMorePosts = displayedProfilePostCount < cachedProfilePosts.length;
         const remainingCount = cachedProfilePosts.length - displayedProfilePostCount;
 
-        // Add Load More button if there are more posts
-        const loadMoreButton = hasMorePosts ? `
-            <div id="profileLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
-                <button onclick="loadMoreProfilePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
-                    Load More Posts (${remainingCount} available)
-                </button>
-            </div>
-        ` : '';
-
-        userPostsContainer.innerHTML = renderedPosts.join('') + loadMoreButton;
+        userPostsContainer.innerHTML = renderedPosts.join('') + renderLoadMoreButton(remainingCount);
 
         // Process any embedded notes after rendering
         try {
@@ -392,10 +393,11 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
 
     } catch (error) {
         console.error('Error rendering user posts:', error);
+        const Utils = await import('../utils.js');
         userPostsContainer.innerHTML = `
             <div style="text-align: center; color: #666; padding: 40px;">
                 <p>Error rendering posts</p>
-                <p style="font-size: 12px; margin-top: 10px;">${error.message}</p>
+                <p style="font-size: 12px; margin-top: 10px;">${Utils.escapeHtml(error.message)}</p>
             </div>
         `;
     }
@@ -421,7 +423,7 @@ export async function loadMoreProfilePosts() {
 
         // Fetch parent posts, disclosed tips, and engagement counts
         const [parentPostsMap, disclosedTipsData, engagementData] = await Promise.all([
-            PostsModule.fetchParentPosts(postsToRender),
+            PostsModule.fetchParentPosts(postsToRender, PostsModule.getParentPostRelays()),
             PostsModule.fetchDisclosedTips(postsToRender),
             PostsModule.fetchEngagementCounts(postsToRender.map(p => p.id))
         ]);
@@ -442,20 +444,12 @@ export async function loadMoreProfilePosts() {
                 return await PostsModule.renderSinglePost(post, 'feed', engagementData, parentPostsMap);
             } catch (error) {
                 console.error('Error rendering profile post:', error);
-                return `
-                    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px;">
-                        <div style="color: #666; font-size: 12px;">Error rendering post</div>
-                    </div>
-                `;
+                return POST_RENDER_ERROR_HTML;
             }
         }));
 
         // Update displayed count
         displayedProfilePostCount = endIndex;
-
-        // Check if there are more posts
-        const hasMorePosts = displayedProfilePostCount < cachedProfilePosts.length;
-        const remainingCount = cachedProfilePosts.length - displayedProfilePostCount;
 
         // Remove old Load More button
         const loadMoreContainer = document.getElementById('profileLoadMoreContainer');
@@ -463,19 +457,11 @@ export async function loadMoreProfilePosts() {
             loadMoreContainer.remove();
         }
 
-        // Add new Load More button if needed
-        const loadMoreButton = hasMorePosts ? `
-            <div id="profileLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
-                <button onclick="loadMoreProfilePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
-                    Load More Posts (${remainingCount} available)
-                </button>
-            </div>
-        ` : '';
-
         // Append new posts and button to container
+        const remainingCount = cachedProfilePosts.length - displayedProfilePostCount;
         const userPostsContainer = document.getElementById('userPostsContainer');
         if (userPostsContainer) {
-            userPostsContainer.insertAdjacentHTML('beforeend', renderedPosts.join('') + loadMoreButton);
+            userPostsContainer.insertAdjacentHTML('beforeend', renderedPosts.join('') + renderLoadMoreButton(remainingCount));
         }
 
         // Process embedded notes
@@ -496,9 +482,10 @@ export async function viewUserProfilePage(pubkey) {
         }
 
         // Import required modules
-        const [StateModule, Posts] = await Promise.all([
+        const [StateModule, Posts, Utils] = await Promise.all([
             import('../state.js'),
-            import('../posts.js')
+            import('../posts.js'),
+            import('../utils.js')
         ]);
 
         // Store current page to go back to
@@ -552,6 +539,25 @@ export async function viewUserProfilePage(pubkey) {
             };
         }
 
+        // Escape user-controlled profile fields to prevent XSS
+        const safeName = Utils.escapeHtml(userProfile.name || 'Anonymous');
+        const safeNip05 = userProfile.nip05 ? Utils.escapeHtml(userProfile.nip05) : '';
+        const safeAbout = userProfile.about ? Utils.escapeHtml(userProfile.about) : '';
+        const safeLud16 = userProfile.lud16 ? Utils.escapeHtml(userProfile.lud16) : '';
+        // For website, validate it's a proper URL and escape for display
+        let safeWebsiteHref = '';
+        let safeWebsiteDisplay = '';
+        if (userProfile.website) {
+            const websiteUrl = userProfile.website.startsWith('http://') || userProfile.website.startsWith('https://')
+                ? userProfile.website
+                : 'https://' + userProfile.website;
+            // Only allow http/https URLs to prevent javascript: injection
+            if (websiteUrl.startsWith('http://') || websiteUrl.startsWith('https://')) {
+                safeWebsiteHref = Utils.escapeHtml(websiteUrl);
+                safeWebsiteDisplay = Utils.escapeHtml(userProfile.website);
+            }
+        }
+
         // Render profile page with ThumbHash progressive loading
         const profileAvatarPlaceholder = userProfile.picture ? window.ThumbHashLoader?.getPlaceholder(userProfile.picture) : null;
         profilePage.innerHTML = `
@@ -561,16 +567,16 @@ export async function viewUserProfilePage(pubkey) {
                         ${userProfile.picture ?
                             `<img src="${profileAvatarPlaceholder || userProfile.picture}" data-thumbhash-src="${userProfile.picture}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;${profileAvatarPlaceholder ? ' filter: blur(4px); transition: filter 0.3s;' : ''}"
                                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)">
-                             <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>` :
-                            `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>`
+                             <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${safeName.charAt(0).toUpperCase()}</div>` :
+                            `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${safeName.charAt(0).toUpperCase()}</div>`
                         }
                         <div style="flex: 1; min-width: 0; word-wrap: break-word; overflow-wrap: break-word;">
-                            <h1 class="profile-name" data-pubkey="${pubkey}" style="color: #fff; font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${userProfile.name || 'Anonymous'}</h1>
+                            <h1 class="profile-name" data-pubkey="${pubkey}" style="color: #fff; font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${safeName}</h1>
                             <p style="margin: 0 0 8px 0; color: #888; font-family: monospace; font-size: 14px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
-                            ${userProfile.nip05 ? `<div style="color: #10B981; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;">✅ ${userProfile.nip05}</div>` : ''}
-                            ${userProfile.about ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 8px; word-wrap: break-word;">${userProfile.about}</div>` : ''}
-                            ${userProfile.website ? `<div style="margin-bottom: 8px; word-wrap: break-word;"><a href="${userProfile.website.startsWith('http://') || userProfile.website.startsWith('https://') ? userProfile.website : 'https://' + userProfile.website}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 14px; word-break: break-all;">🔗 ${userProfile.website}</a></div>` : ''}
-                            ${userProfile.lud16 ? `<div style="color: #FFDF00; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;"><span style="margin-right: 6px;">⚡</span>Lightning: <span style="word-break: break-all;">${userProfile.lud16}</span></div>` : ''}
+                            ${safeNip05 ? `<div style="color: #10B981; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;">✅ ${safeNip05}</div>` : ''}
+                            ${safeAbout ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 8px; word-wrap: break-word;">${safeAbout}</div>` : ''}
+                            ${safeWebsiteHref ? `<div style="margin-bottom: 8px; word-wrap: break-word;"><a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 14px; word-break: break-all;">🔗 ${safeWebsiteDisplay}</a></div>` : ''}
+                            ${safeLud16 ? `<div style="color: #FFDF00; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;"><span style="margin-right: 6px;">⚡</span>Lightning: <span style="word-break: break-all;">${safeLud16}</span></div>` : ''}
                             <div id="uiProfileMoneroAddress" style="margin-bottom: 8px;"></div>
                         </div>
                     </div>
@@ -654,11 +660,13 @@ async function loadAndDisplayMoneroAddress(pubkey, userProfile) {
         if (moneroAddress && moneroAddress.trim()) {
             // Display the Monero address with copy button
             const shortAddress = `${moneroAddress.substring(0, 8)}...${moneroAddress.substring(moneroAddress.length - 8)}`;
+            // Escape for use in onclick attribute to prevent injection
+            const safeMoneroAddress = moneroAddress.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             addressContainer.innerHTML = `
                 <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid #FF6600; border-radius: 8px; padding: 12px; margin-top: 8px;">
                     <div style="color: #FF6600; font-size: 12px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
                         <span><span style="margin-right: 6px;">💰</span>MONERO ADDRESS</span>
-                        <button onclick="navigator.clipboard.writeText('${moneroAddress}'); window.NostrUtils.showNotification('Monero address copied!', 'success')"
+                        <button onclick="navigator.clipboard.writeText('${safeMoneroAddress}'); window.NostrUtils.showNotification('Monero address copied!', 'success')"
                                 style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 10px;">
                             Copy
                         </button>
@@ -681,78 +689,6 @@ async function loadAndDisplayMoneroAddress(pubkey, userProfile) {
 
 
 // ==================== FOLLOW FUNCTIONALITY ====================
-
-// DEPRECATED: Load following list from localStorage and relays
-// Following list loading is now handled by the home feed to prevent race conditions
-export async function loadFollowingList() {
-    try {
-        // Load from localStorage first
-        const storedFollowing = localStorage.getItem('following-list');
-        if (storedFollowing) {
-            const parsed = JSON.parse(storedFollowing);
-            followingList = new Set(parsed);
-        }
-
-        // Import State module
-        const StateModule = await import('../state.js');
-
-        // Try to load from relays if user is logged in
-        if (StateModule.publicKey && StateModule.pool) {
-            const relays = await import('../relays.js');
-            const readRelays = relays.getReadRelays();
-
-            await new Promise((resolve) => {
-                const sub = StateModule.pool.subscribeMany(readRelays, [
-                    { kinds: [3], authors: [StateModule.publicKey], limit: 1 }
-                ], {
-                    onevent(event) {
-                        try {
-                            // Parse contact list (kind 3 event)
-                            const followingFromRelay = new Set();
-                            event.tags.forEach(tag => {
-                                if (tag[0] === 'p' && tag[1]) {
-                                    followingFromRelay.add(tag[1]);
-                                }
-                            });
-
-                            followingList = followingFromRelay;
-
-                            // Update global state
-                            StateModule.setFollowingUsers(followingFromRelay);
-
-                            // Clear cached home feed since follow list changed
-                            StateModule.setHomeFeedCache({
-                                posts: [],
-                                timestamp: 0,
-                                isLoading: false
-                            });
-
-                            // Save to localStorage with timestamp
-                            localStorage.setItem('following-list', JSON.stringify([...followingList]));
-                            localStorage.setItem('following-list-timestamp', Date.now().toString());
-
-                            // Note: Home feed now handles fresh following list fetching automatically via streaming approach
-                        } catch (error) {
-                            console.error('Error parsing contact list:', error);
-                        }
-                    },
-                    oneose: () => {
-                        sub.close();
-                        resolve();
-                    }
-                });
-
-                // Timeout after 3 seconds
-                setTimeout(() => {
-                    sub.close();
-                    resolve();
-                }, 3000);
-            });
-        }
-    } catch (error) {
-        console.error('Error loading following list:', error);
-    }
-}
 
 // Update follow button appearance
 async function updateFollowButton(pubkey) {
@@ -791,7 +727,7 @@ export async function toggleFollow(pubkey) {
             import('../relays.js')
         ]);
 
-        if (!StateModule.publicKey || !StateModule.privateKey) {
+        if (!StateModule.publicKey || !StateModule.hasPrivateKey()) {
             showWarningToast('Please log in to follow users', 'Login Required');
             return;
         }
@@ -906,7 +842,7 @@ async function getFollowingCount(pubkey) {
             let count = 0;
             const timeout = setTimeout(() => {
                 resolve(count);
-            }, 5000); // 5 second timeout
+            }, TIMEOUTS.FOLLOW_COUNT);
 
             const sub = StateModule.pool.subscribeMany(readRelays, [
                 { kinds: [3], authors: [pubkey], limit: 1 }
@@ -948,7 +884,7 @@ async function getFollowersCount(pubkey) {
             const followers = new Set();
             const timeout = setTimeout(() => {
                 resolve(followers.size);
-            }, 5000); // 5 second timeout
+            }, TIMEOUTS.FOLLOW_COUNT);
 
             const sub = StateModule.pool.subscribeMany(socialGraphRelays, [
                 { kinds: [3], '#p': [pubkey], limit: 200 }

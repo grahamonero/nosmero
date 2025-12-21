@@ -25,7 +25,7 @@ const LOCAL_STORAGE_KEY = 'nosmero-follower-baseline';
 async function encryptBaseline(baseline) {
     const content = JSON.stringify(baseline);
 
-    if (State.privateKey === 'extension' || State.privateKey === 'nsec-app') {
+    if (State.getPrivateKeyForSigning() === 'extension' || State.getPrivateKeyForSigning() === 'nsec-app') {
         // Use browser extension for encryption
         if (!window.nostr || !window.nostr.nip04) {
             throw new Error('Browser extension does not support NIP-04 encryption');
@@ -35,7 +35,7 @@ async function encryptBaseline(baseline) {
     } else {
         // Use local private key
         const { nip04 } = window.NostrTools;
-        return await nip04.encrypt(State.privateKey, State.publicKey, content);
+        return await nip04.encrypt(State.getPrivateKeyForSigning(), State.publicKey, content);
     }
 }
 
@@ -48,7 +48,7 @@ async function decryptBaseline(encryptedContent) {
     try {
         let decrypted;
 
-        if (State.privateKey === 'extension' || State.privateKey === 'nsec-app') {
+        if (State.getPrivateKeyForSigning() === 'extension' || State.getPrivateKeyForSigning() === 'nsec-app') {
             // Use browser extension for decryption
             if (!window.nostr || !window.nostr.nip04) {
                 throw new Error('Browser extension does not support NIP-04 decryption');
@@ -58,7 +58,7 @@ async function decryptBaseline(encryptedContent) {
         } else {
             // Use local private key
             const { nip04 } = window.NostrTools;
-            decrypted = await nip04.decrypt(State.privateKey, State.publicKey, encryptedContent);
+            decrypted = await nip04.decrypt(State.getPrivateKeyForSigning(), State.publicKey, encryptedContent);
         }
 
         return JSON.parse(decrypted);
@@ -199,7 +199,7 @@ export async function saveFollowerBaseline(baseline) {
 
         // Sign the event
         let signedEvent;
-        if (State.privateKey === 'extension' || State.privateKey === 'nsec-app') {
+        if (State.getPrivateKeyForSigning() === 'extension' || State.getPrivateKeyForSigning() === 'nsec-app') {
             // Use browser extension for signing
             if (!window.nostr) {
                 throw new Error('Browser extension not available for signing');
@@ -208,7 +208,7 @@ export async function saveFollowerBaseline(baseline) {
         } else {
             // Use local private key
             const { finalizeEvent } = window.NostrTools;
-            signedEvent = finalizeEvent(event, State.privateKey);
+            signedEvent = finalizeEvent(event, State.getPrivateKeyForSigning());
         }
 
         // Publish to Nosmero relay

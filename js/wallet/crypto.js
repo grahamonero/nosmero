@@ -183,7 +183,13 @@ export function validatePIN(pin) {
  * @returns {string}
  */
 export function bytesToBase64(bytes) {
-    return btoa(String.fromCharCode(...bytes));
+    // Avoid spread operator to prevent stack overflow on large arrays
+    let binary = '';
+    const len = bytes.length;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
 }
 
 /**
@@ -229,6 +235,10 @@ export function secureWipe(obj) {
  * @returns {Promise<CryptoKey>}
  */
 async function deriveKeyFromViewKey(privateViewKey, salt) {
+    // Validate hex view key (64 hex chars = 32 bytes = 256 bits)
+    if (!privateViewKey || typeof privateViewKey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(privateViewKey)) {
+        throw new Error('Invalid private view key');
+    }
     // Convert hex to bytes
     const keyBytes = new Uint8Array(privateViewKey.match(/.{2}/g).map(b => parseInt(b, 16)));
 

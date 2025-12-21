@@ -28,6 +28,7 @@ db.exec(`
     username TEXT UNIQUE,
     ncryptsec TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    password_salt TEXT,
     email_verified INTEGER DEFAULT 0,
     created_at INTEGER DEFAULT (strftime('%s', 'now')),
     updated_at INTEGER DEFAULT (strftime('%s', 'now')),
@@ -53,14 +54,24 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tokens_user ON email_tokens(user_id);
 `);
 
+// Migration: Add password_salt column if it doesn't exist
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN password_salt TEXT`);
+  console.log('[DB] Migration: Added password_salt column');
+} catch (error) {
+  if (!error.message.includes('duplicate column name')) {
+    throw error;
+  }
+}
+
 console.log('[DB] SQLite database initialized at', DB_PATH);
 
 // Prepared statements for performance
 const statements = {
   // User queries
   createUser: db.prepare(`
-    INSERT INTO users (npub, email, username, ncryptsec, password_hash)
-    VALUES (@npub, @email, @username, @ncryptsec, @password_hash)
+    INSERT INTO users (npub, email, username, ncryptsec, password_hash, password_salt)
+    VALUES (@npub, @email, @username, @ncryptsec, @password_hash, @password_salt)
   `),
 
   getUserByEmail: db.prepare(`
@@ -79,6 +90,10 @@ const statements = {
     SELECT * FROM users WHERE email = ? OR username = ?
   `),
 
+  getSaltByIdentifier: db.prepare(`
+    SELECT password_salt FROM users WHERE email = ? OR username = ?
+  `),
+
   updateLastLogin: db.prepare(`
     UPDATE users SET last_login = strftime('%s', 'now') WHERE id = ?
   `),
@@ -89,6 +104,7 @@ const statements = {
         username = COALESCE(@username, username),
         ncryptsec = @ncryptsec,
         password_hash = @password_hash,
+        password_salt = @password_salt,
         updated_at = strftime('%s', 'now')
     WHERE npub = @npub
   `),
@@ -144,17 +160,19 @@ const statements = {
  * @param {string} [user.email] - Email address (optional)
  * @param {string} [user.username] - Username (optional)
  * @param {string} user.ncryptsec - NIP-49 encrypted nsec
- * @param {string} user.password_hash - bcrypt hash
+ * @param {string} user.password_hash - Client-side PBKDF2 hash (hex)
+ * @param {string} user.password_salt - Client-side salt (hex)
  * @returns {Object} Created user with id
  */
-export function createUser({ npub, email, username, ncryptsec, password_hash }) {
+export function createUser({ npub, email, username, ncryptsec, password_hash, password_salt }) {
   try {
     const result = statements.createUser.run({
       npub,
       email: email || null,
       username: username || null,
       ncryptsec,
-      password_hash
+      password_hash,
+      password_salt: password_salt || null
     });
     return { id: result.lastInsertRowid, npub, email, username };
   } catch (error) {
@@ -180,6 +198,15 @@ export function createUser({ npub, email, username, ncryptsec, password_hash }) 
  */
 export function getUserByIdentifier(identifier) {
   return statements.getUserByIdentifier.get(identifier, identifier);
+}
+
+/**
+ * Get user's salt by email or username
+ * @param {string} identifier - Email or username
+ * @returns {Object|null} Object with password_salt or null
+ */
+export function getSaltByIdentifier(identifier) {
+  return statements.getSaltByIdentifier.get(identifier, identifier);
 }
 
 /**
@@ -225,14 +252,16 @@ export function updateLastLogin(userId) {
  * @param {string} [data.username]
  * @param {string} data.ncryptsec
  * @param {string} data.password_hash
+ * @param {string} data.password_salt
  */
-export function updateUserRecovery({ npub, email, username, ncryptsec, password_hash }) {
+export function updateUserRecovery({ npub, email, username, ncryptsec, password_hash, password_salt }) {
   statements.updateUserRecovery.run({
     npub,
     email: email || null,
     username: username || null,
     ncryptsec,
-    password_hash
+    password_hash,
+    password_salt: password_salt || null
   });
 }
 

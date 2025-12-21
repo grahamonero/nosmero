@@ -1,55 +1,101 @@
 // ==================== SECURE STORAGE ====================
 // Encryption functions for sensitive data in localStorage
 
-// Derive encryption key from user PIN
-export async function deriveKey(pin) {
+// PBKDF2 configuration - high iterations for brute-force resistance
+const PBKDF2_ITERATIONS = 600000;
+const SALT_LENGTH = 16;  // 128 bits
+const IV_LENGTH = 12;    // 96 bits (recommended for AES-GCM)
+
+// Derive encryption key from user PIN using PBKDF2
+export async function deriveKey(pin, salt) {
     const encoder = new TextEncoder();
-    const data = encoder.encode(pin + 'nosmero-salt-2025');
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return await crypto.subtle.importKey(
+    const pinBytes = encoder.encode(pin);
+
+    const keyMaterial = await crypto.subtle.importKey(
         'raw',
-        hash,
-        { name: 'AES-GCM' },
+        pinBytes,
+        'PBKDF2',
+        false,
+        ['deriveKey']
+    );
+
+    return await crypto.subtle.deriveKey(
+        {
+            name: 'PBKDF2',
+            salt: salt,
+            iterations: PBKDF2_ITERATIONS,
+            hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
         false,
         ['encrypt', 'decrypt']
     );
 }
 
-// Encrypt data with derived key
-export async function encryptData(data, key) {
+// Validate PIN format
+export function validatePIN(pin) {
+    if (!pin || typeof pin !== 'string') {
+        return { valid: false, error: 'PIN is required' };
+    }
+    if (pin.length < 4) {
+        return { valid: false, error: 'PIN must be at least 4 characters' };
+    }
+    if (pin.length > 32) {
+        return { valid: false, error: 'PIN must be 32 characters or less' };
+    }
+    return { valid: true };
+}
+
+// Convert Uint8Array to base64 (loop to avoid stack overflow)
+function bytesToBase64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+// Encrypt data with PIN (generates salt and IV)
+export async function encryptData(data, pin) {
     const encoder = new TextEncoder();
-    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+    const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+    const key = await deriveKey(pin, salt);
+
     const encrypted = await crypto.subtle.encrypt(
         { name: 'AES-GCM', iv: iv },
         key,
         encoder.encode(data)
     );
-    
-    // Combine IV and encrypted data
-    const combined = new Uint8Array(iv.length + encrypted.byteLength);
-    combined.set(iv, 0);
-    combined.set(new Uint8Array(encrypted), iv.length);
-    
-    // Convert to base64 for storage
-    return btoa(String.fromCharCode(...combined));
+
+    // Combine salt + IV + encrypted data
+    const combined = new Uint8Array(SALT_LENGTH + IV_LENGTH + encrypted.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, SALT_LENGTH);
+    combined.set(new Uint8Array(encrypted), SALT_LENGTH + IV_LENGTH);
+
+    return bytesToBase64(combined);
 }
 
-// Decrypt data with derived key
-export async function decryptData(encryptedData, key) {
+// Decrypt data with PIN
+export async function decryptData(encryptedData, pin) {
     try {
         // Convert from base64
         const combined = Uint8Array.from(atob(encryptedData), c => c.charCodeAt(0));
-        
-        // Extract IV and encrypted data
-        const iv = combined.slice(0, 12);
-        const encrypted = combined.slice(12);
-        
+
+        // Extract salt, IV, and encrypted data
+        const salt = combined.slice(0, SALT_LENGTH);
+        const iv = combined.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
+        const encrypted = combined.slice(SALT_LENGTH + IV_LENGTH);
+
+        const key = await deriveKey(pin, salt);
         const decrypted = await crypto.subtle.decrypt(
             { name: 'AES-GCM', iv: iv },
             key,
             encrypted
         );
-        
+
         const decoder = new TextDecoder();
         return decoder.decode(decrypted);
     } catch (error) {
@@ -60,41 +106,38 @@ export async function decryptData(encryptedData, key) {
 
 // Store encrypted private key
 export async function storeSecurePrivateKey(privateKey, pin) {
-    if (!pin) {
-        // Fallback to unencrypted for backward compatibility
-        localStorage.setItem('nostr-private-key', privateKey);
-        return;
+    // Validate PIN
+    const pinCheck = validatePIN(pin);
+    if (!pinCheck.valid) {
+        throw new Error(pinCheck.error);
     }
-    
+
     try {
-        const key = await deriveKey(pin);
-        const encrypted = await encryptData(privateKey, key);
+        const encrypted = await encryptData(privateKey, pin);
         localStorage.setItem('nostr-private-key-encrypted', encrypted);
         localStorage.setItem('encryption-enabled', 'true');
         // Remove unencrypted version if it exists
         localStorage.removeItem('nostr-private-key');
     } catch (error) {
         console.error('Encryption failed:', error);
-        // Fallback to unencrypted
-        localStorage.setItem('nostr-private-key', privateKey);
+        throw error;
     }
 }
 
 // Retrieve and decrypt private key
 export async function getSecurePrivateKey(pin) {
     const isEncrypted = localStorage.getItem('encryption-enabled') === 'true';
-    
+
     if (!isEncrypted) {
-        // Return unencrypted key for backward compatibility
+        // Return unencrypted key for backward compatibility (legacy users)
         return localStorage.getItem('nostr-private-key');
     }
-    
+
     const encryptedKey = localStorage.getItem('nostr-private-key-encrypted');
     if (!encryptedKey || !pin) return null;
-    
+
     try {
-        const key = await deriveKey(pin);
-        return await decryptData(encryptedKey, key);
+        return await decryptData(encryptedKey, pin);
     } catch (error) {
         console.error('Failed to decrypt private key:', error);
         return null;
@@ -232,8 +275,9 @@ export function wrapGiftMessageWithRecipient(content, senderPrivateKey, wrapReci
         const conversationKey = nip44.getConversationKey(senderPrivateKey, wrapRecipientPubkey);
         const encryptedRumor = nip44.encrypt(JSON.stringify(rumor), conversationKey);
 
-        // Step 3: Create the gift wrap (kind 1059) with randomized timestamp (±2 days)
-        const randomOffset = Math.floor(Math.random() * 4 * 24 * 60 * 60) - (2 * 24 * 60 * 60); // ±2 days in seconds
+        // Step 3: Create the gift wrap (kind 1059) with randomized timestamp (0 to -2 days)
+        // Per NIP-17 spec: timestamps SHOULD be in the past to avoid relay rejection
+        const randomOffset = -Math.floor(Math.random() * 2 * 24 * 60 * 60); // 0 to -2 days in seconds
         const giftWrap = {
             kind: 1059,
             created_at: Math.floor(Date.now() / 1000) + randomOffset,

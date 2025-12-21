@@ -618,6 +618,13 @@ export function resetRelayPerformance() {
     relayPerformance = {};
 }
 
+// Get the Nosmero relay URL based on current protocol
+export function getNosmeroRelay() {
+    return window.location.protocol === 'https:'
+        ? 'wss://nosmero.com/nip78-relay'
+        : 'ws://nosmero.com:8080/nip78-relay';
+}
+
 // Initialize relay system
 export function initializeRelays() {
     // Initialize the relay pool

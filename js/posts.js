@@ -11,6 +11,22 @@ import * as PaywallUI from './paywall-ui.js';
 export const POSTS_PER_PAGE = 10;
 export const MAX_CONTENT_LENGTH = 4000;
 
+// Major public relays for fetching parent posts (replies could be from any user)
+const PARENT_POST_RELAYS = [
+    'wss://relay.damus.io',
+    'wss://relay.nostr.band',
+    'wss://nos.lol',
+    'wss://relay.snort.social',
+    'wss://nostr.wine',
+    'wss://relay.primal.net'
+];
+
+// Get combined relays for parent post fetching (user's relays + public fallbacks)
+export function getParentPostRelays() {
+    const userRelays = Relays.getReadRelays() || [];
+    return [...new Set([...userRelays, ...PARENT_POST_RELAYS])];
+}
+
 // Current media file for uploads
 let currentMediaFile = null;
 let currentMediaUrl = null;
@@ -1601,7 +1617,7 @@ async function loadFreshFollowingList() {
 export async function fetchMuteList() {
     console.log('🔇 Fetching private encrypted mute list (kind 30000)...');
 
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.getPrivateKeyForSigning()) {
         console.log('🔇 No keys available, skipping mute list fetch');
         return;
     }
@@ -1623,7 +1639,7 @@ export async function fetchMuteList() {
                     try {
                         // Decrypt the content
                         const decryptedContent = await window.NostrTools.nip04.decrypt(
-                            State.privateKey,
+                            State.getPrivateKeyForSigning(),
                             State.publicKey,
                             event.content
                         );
@@ -1667,7 +1683,7 @@ export async function fetchMuteList() {
 export async function publishMuteList() {
     console.log('📤 Publishing private encrypted mute list...');
 
-    if (!State.privateKey || !State.publicKey) {
+    if (!State.getPrivateKeyForSigning() || !State.publicKey) {
         console.error('Cannot publish mute list - no keys available');
         return false;
     }
@@ -1684,7 +1700,7 @@ export async function publishMuteList() {
 
         // Encrypt content using NIP-04 (encrypt to self)
         const encryptedContent = await window.NostrTools.nip04.encrypt(
-            State.privateKey,
+            State.getPrivateKeyForSigning(),
             State.publicKey,
             contentToEncrypt
         );
@@ -1701,7 +1717,7 @@ export async function publishMuteList() {
         };
 
         // Sign the event
-        const signedEvent = window.NostrTools.finalizeEvent(muteListEvent, State.privateKey);
+        const signedEvent = window.NostrTools.finalizeEvent(muteListEvent, State.getPrivateKeyForSigning());
 
         // Publish to relays
         const publishPromises = State.pool.publish(writeRelays, signedEvent);
@@ -2112,7 +2128,7 @@ export async function loadWebOfTrustFeed() {
 
             // Fetch parent posts and engagement counts for replies
             const [parentPostsMap, engagementData] = await Promise.all([
-                fetchParentPosts(postsToDisplay),
+                fetchParentPosts(postsToDisplay, getParentPostRelays()),
                 fetchEngagementCounts(postsToDisplay.map(p => p.id))
             ]);
             console.log(`✅ Fetched ${Object.keys(parentPostsMap).length} parent posts and engagement data`);
@@ -2263,7 +2279,7 @@ export async function loadMoreWebOfTrustPosts() {
 
             // Fetch parent posts and engagement counts for new posts
             const [parentPostsMap, engagementData] = await Promise.all([
-                fetchParentPosts(postsToDisplay),
+                fetchParentPosts(postsToDisplay, getParentPostRelays()),
                 fetchEngagementCounts(postsToDisplay.map(p => p.id))
             ]);
             console.log(`✅ Fetched ${Object.keys(parentPostsMap).length} parent posts and engagement data for new posts`);
@@ -2743,7 +2759,7 @@ async function renderHomeFeedResults() {
     const postIds = sortedResults.map(p => p.id);
     Promise.all([
         fetchDisclosedTips(sortedResults),
-        fetchParentPosts(sortedResults),
+        fetchParentPosts(sortedResults, getParentPostRelays()),
         fetchEngagementCounts(postIds)
     ]).then(([disclosedTipsData, parentPostsMap, engagementData]) => {
         console.log('💰 Disclosed tips, 👨‍👩‍👧 parent posts, and 📊 engagement loaded');
@@ -2901,7 +2917,7 @@ export async function renderFeed(loadMore = false) {
     }
 
     // Fetch parent posts for replies (only for posts being rendered)
-    const parentPostsMap = await fetchParentPosts(postsToRender);
+    const parentPostsMap = await fetchParentPosts(postsToRender, getParentPostRelays());
 
     // Fetch engagement counts for posts being rendered
     const postIds = postsToRender.map(p => p.id);
@@ -3301,12 +3317,13 @@ export function getAuthorInfo(post) {
     const profile = State.profileCache[post.pubkey];
     if (profile) {
         return {
-            name: profile.name || profile.display_name || post.pubkey.slice(0, 8),
-            handle: profile.nip05 || post.pubkey.slice(0, 16),
+            // Escape HTML to prevent XSS from malicious profile names
+            name: Utils.escapeHtml(profile.name || profile.display_name || post.pubkey.slice(0, 8)),
+            handle: Utils.escapeHtml(profile.nip05 || post.pubkey.slice(0, 16)),
             picture: profile.picture || null
         };
     }
-    
+
     // Fallback if no profile cached
     return {
         name: post.pubkey.slice(0, 8),
@@ -3825,7 +3842,7 @@ export function updateAllRepostButtons() {
 // ==================== HELPER FUNCTIONS ====================
 
 // Fetch parent posts for replies
-export async function fetchParentPosts(posts) {
+export async function fetchParentPosts(posts, customRelays = null) {
     const parentMap = {};
     const parentIdsToFetch = [];
 
@@ -3861,13 +3878,14 @@ export async function fetchParentPosts(posts) {
             }
         }
     }
-    
+
     // Fetch missing parent posts
     if (parentIdsToFetch.length > 0) {
         console.log('Fetching', parentIdsToFetch.length, 'parent posts');
-        
+
         try {
-            const relays = Relays.getReadRelays();
+            // Use custom relays if provided, otherwise fall back to user's read relays
+            const relays = customRelays || Relays.getReadRelays();
             
             if (State.pool && relays.length > 0) {
                 await new Promise((resolve) => {
@@ -4670,7 +4688,7 @@ export async function handleSmartPaste(event) {
 // Toggle the visibility of the new post composition area
 export function toggleCompose() {
     // Check if user is logged in first
-    if (!State.privateKey) {
+    if (!State.getPrivateKeyForSigning()) {
         // Show login options instead of compose area
         if (window.showAuthUI) {
             window.showAuthUI();
@@ -5185,7 +5203,7 @@ async function uploadMediaToBlossom() {
         // Create NIP-98 auth event
         let authEvent;
 
-        if (State.privateKey === 'extension' || State.privateKey === 'nsec-app') {
+        if (State.getPrivateKeyForSigning() === 'extension' || State.getPrivateKeyForSigning() === 'nsec-app') {
             // Use window.nostr to sign (browser extension or nsec.app)
             if (!window.nostr) {
                 throw new Error('window.nostr not available');
@@ -6421,7 +6439,7 @@ async function showMoreTrendingAll() {
     await fetchProfiles(allPubkeys);
 
     // Fetch parent posts for replies
-    const parentPostsMap = await fetchParentPosts(pagesToShow);
+    const parentPostsMap = await fetchParentPosts(pagesToShow, getParentPostRelays());
 
     // Render notes with repost context
     const renderedNotes = await Promise.all(
@@ -6631,7 +6649,7 @@ export async function loadDiscoverFeed() {
 
         // Fetch engagement and parent posts
         const engagementData = await fetchEngagementCounts(displayNotes.map(n => n.id));
-        const parentPostsMap = await fetchParentPosts(displayNotes);
+        const parentPostsMap = await fetchParentPosts(displayNotes, getParentPostRelays());
 
         // Render notes with repost context
         const renderedNotes = await Promise.all(

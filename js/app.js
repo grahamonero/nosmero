@@ -415,10 +415,10 @@ async function checkExistingSession() {
 // Start the main application
 async function startApplication() {
     console.log('🚦 startApplication() called');
-    console.log('  - State.privateKey:', State.privateKey);
+    console.log('  - State.getPrivateKeyForSigning():', State.getPrivateKeyForSigning());
     console.log('  - State.publicKey:', State.publicKey ? State.publicKey.substring(0, 16) + '...' : 'null');
 
-    if (State.privateKey && State.publicKey) {
+    if (State.getPrivateKeyForSigning() && State.publicKey) {
         console.log('🏠 Starting authenticated session...');
 
         // Update UI for logged in state
@@ -586,6 +586,16 @@ async function handleNavigation(event) {
     const feed = document.getElementById('feed');
     if (feed) {
         feed.style.display = 'block';
+
+        // Restore proper feed structure if it was destroyed (e.g., by Tip Activity)
+        // Check if homeFeedList exists, if not, recreate the structure
+        if (!document.getElementById('homeFeedList')) {
+            feed.innerHTML = `
+                <div id="homeFeedHeader" style="display: none;"></div>
+                <div id="homeFeedList"></div>
+                <div id="loadMoreContainer" style="display: none;"></div>
+            `;
+        }
     }
 
     // Navigate to requested page
@@ -1376,7 +1386,7 @@ function displayUserPosts(posts) {
             }
 
             // Fetch parent posts and their authors for replies
-            const parentPostsMap = await Posts.fetchParentPosts(posts);
+            const parentPostsMap = await Posts.fetchParentPosts(posts, Posts.getParentPostRelays());
             const parentAuthors = Object.values(parentPostsMap)
                 .filter(parent => parent)
                 .map(parent => parent.pubkey);
@@ -1500,7 +1510,7 @@ async function loadMoreOwnPosts() {
 
         // Fetch parent posts, disclosed tips, and engagement counts
         const [parentPostsMap, disclosedTipsData, engagementData] = await Promise.all([
-            Posts.fetchParentPosts(postsToRender),
+            Posts.fetchParentPosts(postsToRender, Posts.getParentPostRelays()),
             Posts.fetchDisclosedTips(postsToRender),
             Posts.fetchEngagementCounts(postsToRender.map(p => p.id))
         ]);
@@ -1725,11 +1735,11 @@ async function loadSettings_OLD_DISABLED() {
                     <label style="color: #ccc; display: block; margin-bottom: 8px;">Private Key Storage</label>
                     <div style="background: #333; padding: 15px; border-radius: 8px;">
                         <p style="color: #fff; margin: 0; font-size: 14px;">
-                            ${State.privateKey === 'extension' ?
+                            ${State.getPrivateKeyForSigning() === 'extension' ?
                                 '🔌 Using browser extension (most secure)' :
-                                State.privateKey === 'nsec-app' ?
+                                State.getPrivateKeyForSigning() === 'nsec-app' ?
                                 '🌐 Using nsec.app OAuth (most secure)' :
-                                State.privateKey === 'amber' ?
+                                State.getPrivateKeyForSigning() === 'amber' ?
                                 '📱 Using Amber signer (most secure)' :
                                 '💾 Stored locally (encrypted recommended)'
                             }
@@ -2221,22 +2231,22 @@ function resetToDefaultRelays() {
 
 // Export private key
 function exportPrivateKey() {
-    if (State.privateKey === 'extension') {
+    if (State.getPrivateKeyForSigning() === 'extension') {
         alert('Cannot export private key from browser extension. Check your extension settings.');
         return;
     }
 
-    if (State.privateKey === 'nsec-app') {
+    if (State.getPrivateKeyForSigning() === 'nsec-app') {
         alert('Cannot export private key from nsec.app. Your keys are managed by nsec.app.');
         return;
     }
 
-    if (State.privateKey === 'amber') {
+    if (State.getPrivateKeyForSigning() === 'amber') {
         alert('Cannot export private key from Amber. Your keys are securely stored on your Android device.');
         return;
     }
 
-    if (!State.privateKey) {
+    if (!State.getPrivateKeyForSigning()) {
         alert('No private key available to export');
         return;
     }
@@ -2247,14 +2257,14 @@ function exportPrivateKey() {
 
             // Convert hex string to Uint8Array for nsecEncode
             let privateKeyBytes;
-            if (typeof State.privateKey === 'string' && State.privateKey.length === 64) {
+            if (typeof State.getPrivateKeyForSigning() === 'string' && State.getPrivateKeyForSigning().length === 64) {
                 // Convert hex string to Uint8Array
                 privateKeyBytes = utils && utils.hexToBytes ?
-                    utils.hexToBytes(State.privateKey) :
-                    new Uint8Array(State.privateKey.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                    utils.hexToBytes(State.getPrivateKeyForSigning()) :
+                    new Uint8Array(State.getPrivateKeyForSigning().match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
             } else {
                 // Already in correct format or handle other cases
-                privateKeyBytes = State.privateKey;
+                privateKeyBytes = State.getPrivateKeyForSigning();
             }
 
             const nsec = nip19.nsecEncode(privateKeyBytes);
@@ -2402,7 +2412,7 @@ async function savePostingSettings() {
 
 // Save Lightning address to profile using NIP-01 (profile metadata)
 async function saveLightningAddressToProfile(lightningAddress) {
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.getPrivateKeyForSigning()) {
         throw new Error('User not logged in');
     }
     
@@ -2451,13 +2461,13 @@ async function saveLightningAddressToProfile(lightningAddress) {
 
 // Save Monero address to relays using NIP-78 (application-specific data)
 async function saveMoneroAddressToRelays(moneroAddress) {
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.getPrivateKeyForSigning()) {
         throw new Error('User not authenticated');
     }
 
     console.log('Saving Monero address to relays using NIP-78...', moneroAddress);
     console.log('Current public key:', State.publicKey);
-    console.log('Current private key type:', typeof State.privateKey);
+    console.log('Current private key type:', typeof State.getPrivateKeyForSigning());
 
     // Get current zap amounts from localStorage to preserve them
     const btcZapAmount = localStorage.getItem('default-btc-zap-amount') || '1000';
@@ -2578,7 +2588,7 @@ async function loadMoneroAddressFromRelays(targetPubkey) {
 
 // Save zap settings to relays using NIP-78
 async function saveZapSettingsToRelays(btcAmount, xmrAmount) {
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.getPrivateKeyForSigning()) {
         throw new Error('User not authenticated');
     }
 
@@ -3647,7 +3657,7 @@ function closeEditProfileModal() {
 async function saveProfile(event) {
     event.preventDefault();
     
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.getPrivateKeyForSigning()) {
         Utils.showNotification('Please log in to save your profile', 'error');
         return;
     }
@@ -4009,11 +4019,11 @@ async function populateSettingsForm() {
         // Populate key storage status
         const keyStorageStatus = document.getElementById('keyStorageStatus');
         if (keyStorageStatus) {
-            if (State.privateKey === 'extension') {
+            if (State.getPrivateKeyForSigning() === 'extension') {
                 keyStorageStatus.textContent = '🔌 Using browser extension (keys managed by extension)';
-            } else if (State.privateKey === 'nsec-app') {
+            } else if (State.getPrivateKeyForSigning() === 'nsec-app') {
                 keyStorageStatus.textContent = '🌐 Using nsec.app (keys managed by nsec.app)';
-            } else if (State.privateKey === 'amber') {
+            } else if (State.getPrivateKeyForSigning() === 'amber') {
                 keyStorageStatus.textContent = '📱 Using Amber signer (keys on your Android device)';
             } else {
                 const loginMethod = localStorage.getItem('login-method');
@@ -4035,7 +4045,7 @@ async function populateSettingsForm() {
 
 // Save settings from the modal
 async function saveSettings() {
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.getPrivateKeyForSigning()) {
         Utils.showNotification('Please log in to save settings', 'error');
         return;
     }

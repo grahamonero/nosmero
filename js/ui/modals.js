@@ -4,7 +4,7 @@
 import { showNotification, signEvent, escapeHtml } from '../utils.js';
 import { loadNostrLogin } from '../nostr-login-loader.js';
 import * as State from '../state.js';
-import { zapQueue, privateKey } from '../state.js';
+import { zapQueue, getPrivateKeyForSigning } from '../state.js';
 import { showSuccessToast, showErrorToast, showWarningToast } from './toasts.js';
 import * as Wallet from '../wallet/index.js';
 
@@ -23,7 +23,7 @@ export function showWelcomeModalIfFirstVisit() {
     // Check if user has seen welcome modal before
     const hasSeenWelcome = localStorage.getItem('nosmero-welcome-seen');
 
-    if (!hasSeenWelcome && !privateKey) {
+    if (!hasSeenWelcome && !getPrivateKeyForSigning()) {
         // Show welcome modal
         const welcomeModal = document.getElementById('welcomeModal');
         if (welcomeModal) {
@@ -54,10 +54,15 @@ export function closeWelcomeModalAndCreate() {
     // Show login modal with create account option pre-selected
     const loginModal = document.getElementById('loginModal');
     if (loginModal) {
-        // Click the generate keys button to show create account form
-        const generateBtn = document.querySelector('[onclick="generateNewKeys()"]');
+        // Trigger the generate keys button via data-action attribute instead
+        const generateBtn = document.querySelector('[data-action="generate-keys"]') ||
+                           document.querySelector('#generateKeysBtn') ||
+                           document.querySelector('.generate-keys-btn');
         if (generateBtn) {
             generateBtn.click();
+        } else if (window.generateNewKeys) {
+            // Fallback: call the function directly if button not found
+            window.generateNewKeys();
         }
     }
 }
@@ -249,14 +254,14 @@ export function showLoginWithNsec() {
                 <div style="margin-bottom: 30px;">
                     <input type="password" id="nsecInput" placeholder="nsec1..."
                            style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 20px;"
-                           onkeypress="if(event.key==='Enter') loginWithNsec()">
+                           data-action="nsec-login">
 
                     <div style="display: flex; gap: 12px; justify-content: center;">
-                        <button onclick="loginWithNsec()"
+                        <button data-action="nsec-login"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold;">
                             🔑 Login
                         </button>
-                        <button onclick="showAuthUI()"
+                        <button data-action="show-auth"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
                             ← Back
                         </button>
@@ -282,10 +287,21 @@ export function showLoginWithNsec() {
             </div>
         `;
 
-        // Focus the input field
+        // Focus the input field and attach event listeners
         setTimeout(() => {
             const input = document.getElementById('nsecInput');
-            if (input) input.focus();
+            if (input) {
+                input.focus();
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') window.loginWithNsec();
+                });
+            }
+
+            // Attach button event listeners
+            const loginBtn = feed.querySelector('[data-action="nsec-login"]');
+            const backBtn = feed.querySelector('[data-action="show-auth"]');
+            if (loginBtn) loginBtn.addEventListener('click', () => window.loginWithNsec());
+            if (backBtn) backBtn.addEventListener('click', () => window.showAuthUI());
         }, 100);
     }
 }
@@ -306,14 +322,14 @@ export function showLoginWithAmber() {
                 <div style="margin-bottom: 30px;">
                     <input type="text" id="amberBunkerInput" placeholder="Paste your bunker:// URI from Amber..."
                            style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 20px;"
-                           onkeypress="if(event.key==='Enter') loginWithAmber()">
+                           data-action="amber-login">
 
                     <div style="display: flex; gap: 12px; justify-content: center;">
-                        <button onclick="loginWithAmber()"
+                        <button data-action="amber-login"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #8B5CF6, #FF6600); color: #fff; font-weight: bold;">
                             📱 Connect to Amber
                         </button>
-                        <button onclick="showAuthUI()"
+                        <button data-action="show-auth"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
                             ← Back
                         </button>
@@ -344,10 +360,21 @@ export function showLoginWithAmber() {
             </div>
         `;
 
-        // Focus the input field
+        // Focus the input field and attach event listeners
         setTimeout(() => {
             const input = document.getElementById('amberBunkerInput');
-            if (input) input.focus();
+            if (input) {
+                input.focus();
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') window.loginWithAmber();
+                });
+            }
+
+            // Attach button event listeners
+            const loginBtn = feed.querySelector('button[data-action="amber-login"]');
+            const backBtn = feed.querySelector('button[data-action="show-auth"]');
+            if (loginBtn) loginBtn.addEventListener('click', () => window.loginWithAmber());
+            if (backBtn) backBtn.addEventListener('click', () => window.showAuthUI());
         }, 100);
     }
 }
@@ -403,11 +430,17 @@ export async function showLoginWithNsecApp() {
                         </p>
                     </div>
 
-                    <button onclick="showAuthUI()" style="margin-top: 20px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
+                    <button data-action="show-auth" style="margin-top: 20px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
                         ← Back to Login Options
                     </button>
                 </div>
             `;
+
+            // Attach event listener for back button
+            setTimeout(() => {
+                const backBtn = feed.querySelector('[data-action="show-auth"]');
+                if (backBtn) backBtn.addEventListener('click', () => window.showAuthUI());
+            }, 100);
         }
 
     } catch (error) {
@@ -444,7 +477,7 @@ export function showGeneratedKeyModal(nsec) {
                     <button id="copyNsecBtn" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                         📋 Copy Key
                     </button>
-                    <button onclick="closeKeyModal()" style="background: #333; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">
+                    <button data-action="close-key-modal" style="background: #333; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">
                         I've Saved It Safely
                     </button>
                 </div>
@@ -465,6 +498,10 @@ export function showGeneratedKeyModal(nsec) {
                 });
             }
         });
+
+        // Attach click handler for close button
+        const closeBtn = keyModal.querySelector('[data-action="close-key-modal"]');
+        if (closeBtn) closeBtn.addEventListener('click', closeKeyModal);
 
         keyModal.classList.add('show');
     }
@@ -1293,11 +1330,17 @@ async function showQueueBatchConfirm(queue) {
             <div style="text-align: center; padding: 20px;">
                 <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Transaction Failed</div>
                 <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
-                <button onclick="showZapQueue()" style="margin-top: 12px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                <button data-action="back-to-queue" style="margin-top: 12px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
                     Back
                 </button>
             </div>
         `;
+
+        // Attach back button handler
+        setTimeout(() => {
+            const backBtn = section.querySelector('[data-action="back-to-queue"]');
+            if (backBtn) backBtn.addEventListener('click', showZapQueue);
+        }, 0);
     }
 }
 
@@ -1366,11 +1409,17 @@ async function sendQueueBatch(queue, disclosures) {
             <div style="text-align: center; padding: 20px;">
                 <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Send Failed</div>
                 <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
-                <button onclick="showZapQueue()" style="margin-top: 12px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                <button data-action="back-to-queue" style="margin-top: 12px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
                     Back
                 </button>
             </div>
         `;
+
+        // Attach back button handler
+        setTimeout(() => {
+            const backBtn = section.querySelector('[data-action="back-to-queue"]');
+            if (backBtn) backBtn.addEventListener('click', showZapQueue);
+        }, 0);
     }
 }
 
@@ -1680,7 +1729,7 @@ export function openLightningZapModal(postId, authorName, lightningAddress) {
             ${escapeHtml(lightningAddress)}
         </div>
         <div style="margin-bottom: 20px; text-align: center; color: #ccc; font-size: 14px;">
-            Post: ${truncatedPostId}...
+            Post: ${escapeHtml(truncatedPostId)}...
         </div>
         <div style="text-align: center; color: #999; font-size: 12px; line-height: 1.4;">
             Lightning zapping requires a compatible wallet extension like Alby or nos2x.
@@ -1688,16 +1737,38 @@ export function openLightningZapModal(postId, authorName, lightningAddress) {
             Click the button below to initiate the Lightning payment.
         </div>
         <div style="display: flex; gap: 12px; justify-content: center; margin-top: 20px;">
-            <button onclick="sendLightningZap('${postId}', '${escapeHtml(authorName)}', '${escapeHtml(lightningAddress)}')"
+            <button data-action="send-lightning-zap"
+                    data-post-id="${escapeHtml(postId)}"
+                    data-author-name="${escapeHtml(authorName)}"
+                    data-lightning-address="${escapeHtml(lightningAddress)}"
                     style="background: linear-gradient(135deg, #FFDF00, #FF6600); border: none; color: #000; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                 ⚡ Send Lightning Zap
             </button>
-            <button onclick="closeLightningZapModal()"
+            <button data-action="close-lightning-modal"
                     style="background: #333; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
                 Cancel
             </button>
         </div>
     `;
+
+    // Attach event listeners
+    setTimeout(() => {
+        const sendBtn = details.querySelector('[data-action="send-lightning-zap"]');
+        const closeBtn = details.querySelector('[data-action="close-lightning-modal"]');
+
+        if (sendBtn) {
+            sendBtn.addEventListener('click', () => {
+                const pid = sendBtn.dataset.postId;
+                const aName = sendBtn.dataset.authorName;
+                const lAddr = sendBtn.dataset.lightningAddress;
+                sendLightningZap(pid, aName, lAddr);
+            });
+        }
+
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeLightningZapModal);
+        }
+    }, 0);
 
     const lightningModal = document.getElementById('lightningZapModal');
     if (lightningModal) {
@@ -2132,13 +2203,13 @@ export async function showZapQueue() {
             <div style="text-align: center; color: #666; font-size: 12px; margin-bottom: 12px;">─── OR ───</div>
 
             <div style="margin-bottom: 16px;">
-                <button onclick="showBatchQrCodes()" style="width: 100%; background: #333; border: 1px solid #888; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                <button data-action="show-batch-qr" style="width: 100%; background: #333; border: 1px solid #888; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
                     Show QR Codes Sequentially
                 </button>
                 <div style="font-size: 11px; color: #666; text-align: center; margin-top: 4px;">For external wallet users</div>
             </div>
 
-            <div style="max-height: 300px; overflow-y: auto;">
+            <div style="max-height: 300px; overflow-y: auto;" id="queueItemsList">
                 ${queue.map((item, index) => `
                     <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1;">
@@ -2146,7 +2217,7 @@ export async function showZapQueue() {
                             <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">${escapeHtml(item.amount || '0.00018')} XMR</div>
                             <div style="font-size: 12px; color: #666; margin-top: 4px; word-break: break-all;">${escapeHtml(item.moneroAddress.substring(0, 20))}...${escapeHtml(item.moneroAddress.substring(item.moneroAddress.length - 10))}</div>
                         </div>
-                        <button onclick="removeFromZapQueue(${index})" style="background: #ff6b6b; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                        <button data-action="remove-queue-item" data-index="${index}" style="background: #ff6b6b; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px;">
                             Remove
                         </button>
                     </div>
@@ -2154,12 +2225,26 @@ export async function showZapQueue() {
             </div>
         `;
 
-        // Attach wallet send button handler
+        // Attach event handlers
         setTimeout(() => {
             const walletBtn = document.getElementById('queueWalletSendBtn');
             if (walletBtn) {
                 walletBtn.onclick = () => handleQueueWalletSend(queue);
             }
+
+            const batchQrBtn = content.querySelector('[data-action="show-batch-qr"]');
+            if (batchQrBtn) {
+                batchQrBtn.addEventListener('click', showBatchQrCodes);
+            }
+
+            // Attach remove buttons
+            const removeButtons = content.querySelectorAll('[data-action="remove-queue-item"]');
+            removeButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.dataset.index, 10);
+                    removeFromZapQueue(idx);
+                });
+            });
         }, 0);
     }
 
@@ -2242,11 +2327,15 @@ export function showBatchQrCodes() {
                 <div class="modal-header">Batch Zap QR Codes</div>
                 <div id="batchQrContent"></div>
                 <div class="modal-footer">
-                    <button class="close-btn" onclick="closeBatchQrModal()">Close</button>
+                    <button class="close-btn" data-action="close-batch-qr">Close</button>
                 </div>
             </div>
         `;
         document.body.appendChild(modal);
+
+        // Attach close button handler
+        const closeBtn = modal.querySelector('[data-action="close-batch-qr"]');
+        if (closeBtn) closeBtn.addEventListener('click', closeBatchQrModal);
     }
 
     modal.classList.add('show');
@@ -2307,16 +2396,16 @@ export function showBatchQrCodes() {
 
                 <div style="display: flex; gap: 12px; justify-content: center;">
                     ${currentIndex > 0 ? `
-                        <button onclick="window.batchQrPrevious()" style="background: #666; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                        <button data-action="batch-qr-previous" style="background: #666; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
                             ← Previous
                         </button>
                     ` : ''}
                     ${currentIndex < queue.length - 1 ? `
-                        <button onclick="window.batchQrNext()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        <button data-action="batch-qr-next" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                             Next →
                         </button>
                     ` : `
-                        <button onclick="window.finishBatchZap()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        <button data-action="finish-batch-zap" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                             Finish & Clear Queue
                         </button>
                     `}
@@ -2347,7 +2436,7 @@ export function showBatchQrCodes() {
             }
         }
 
-        // Attach copy button event listeners
+        // Attach copy button event listeners and navigation buttons
         setTimeout(() => {
             const copyUriBtn = document.getElementById('batchCopyUriBtn');
             const copyAddrBtn = document.getElementById('batchCopyAddressBtn');
@@ -2367,29 +2456,39 @@ export function showBatchQrCodes() {
                 const txNote = `nosmero.com/n/${item.postId}`;
                 copyNoteBtn.onclick = () => copyMoneroFieldToClipboard(txNote, copyNoteBtn, 'Note');
             }
+
+            // Attach navigation button listeners
+            const prevBtn = content.querySelector('[data-action="batch-qr-previous"]');
+            const nextBtn = content.querySelector('[data-action="batch-qr-next"]');
+            const finishBtn = content.querySelector('[data-action="finish-batch-zap"]');
+
+            if (prevBtn) {
+                prevBtn.addEventListener('click', () => {
+                    if (currentIndex > 0) {
+                        currentIndex--;
+                        showNextQr();
+                    }
+                });
+            }
+
+            if (nextBtn) {
+                nextBtn.addEventListener('click', () => {
+                    if (currentIndex < queue.length - 1) {
+                        currentIndex++;
+                        showNextQr();
+                    }
+                });
+            }
+
+            if (finishBtn) {
+                finishBtn.addEventListener('click', () => {
+                    clearZapQueue();
+                    closeBatchQrModal();
+                    alert(`✅ Batch zap complete! ${queue.length} zap${queue.length === 1 ? '' : 's'} processed.`);
+                });
+            }
         }, 0);
     }
-
-    // Navigation functions
-    window.batchQrNext = function() {
-        if (currentIndex < queue.length - 1) {
-            currentIndex++;
-            showNextQr();
-        }
-    };
-
-    window.batchQrPrevious = function() {
-        if (currentIndex > 0) {
-            currentIndex--;
-            showNextQr();
-        }
-    };
-
-    window.finishBatchZap = function() {
-        clearZapQueue();
-        closeBatchQrModal();
-        alert(`✅ Batch zap complete! ${queue.length} zap${queue.length === 1 ? '' : 's'} processed.`);
-    };
 
     // Show first QR
     showNextQr();

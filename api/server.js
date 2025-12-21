@@ -541,7 +541,7 @@ const trendingLimiter = rateLimit({
 });
 
 // POST /api/trending - Log a search term
-app.post('/api/trending', trendingLimiter, (req, res) => {
+app.post('/api/trending', trendingLimiter, async (req, res) => {
   try {
     const { term } = req.body;
 
@@ -552,7 +552,7 @@ app.post('/api/trending', trendingLimiter, (req, res) => {
     const normalizedTerm = normalizeSearchTerm(term);
 
     // Load data
-    let data = JSON.parse(fs.readFileSync(TRENDING_DATA_FILE, 'utf8'));
+    let data = JSON.parse(await fs.promises.readFile(TRENDING_DATA_FILE, 'utf8'));
 
     // Cleanup if needed (every hour)
     if ((data.lastCleanup || 0) < Date.now() - 3600000) {
@@ -578,9 +578,8 @@ app.post('/api/trending', trendingLimiter, (req, res) => {
     }
 
     // Save data
-    fs.writeFileSync(TRENDING_DATA_FILE, JSON.stringify(data));
+    await fs.promises.writeFile(TRENDING_DATA_FILE, JSON.stringify(data));
 
-    console.log(`[Trending] Logged search: "${normalizedTerm}"`);
     res.json({ success: true });
   } catch (error) {
     console.error('[Trending] Error logging search:', error);
@@ -589,14 +588,14 @@ app.post('/api/trending', trendingLimiter, (req, res) => {
 });
 
 // GET /api/trending - Get trending searches
-app.get('/api/trending', (req, res) => {
+app.get('/api/trending', async (req, res) => {
   try {
-    let data = JSON.parse(fs.readFileSync(TRENDING_DATA_FILE, 'utf8'));
+    let data = JSON.parse(await fs.promises.readFile(TRENDING_DATA_FILE, 'utf8'));
 
     // Cleanup if needed
     if ((data.lastCleanup || 0) < Date.now() - 3600000) {
       data = cleanupOldData(data);
-      fs.writeFileSync(TRENDING_DATA_FILE, JSON.stringify(data));
+      await fs.promises.writeFile(TRENDING_DATA_FILE, JSON.stringify(data));
     }
 
     // Calculate scores with time decay
@@ -687,7 +686,7 @@ const analyticsLimiter = rateLimit({
 });
 
 // POST /api/analytics/event - Log a client event
-app.post('/api/analytics/event', analyticsLimiter, (req, res) => {
+app.post('/api/analytics/event', analyticsLimiter, async (req, res) => {
   try {
     const { kind, pubkey, event_id } = req.body;
 
@@ -708,7 +707,7 @@ app.post('/api/analytics/event', analyticsLimiter, (req, res) => {
     }
 
     // Load data
-    let data = JSON.parse(fs.readFileSync(ANALYTICS_DATA_FILE, 'utf8'));
+    let data = JSON.parse(await fs.promises.readFile(ANALYTICS_DATA_FILE, 'utf8'));
 
     // Cleanup if needed (daily)
     if ((data.lastCleanup || 0) < Date.now() - 86400000) {
@@ -747,7 +746,7 @@ app.post('/api/analytics/event', analyticsLimiter, (req, res) => {
     }
 
     // Save data
-    fs.writeFileSync(ANALYTICS_DATA_FILE, JSON.stringify(data));
+    await fs.promises.writeFile(ANALYTICS_DATA_FILE, JSON.stringify(data));
 
     res.json({ success: true });
   } catch (error) {
@@ -757,14 +756,14 @@ app.post('/api/analytics/event', analyticsLimiter, (req, res) => {
 });
 
 // GET /api/analytics - Get analytics summary
-app.get('/api/analytics', (req, res) => {
+app.get('/api/analytics', async (req, res) => {
   try {
-    let data = JSON.parse(fs.readFileSync(ANALYTICS_DATA_FILE, 'utf8'));
+    let data = JSON.parse(await fs.promises.readFile(ANALYTICS_DATA_FILE, 'utf8'));
 
     // Cleanup if needed
     if ((data.lastCleanup || 0) < Date.now() - 86400000) {
       data = cleanupOldAnalytics(data);
-      fs.writeFileSync(ANALYTICS_DATA_FILE, JSON.stringify(data));
+      await fs.promises.writeFile(ANALYTICS_DATA_FILE, JSON.stringify(data));
     }
 
     const now = Date.now();
@@ -886,15 +885,13 @@ const moneroRpcLimiter = rateLimit({
   message: { success: false, error: 'Rate limited - too many RPC requests' }
 });
 
-// DEBUG: Log ALL requests to /api/monero/* to see what monero-ts is requesting
-app.use('/api/monero', (req, res, next) => {
-  console.log(`[MoneroRPC DEBUG] ${req.method} ${req.originalUrl}`);
-  console.log(`[MoneroRPC DEBUG] Headers:`, JSON.stringify(req.headers, null, 2));
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log(`[MoneroRPC DEBUG] Body:`, JSON.stringify(req.body));
-  }
-  next();
-});
+// Debug logging for Monero RPC (development only)
+if (config.nodeEnv === 'development') {
+  app.use('/api/monero', (req, res, next) => {
+    console.log(`[MoneroRPC] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+}
 
 // JSON-RPC proxy endpoint (simplified format for manual testing)
 app.post('/api/monero/rpc', moneroRpcLimiter, async (req, res) => {
@@ -1330,7 +1327,7 @@ app.get('/api/paywall/my-unlocks/:buyerPubkey', paywallReadLimiter, (req, res) =
 });
 
 // Get decryption key for creator (author can always see their own content)
-app.get('/api/paywall/creator-key/:noteId/:creatorPubkey', paywallReadLimiter, (req, res) => {
+app.get('/api/paywall/creator-key/:noteId/:creatorPubkey', paywallReadLimiter, async (req, res) => {
   try {
     const { noteId, creatorPubkey } = req.params;
 
@@ -1341,7 +1338,7 @@ app.get('/api/paywall/creator-key/:noteId/:creatorPubkey', paywallReadLimiter, (
       });
     }
 
-    const decryptionKey = Paywall.getCreatorKey(noteId, creatorPubkey);
+    const decryptionKey = await Paywall.getCreatorKey(noteId, creatorPubkey);
 
     if (!decryptionKey) {
       return res.status(404).json({

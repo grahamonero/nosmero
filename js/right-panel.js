@@ -4,6 +4,39 @@
  * (threads, profiles, settings, wallet, compose, zap flow)
  */
 
+// Debug flag for console logging
+const DEBUG = false;
+
+// Timeout constants (in milliseconds)
+const TIMEOUTS = Object.freeze({
+    RELAY_INIT_DELAY: 500,
+    TRUST_BADGE_DELAY: 100,
+    RELAY_PING: 5000,
+    FEED_REFRESH_DELAY: 1000
+});
+
+// Limit constants
+const LIMITS = Object.freeze({
+    HISTORY_MAX: 20,
+    POPULAR_POSTS: 15,
+    PROFILE_POSTS: 10,
+    THREAD_REPLIES: 100,
+    NESTED_REPLIES: 100,
+    THREAD_BATCH_SIZE: 20,
+    ENGAGEMENT_LIMIT: 500,
+    REPOSTS_LIMIT: 200,
+    FOLLOWERS_LIMIT: 200,
+    TIPS_LIMIT: 100
+});
+
+// Fallback relays for better coverage when user relays fail
+const FALLBACK_RELAYS = Object.freeze([
+    'wss://relay.damus.io',
+    'wss://relay.nostr.band',
+    'wss://nos.lol',
+    'wss://relay.snort.social'
+]);
+
 // Panel state
 const RightPanel = {
     currentView: 'default', // 'default', 'thread', 'profile', 'settings', 'wallet', 'compose', 'reply', 'zap'
@@ -22,6 +55,11 @@ const RightPanel = {
 
     // Guard against race conditions in async content loading
     loadContentId: 0,
+
+    // Profile posts pagination state
+    profilePostsLoaded: [],
+    profilePubkey: null,
+    profileOldestTimestamp: null,
 
     // DOM elements (cached on init)
     panel: null,
@@ -73,7 +111,7 @@ const RightPanel = {
         window.addEventListener('nosmero:login', () => this.loadDefaultContent());
         window.addEventListener('nosmero:logout', () => this.loadDefaultContent());
 
-        console.log('Right panel initialized');
+        if (DEBUG) console.log('Right panel initialized');
     },
 
     /**
@@ -135,7 +173,7 @@ const RightPanel = {
                 title: this.title?.textContent || ''
             });
             // Limit history size
-            if (this.history.length > 20) {
+            if (this.history.length > LIMITS.HISTORY_MAX) {
                 this.history.shift();
             }
         }
@@ -279,11 +317,11 @@ const RightPanel = {
         this.defaultFeed.innerHTML = '<div class="loading">Loading...</div>';
 
         // Wait a bit for relays to be ready
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, TIMEOUTS.RELAY_INIT_DELAY));
 
         // Check if this load is still current (not superseded by another call)
         if (thisLoadId !== this.loadContentId) {
-            console.log('Right panel: Skipping stale load operation');
+            if (DEBUG) console.log('Right panel: Skipping stale load operation');
             return;
         }
 
@@ -313,7 +351,7 @@ const RightPanel = {
         const loadId = this.loadContentId;
 
         const posts = await this.fetchTrendingMoneroPosts();
-        this.renderPostsToPanel(posts, 'Trending Monero', loadId);
+        this.renderPostsToPanel(posts, 'Trending Monero Notes', loadId);
     },
 
     /**
@@ -382,7 +420,7 @@ const RightPanel = {
         }
 
         try {
-            console.log('Right panel: Loading popular notes (last 24h, sorted by engagement)...');
+            if (DEBUG) console.log('Right panel: Loading popular notes (last 24h, sorted by engagement)...');
 
             // Query for recent notes from last 24 hours (same as loadTrendingAllFeed)
             const oneDayAgo = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
@@ -393,7 +431,7 @@ const RightPanel = {
                 limit: 200  // Same as loadTrendingAllFeed
             });
 
-            console.log(`Right panel: Found ${notes.length} recent notes`);
+            if (DEBUG) console.log(`Right panel: Found ${notes.length} recent notes`);
 
             if (!notes || notes.length === 0) {
                 return [];
@@ -416,8 +454,8 @@ const RightPanel = {
                 return engageB - engageA;
             });
 
-            // Return top 15 most engaged notes
-            return notes.slice(0, 15);
+            // Return top most engaged notes
+            return notes.slice(0, LIMITS.POPULAR_POSTS);
         } catch (error) {
             console.error('Error fetching popular posts:', error);
             return [];
@@ -435,7 +473,7 @@ const RightPanel = {
 
         // Check if this render is stale (another load has started)
         if (loadId !== null && loadId !== this.loadContentId) {
-            console.log('Right panel: Skipping stale render for', title);
+            if (DEBUG) console.log('Right panel: Skipping stale render for', title);
             return;
         }
 
@@ -455,9 +493,22 @@ const RightPanel = {
             await window.NostrPosts.fetchProfiles(pubkeysToFetch);
         }
 
-        // Check again after async profile fetch
+        // Fetch disclosed tips for these posts (for verified tip badges)
+        if (window.NostrPosts?.fetchDisclosedTips) {
+            try {
+                const disclosedTipsData = await window.NostrPosts.fetchDisclosedTips(posts);
+                // Cache the tips data for renderSinglePost to access
+                if (window.NostrPosts?.disclosedTipsCache) {
+                    Object.assign(window.NostrPosts.disclosedTipsCache, disclosedTipsData);
+                }
+            } catch (tipError) {
+                console.error('Right panel: Error fetching disclosed tips:', tipError);
+            }
+        }
+
+        // Check again after async fetches
         if (loadId !== null && loadId !== this.loadContentId) {
-            console.log('Right panel: Skipping stale render for', title);
+            if (DEBUG) console.log('Right panel: Skipping stale render for', title);
             return;
         }
 
@@ -470,7 +521,7 @@ const RightPanel = {
 
                 // Final check before DOM update
                 if (loadId !== null && loadId !== this.loadContentId) {
-                    console.log('Right panel: Skipping stale render for', title);
+                    if (DEBUG) console.log('Right panel: Skipping stale render for', title);
                     return;
                 }
 
@@ -676,7 +727,7 @@ const RightPanel = {
                 kinds: [9736],
                 '#p': [pubkey],
                 since: sevenDaysAgo,
-                limit: 100
+                limit: LIMITS.TIPS_LIMIT
             });
 
             // Sum up amounts if available
@@ -776,7 +827,7 @@ const RightPanel = {
         return new Promise((resolve) => {
             const timeout = setTimeout(() => {
                 resolve({ url, connected: false, latency: null });
-            }, 5000); // 5 second timeout
+            }, TIMEOUTS.RELAY_PING);
 
             try {
                 const ws = new WebSocket(url);
@@ -868,7 +919,7 @@ const RightPanel = {
                 kinds: [7],
                 '#p': [pubkey],
                 since,
-                limit: 500
+                limit: LIMITS.ENGAGEMENT_LIMIT
             });
             return events.length;
         } catch (e) {
@@ -886,7 +937,7 @@ const RightPanel = {
                 kinds: [1],
                 '#p': [pubkey],
                 since,
-                limit: 500
+                limit: LIMITS.ENGAGEMENT_LIMIT
             });
             // Filter out own posts
             return events.filter(e => e.pubkey !== pubkey).length;
@@ -905,7 +956,7 @@ const RightPanel = {
                 kinds: [6],
                 '#p': [pubkey],
                 since,
-                limit: 200
+                limit: LIMITS.REPOSTS_LIMIT
             });
             return events.length;
         } catch (e) {
@@ -924,7 +975,7 @@ const RightPanel = {
                 kinds: [3],
                 '#p': [pubkey],
                 since,
-                limit: 200
+                limit: LIMITS.FOLLOWERS_LIMIT
             });
             // Count unique pubkeys who added user to their follow list
             const uniqueFollowers = new Set(events.map(e => e.pubkey));
@@ -1140,7 +1191,7 @@ const RightPanel = {
                     noteId = decoded.data.id || decoded.data;
                     if (decoded.data.relays && decoded.data.relays.length > 0) {
                         relayHints = decoded.data.relays;
-                        console.log('📍 Thread relay hints from nevent:', relayHints);
+                        if (DEBUG) console.log('📍 Thread relay hints from nevent:', relayHints);
                     }
                 } catch (decodeError) {
                     console.warn('Could not decode as nevent/note, using as raw ID:', decodeError);
@@ -1160,27 +1211,27 @@ const RightPanel = {
      * @param {string} noteId - The note ID to fetch
      * @param {HTMLElement} container - Container element to render into
      * @param {string[]} relayHints - Optional relay hints from nevent
+     *
+     * TODO: This function is ~250 lines and should be refactored into smaller helpers:
+     * - buildRelayList(relayHints) - combine relay sources
+     * - fetchMainNote(noteId, relays) - fetch the clicked note
+     * - findThreadRoot(mainNote) - find root via e-tags
+     * - fetchThreadPosts(noteId, rootId, relays) - fetch all thread posts
+     * - buildThreadTree(posts, rootId) - build tree structure
+     * - renderThreadTree(tree, clickedNoteId) - render HTML
      */
     async fetchAndRenderThread(noteId, container, relayHints = []) {
         const pool = window.NostrState?.pool;
         const userRelays = window.NostrRelays?.getReadRelays?.() || window.NostrRelays?.getActiveRelays?.() || [];
 
-        // Fallback relays for better coverage
-        const fallbackRelays = [
-            'wss://relay.damus.io',
-            'wss://relay.nostr.band',
-            'wss://nos.lol',
-            'wss://relay.snort.social'
-        ];
-
         // Combine: hints first, then user relays, then fallbacks
         const relays = [...new Set([
             ...relayHints,
             ...userRelays,
-            ...fallbackRelays
+            ...FALLBACK_RELAYS
         ])];
 
-        console.log('📡 Thread fetch using', relays.length, 'relays (hints:', relayHints.length, ')');
+        if (DEBUG) console.log('📡 Thread fetch using', relays.length, 'relays (hints:', relayHints.length, ')');
 
         if (!pool || !relays?.length) {
             container.innerHTML = '<div style="padding: 20px;">Cannot load thread - no relay connection</div>';
@@ -1236,7 +1287,7 @@ const RightPanel = {
             const replies = await pool.querySync(relays, {
                 kinds: [1],
                 '#e': [rootId],
-                limit: 100
+                limit: LIMITS.THREAD_REPLIES
             });
 
             // Also fetch replies to the clicked note if it's not the root
@@ -1245,7 +1296,7 @@ const RightPanel = {
                 clickedReplies = await pool.querySync(relays, {
                     kinds: [1],
                     '#e': [noteId],
-                    limit: 50
+                    limit: Math.floor(LIMITS.THREAD_REPLIES / 2)
                 });
             }
 
@@ -1261,13 +1312,12 @@ const RightPanel = {
             const foundNoteIds = Array.from(allPostsMap.keys()).filter(id => id !== rootId && id !== noteId);
             if (foundNoteIds.length > 0) {
                 // Query in batches to avoid too large requests
-                const batchSize = 20;
-                for (let i = 0; i < foundNoteIds.length; i += batchSize) {
-                    const batch = foundNoteIds.slice(i, i + batchSize);
+                for (let i = 0; i < foundNoteIds.length; i += LIMITS.THREAD_BATCH_SIZE) {
+                    const batch = foundNoteIds.slice(i, i + LIMITS.THREAD_BATCH_SIZE);
                     const nestedReplies = await pool.querySync(relays, {
                         kinds: [1],
                         '#e': batch,
-                        limit: 100
+                        limit: LIMITS.NESTED_REPLIES
                     });
                     nestedReplies.forEach(r => allPostsMap.set(r.id, r));
                 }
@@ -1287,6 +1337,18 @@ const RightPanel = {
             const pubkeysToFetch = uniquePubkeys.filter(pk => !window.NostrState?.profileCache?.[pk]);
             if (pubkeysToFetch.length > 0 && window.NostrPosts?.fetchProfiles) {
                 await window.NostrPosts.fetchProfiles(pubkeysToFetch);
+            }
+
+            // Fetch disclosed tips for thread posts (for verified tip badges)
+            if (window.NostrPosts?.fetchDisclosedTips) {
+                try {
+                    const disclosedTipsData = await window.NostrPosts.fetchDisclosedTips(allPosts);
+                    if (window.NostrPosts?.disclosedTipsCache) {
+                        Object.assign(window.NostrPosts.disclosedTipsCache, disclosedTipsData);
+                    }
+                } catch (tipError) {
+                    console.error('Right panel thread: Error fetching disclosed tips:', tipError);
+                }
             }
 
             // Build a map of posts by ID for quick lookup
@@ -1467,23 +1529,39 @@ const RightPanel = {
 
             // Render profile header with ThumbHash progressive loading
             const avatarPlaceholder = userProfile.picture ? window.ThumbHashLoader?.getPlaceholder(userProfile.picture) : null;
+            // Escape user-controlled profile fields to prevent XSS
+            const safeName = this.escapeHtml(userProfile.name || 'Anonymous');
+            const safeNip05 = userProfile.nip05 ? this.escapeHtml(userProfile.nip05) : '';
+            // For website, validate it's a proper URL and escape for display
+            let safeWebsiteHref = '';
+            let safeWebsiteDisplay = '';
+            if (userProfile.website) {
+                const websiteUrl = userProfile.website.startsWith('http://') || userProfile.website.startsWith('https://')
+                    ? userProfile.website
+                    : 'https://' + userProfile.website;
+                // Only allow http/https URLs to prevent javascript: injection
+                if (websiteUrl.startsWith('http://') || websiteUrl.startsWith('https://')) {
+                    safeWebsiteHref = this.escapeHtml(websiteUrl);
+                    safeWebsiteDisplay = this.escapeHtml(userProfile.website);
+                }
+            }
             section.innerHTML = `
                 <div style="padding: 16px;">
                     <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
                         ${userProfile.picture ?
                             `<img src="${avatarPlaceholder || userProfile.picture}" data-thumbhash-src="${userProfile.picture}" style="width: 64px; height: 64px; border-radius: 50%; object-fit: cover;${avatarPlaceholder ? ' filter: blur(4px); transition: filter 0.3s;' : ''}"
                                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)">
-                             <div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>` :
-                            `<div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>`
+                             <div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${safeName.charAt(0).toUpperCase()}</div>` :
+                            `<div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${safeName.charAt(0).toUpperCase()}</div>`
                         }
                         <div style="flex: 1; min-width: 0;">
-                            <h2 class="profile-name" data-pubkey="${pubkey}" style="color: #fff; font-size: 18px; margin: 0 0 4px 0; word-wrap: break-word;">${userProfile.name || 'Anonymous'}</h2>
+                            <h2 class="profile-name" data-pubkey="${pubkey}" style="color: #fff; font-size: 18px; margin: 0 0 4px 0; word-wrap: break-word;">${safeName}</h2>
                             <p style="margin: 0; color: #888; font-family: monospace; font-size: 12px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
-                            ${userProfile.nip05 ? `<div style="color: #10B981; font-size: 12px; margin-top: 4px;">✅ ${userProfile.nip05}</div>` : ''}
+                            ${safeNip05 ? `<div style="color: #10B981; font-size: 12px; margin-top: 4px;">✅ ${safeNip05}</div>` : ''}
                         </div>
                     </div>
                     ${userProfile.about ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 12px; word-wrap: break-word;">${this.escapeHtml(userProfile.about)}</div>` : ''}
-                    ${userProfile.website ? `<div style="margin-bottom: 8px;"><a href="${userProfile.website.startsWith('http') ? userProfile.website : 'https://' + userProfile.website}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 13px;">🔗 ${userProfile.website}</a></div>` : ''}
+                    ${safeWebsiteHref ? `<div style="margin-bottom: 8px;"><a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 13px;">🔗 ${safeWebsiteDisplay}</a></div>` : ''}
                     <div id="panelProfileMoneroAddress"></div>
                     <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
                         <button id="panelFollowBtn_${pubkey}" onclick="toggleFollow('${pubkey}')" style="background: #6B73FF; border: none; border-radius: 6px; color: #fff; padding: 6px 12px; cursor: pointer; font-size: 13px; font-weight: bold;">
@@ -1512,7 +1590,7 @@ const RightPanel = {
                 if (window.NostrTrustBadges?.addProfileTrustBadge) {
                     setTimeout(() => {
                         window.NostrTrustBadges.addProfileTrustBadge(pubkey, '.right-panel-profile');
-                    }, 100);
+                    }, TIMEOUTS.TRUST_BADGE_DELAY);
                 }
             } catch (e) {
                 console.error('Error adding trust badge:', e);
@@ -1560,19 +1638,31 @@ const RightPanel = {
             }
 
             if (moneroAddress && moneroAddress.trim()) {
+                // Validate Monero address format (primary: 95 chars starting with 4, subaddress: 95 chars starting with 8)
+                const isValidMoneroAddress = /^[48][1-9A-HJ-NP-Za-km-z]{94}$/.test(moneroAddress);
+                if (!isValidMoneroAddress) {
+                    console.warn('Invalid Monero address format in profile');
+                    return;
+                }
+
                 const shortAddress = `${moneroAddress.substring(0, 8)}...${moneroAddress.substring(moneroAddress.length - 8)}`;
                 container.innerHTML = `
                     <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid #FF6600; border-radius: 6px; padding: 8px; margin-top: 8px;">
                         <div style="color: #FF6600; font-size: 11px; font-weight: bold; margin-bottom: 2px; display: flex; align-items: center; justify-content: space-between;">
                             <span>💰 MONERO</span>
-                            <button onclick="navigator.clipboard.writeText('${moneroAddress}'); window.NostrUtils?.showNotification?.('Copied!', 'success')"
-                                    style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 1px 4px; border-radius: 3px; cursor: pointer; font-size: 9px;">
+                            <button class="panel-copy-monero-btn" style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 1px 4px; border-radius: 3px; cursor: pointer; font-size: 9px;">
                                 Copy
                             </button>
                         </div>
                         <div style="color: #fff; font-family: monospace; font-size: 12px;">${shortAddress}</div>
                     </div>
                 `;
+
+                // Add event listener instead of inline onclick (XSS prevention)
+                container.querySelector('.panel-copy-monero-btn')?.addEventListener('click', () => {
+                    navigator.clipboard.writeText(moneroAddress);
+                    window.NostrUtils?.showNotification?.('Copied!', 'success');
+                });
             }
         } catch (error) {
             console.error('Error loading Monero address:', error);
@@ -1580,9 +1670,9 @@ const RightPanel = {
     },
 
     /**
-     * Fetch and display user posts in panel
+     * Fetch and display user posts in panel (with pagination support)
      */
-    async fetchPanelProfilePosts(pubkey) {
+    async fetchPanelProfilePosts(pubkey, loadMore = false) {
         const container = document.getElementById('panelProfilePosts');
         if (!container) return;
 
@@ -1594,62 +1684,151 @@ const RightPanel = {
             return;
         }
 
+        // Reset pagination state for new profile
+        if (!loadMore || this.profilePubkey !== pubkey) {
+            this.profilePostsLoaded = [];
+            this.profilePubkey = pubkey;
+            this.profileOldestTimestamp = null;
+        }
+
+        // Show loading indicator
+        if (loadMore) {
+            const loadMoreBtn = container.querySelector('.panel-load-more-btn');
+            if (loadMoreBtn) {
+                loadMoreBtn.textContent = 'Loading...';
+                loadMoreBtn.disabled = true;
+            }
+        }
+
         try {
             // Get the author's outbox relays (where they publish their posts)
             let authorOutboxRelays = [];
             if (window.NostrRelays?.getOutboxRelays) {
                 try {
                     authorOutboxRelays = await window.NostrRelays.getOutboxRelays(pubkey);
-                    console.log('📤 Author outbox relays:', authorOutboxRelays.length);
+                    if (DEBUG) console.log('📤 Author outbox relays:', authorOutboxRelays.length);
                 } catch (e) {
                     console.warn('Could not fetch author outbox relays:', e);
                 }
             }
 
-            // Fallback relays for better coverage
-            const fallbackRelays = [
-                'wss://relay.damus.io',
-                'wss://relay.nostr.band',
-                'wss://nos.lol',
-                'wss://relay.snort.social'
-            ];
-
             // Combine: author's outbox first, then user relays, then fallbacks
             const relays = [...new Set([
                 ...authorOutboxRelays,
                 ...userRelays,
-                ...fallbackRelays
+                ...FALLBACK_RELAYS
             ])];
 
-            console.log('📡 Fetching profile notes from', relays.length, 'relays (outbox:', authorOutboxRelays.length, ')');
+            if (DEBUG) console.log('📡 Fetching profile notes from', relays.length, 'relays (outbox:', authorOutboxRelays.length, ')');
 
-            const posts = await pool.querySync(relays, {
+            // Build query with pagination
+            const query = {
                 kinds: [1],
                 authors: [pubkey],
-                limit: 10
-            });
+                limit: LIMITS.PROFILE_POSTS
+            };
+
+            // For load more, fetch posts older than the oldest we have
+            if (loadMore && this.profileOldestTimestamp) {
+                query.until = this.profileOldestTimestamp - 1;
+            }
+
+            const posts = await pool.querySync(relays, query);
 
             if (!posts || posts.length === 0) {
-                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No notes found</div>';
+                if (!loadMore) {
+                    container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No notes found</div>';
+                } else {
+                    // Remove load more button if no more posts
+                    const loadMoreBtn = container.querySelector('.panel-load-more-btn');
+                    if (loadMoreBtn) {
+                        loadMoreBtn.textContent = 'No more notes';
+                        loadMoreBtn.disabled = true;
+                    }
+                }
                 return;
             }
 
-            // Sort by date
+            // Sort by date and filter out already loaded posts
             posts.sort((a, b) => b.created_at - a.created_at);
+            const loadedIds = new Set(this.profilePostsLoaded.map(p => p.id));
+            const newPosts = posts.filter(p => !loadedIds.has(p.id));
+
+            if (newPosts.length === 0) {
+                const loadMoreBtn = container.querySelector('.panel-load-more-btn');
+                if (loadMoreBtn) {
+                    loadMoreBtn.textContent = 'No more notes';
+                    loadMoreBtn.disabled = true;
+                }
+                return;
+            }
+
+            // Update pagination state
+            this.profilePostsLoaded = [...this.profilePostsLoaded, ...newPosts];
+            this.profileOldestTimestamp = newPosts[newPosts.length - 1].created_at;
 
             // Add to cache
-            posts.forEach(post => {
+            newPosts.forEach(post => {
                 if (window.NostrState?.eventCache) {
                     window.NostrState.eventCache[post.id] = post;
                 }
             });
 
-            // Render posts
+            // Fetch disclosed tips and parent posts for new posts
+            let parentPostsMap = {};
+            if (window.NostrPosts?.fetchDisclosedTips) {
+                try {
+                    const disclosedTipsData = await window.NostrPosts.fetchDisclosedTips(newPosts);
+                    if (window.NostrPosts?.disclosedTipsCache) {
+                        Object.assign(window.NostrPosts.disclosedTipsCache, disclosedTipsData);
+                    }
+                } catch (tipError) {
+                    console.error('Right panel profile: Error fetching disclosed tips:', tipError);
+                }
+            }
+
+            // Fetch parent posts for replies (shows reply context)
+            if (window.NostrPosts?.fetchParentPosts) {
+                try {
+                    // Use combined relays (user's + public fallbacks) for better coverage
+                    const parentRelays = window.NostrPosts.getParentPostRelays?.() || FALLBACK_RELAYS;
+                    parentPostsMap = await window.NostrPosts.fetchParentPosts(newPosts, parentRelays);
+                } catch (parentError) {
+                    console.error('Right panel profile: Error fetching parent posts:', parentError);
+                }
+            }
+
+            // Render posts with parent context
             if (window.NostrPosts?.renderSinglePost) {
                 const rendered = await Promise.all(
-                    posts.map(post => window.NostrPosts.renderSinglePost(post, 'feed'))
+                    newPosts.map(post => window.NostrPosts.renderSinglePost(post, 'feed', {}, parentPostsMap))
                 );
-                container.innerHTML = rendered.join('');
+
+                if (loadMore) {
+                    // Remove old load more button and append new posts
+                    const loadMoreBtn = container.querySelector('.panel-load-more-container');
+                    if (loadMoreBtn) loadMoreBtn.remove();
+                    container.insertAdjacentHTML('beforeend', rendered.join(''));
+                } else {
+                    container.innerHTML = rendered.join('');
+                }
+
+                // Add Load More button if we got a full page of results
+                if (newPosts.length >= LIMITS.PROFILE_POSTS) {
+                    const loadMoreHtml = `
+                        <div class="panel-load-more-container" style="padding: 16px; text-align: center;">
+                            <button class="panel-load-more-btn" style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; color: #FF6600; padding: 8px 24px; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                                Load More
+                            </button>
+                        </div>
+                    `;
+                    container.insertAdjacentHTML('beforeend', loadMoreHtml);
+
+                    // Add event listener
+                    container.querySelector('.panel-load-more-btn')?.addEventListener('click', () => {
+                        this.fetchPanelProfilePosts(pubkey, true);
+                    });
+                }
 
                 // Process embedded notes (quote reposts)
                 try {
@@ -1659,15 +1838,31 @@ const RightPanel = {
                     console.error('Right panel profile: Error processing embedded notes:', embedError);
                 }
             } else {
-                container.innerHTML = posts.map(post => `
+                const postsHtml = newPosts.map(post => `
                     <div class="post" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
                         ${this.escapeHtml(post.content.substring(0, 200))}${post.content.length > 200 ? '...' : ''}
                     </div>
                 `).join('');
+
+                if (loadMore) {
+                    const loadMoreBtn = container.querySelector('.panel-load-more-container');
+                    if (loadMoreBtn) loadMoreBtn.remove();
+                    container.insertAdjacentHTML('beforeend', postsHtml);
+                } else {
+                    container.innerHTML = postsHtml;
+                }
             }
         } catch (error) {
             console.error('Error fetching profile posts:', error);
-            container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">Failed to load posts</div>';
+            if (!loadMore) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">Failed to load posts</div>';
+            } else {
+                const loadMoreBtn = container.querySelector('.panel-load-more-btn');
+                if (loadMoreBtn) {
+                    loadMoreBtn.textContent = 'Load More';
+                    loadMoreBtn.disabled = false;
+                }
+            }
         }
     },
 
@@ -1983,7 +2178,7 @@ const RightPanel = {
         window.NostrUI?.showSuccessToast?.('Paywalled note published!');
 
         // Refresh feed
-        setTimeout(() => window.loadFeedRealtime?.(), 1000);
+        setTimeout(() => window.loadFeedRealtime?.(), TIMEOUTS.FEED_REFRESH_DELAY);
     },
 
     /**
@@ -2006,23 +2201,34 @@ const RightPanel = {
         }
 
         // data should contain { address, noteId, authorName, authorPubkey }
-        if (!data?.address) {
+        const address = data?.address || '';
+        if (!address) {
             section.innerHTML = '<div style="padding: 20px;">No Monero address available for this user</div>';
             return;
         }
 
+        // Validate Monero address format (primary: 95 chars starting with 4, subaddress: 95 chars starting with 8)
+        const isValidAddress = /^[48][1-9A-HJ-NP-Za-km-z]{94}$/.test(address);
+        if (!isValidAddress) {
+            section.innerHTML = '<div style="padding: 20px;">Invalid Monero address format</div>';
+            return;
+        }
+
+        // Escape user-controlled data for safe HTML rendering
+        const safeAuthorName = this.escapeHtml(data.authorName || 'this user');
+
         section.innerHTML = `
             <div style="margin-bottom: 16px;">
                 <div style="color: var(--text-secondary); font-size: 14px; margin-bottom: 8px;">
-                    Tipping ${data.authorName || 'this user'}
+                    Tipping ${safeAuthorName}
                 </div>
                 <div style="font-family: monospace; font-size: 12px; word-break: break-all; padding: 12px; background: var(--card-bg); border-radius: 8px; color: var(--text-primary);">
-                    ${data.address}
+                    ${address}
                 </div>
             </div>
             <div class="qr-container" id="panelQrCode" style="margin: 20px auto;"></div>
             <div style="margin-top: 16px;">
-                <button class="send-btn" style="width: 100%;" onclick="navigator.clipboard.writeText('${data.address}'); window.showToast?.('Address copied!', 'success');">
+                <button class="send-btn panel-zap-copy-btn" style="width: 100%;">
                     📋 Copy Address
                 </button>
             </div>
@@ -2031,11 +2237,17 @@ const RightPanel = {
             </div>
         `;
 
+        // Add event listener instead of inline onclick (XSS prevention)
+        section.querySelector('.panel-zap-copy-btn')?.addEventListener('click', () => {
+            navigator.clipboard.writeText(address);
+            window.showToast?.('Address copied!', 'success');
+        });
+
         // Generate QR code
         if (window.QRCode) {
             const qrContainer = section.querySelector('#panelQrCode');
             new QRCode(qrContainer, {
-                text: `monero:${data.address}`,
+                text: `monero:${address}`,
                 width: 200,
                 height: 200,
                 colorDark: '#FF6600',
@@ -2102,6 +2314,7 @@ const RightPanel = {
 
     /**
      * Escape HTML for safe rendering
+     * TODO: This duplicates escapeHtml from utils.js - consider importing shared utility
      */
     escapeHtml(text) {
         const div = document.createElement('div');

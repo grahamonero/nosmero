@@ -4,6 +4,7 @@
 import { showSkeletonLoader } from './skeleton.js';
 import { setPreviousPage, getPreviousPage } from './profile.js';
 import * as PaywallUI from '../paywall-ui.js';
+import { escapeHtml } from '../utils.js';
 
 // ==================== THREAD TREE BUILDING ====================
 
@@ -347,7 +348,7 @@ export async function openThreadView(eventId, skipHistory = false) {
                 const parentName = parentProfile?.name || parentProfile?.display_name || parentNode.post.pubkey.slice(0, 8) + '...';
                 html += `<div style="margin-left: ${indent}px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
                     <div style="width: 2px; height: 16px; background: #444; margin-left: 20px;"></div>
-                    <span style="color: #666; font-size: 12px;">↑ Replying to <span style="color: #888;">@${parentName}</span></span>
+                    <span style="color: #666; font-size: 12px;">↑ Replying to <span style="color: #888;">@${escapeHtml(parentName)}</span></span>
                 </div>`;
             }
 
@@ -397,7 +398,7 @@ export async function openThreadView(eventId, skipHistory = false) {
 
     } catch (error) {
         console.error('Error opening thread view:', error);
-        const threadContent = document.getElementById('threadContent');
+        const threadContent = document.getElementById('threadPageContent');
         if (threadContent) {
             threadContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #ff6666;">Error loading thread</div>';
         }
@@ -772,7 +773,7 @@ export async function requestDeletion() {
             import('../utils.js')
         ]);
 
-        if (!State.privateKey) {
+        if (!State.getPrivateKeyForSigning()) {
             if (typeof showNotification === 'function') {
                 showNotification('You must be logged in to request deletion', 'error');
             }

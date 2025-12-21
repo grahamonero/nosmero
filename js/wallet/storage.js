@@ -172,10 +172,18 @@ export async function deleteWallet(pubkey) {
         tx.objectStore(STORES.SYNC).delete(pubkey);
         tx.objectStore(STORES.WALLET_CACHE).delete(pubkey);
 
-        // For tx cache, we need to delete all entries for this user
-        // Since tx cache uses txid as key, we need to clear all (or add user prefix later)
-        // For now, clear all tx cache when any wallet is deleted
-        tx.objectStore(STORES.TX_CACHE).clear();
+        // Delete only this user's cached transactions (keys are prefixed with pubkey:txid)
+        const txStore = tx.objectStore(STORES.TX_CACHE);
+        const cursorRequest = txStore.openCursor();
+        cursorRequest.onsuccess = (event) => {
+            const cursor = event.target.result;
+            if (cursor) {
+                if (cursor.value.owner_pubkey === pubkey) {
+                    cursor.delete();
+                }
+                cursor.continue();
+            }
+        };
 
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
@@ -327,7 +335,7 @@ export async function clearTransactionCache() {
 /**
  * Update wallet metadata (without changing encrypted keys)
  * @param {string} pubkey - Nostr pubkey of wallet owner
- * @param {Object} updates - Fields to update
+ * @param {Object} updates - Fields to update (only restore_height and primary_address allowed)
  * @returns {Promise<void>}
  */
 export async function updateWalletMeta(pubkey, updates) {
@@ -342,13 +350,22 @@ export async function updateWalletMeta(pubkey, updates) {
         throw new Error('No wallet found to update');
     }
 
+    // Whitelist allowed fields to prevent overwriting critical data
+    const ALLOWED_META_FIELDS = ['restore_height', 'primary_address'];
+    const safeUpdates = {};
+    for (const field of ALLOWED_META_FIELDS) {
+        if (field in updates) {
+            safeUpdates[field] = updates[field];
+        }
+    }
+
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORES.WALLET, 'readwrite');
         const store = tx.objectStore(STORES.WALLET);
 
         const record = {
             ...existing,
-            ...updates,
+            ...safeUpdates,
             updated_at: Date.now()
         };
 

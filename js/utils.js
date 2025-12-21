@@ -69,6 +69,61 @@ export function showNotification(message, type = 'success') {
     }, 3000);
 }
 
+// Render login required prompt in a container
+export function renderLoginRequired(container, message = 'Please login to access this feature') {
+    if (!container) return;
+
+    container.innerHTML = `
+        <div style="padding: 40px; text-align: center; max-width: 500px; margin: 0 auto;">
+            <h2 style="color: #FF6600; margin-bottom: 30px;">Login Required</h2>
+            <p style="color: #ccc; margin-bottom: 40px; line-height: 1.6;">
+                ${escapeHtml(message)}
+            </p>
+
+            <div class="login-buttons" style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 30px;">
+                <button data-action="create-account"
+                        style="padding: 16px 24px; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold; font-size: 16px;">
+                    🎭 Create New Account
+                </button>
+
+                <button data-action="login-nsec"
+                        style="padding: 16px 24px; border: none; border-radius: 12px; cursor: pointer; background: #333; color: #fff; font-weight: bold; font-size: 16px;">
+                    🔑 Login with Private Key
+                </button>
+
+                <button data-action="login-extension"
+                        style="padding: 16px 24px; border: none; border-radius: 12px; cursor: pointer; background: #6B73FF; color: #fff; font-weight: bold; font-size: 16px;">
+                    🔌 Connect Browser Extension
+                </button>
+            </div>
+
+            <div style="font-size: 14px; color: #666; line-height: 1.4;">
+                <p>New to Nostr? Create a new account to get started.</p>
+                <p>Have an existing key? Login with your nsec private key.</p>
+                <p>Using nos2x or Alby? Connect your browser extension.</p>
+            </div>
+        </div>
+    `;
+
+    // Add event delegation for login buttons
+    const loginButtonsContainer = container.querySelector('.login-buttons');
+    if (loginButtonsContainer) {
+        loginButtonsContainer.addEventListener('click', (e) => {
+            const button = e.target.closest('button[data-action]');
+            if (!button) return;
+
+            const action = button.dataset.action;
+            if (action === 'create-account' && typeof createNewAccount === 'function') {
+                createNewAccount();
+            } else if (action === 'login-nsec' && typeof showLoginWithNsec === 'function') {
+                showLoginWithNsec();
+            } else if (action === 'login-extension' && typeof loginWithExtension === 'function') {
+                loginWithExtension();
+            }
+        });
+    }
+}
+
 // ==================== EVENT SIGNING ====================
 
 /**
@@ -77,17 +132,18 @@ export function showNotification(message, type = 'success') {
  * @returns {Promise<Object>} Signed event
  */
 export async function signEvent(eventTemplate) {
+    const privateKey = State.getPrivateKeyForSigning();
     // Check if user is using browser extension (nos2x, Alby, etc.) or nsec.app
-    if (State.privateKey === 'extension' || State.privateKey === 'nsec-app') {
+    if (privateKey === 'extension' || privateKey === 'nsec-app') {
         // Use window.nostr for signing (provided by extension or nostr-login)
         if (!window.nostr) {
-            const source = State.privateKey === 'extension' ? 'Browser extension' : 'nsec.app';
-            throw new Error(`${source} not found. Please ensure your Nostr ${State.privateKey === 'extension' ? 'extension' : 'connection'} is active.`);
+            const source = privateKey === 'extension' ? 'Browser extension' : 'nsec.app';
+            throw new Error(`${source} not found. Please ensure your Nostr ${privateKey === 'extension' ? 'extension' : 'connection'} is active.`);
         }
         return await window.nostr.signEvent(eventTemplate);
     }
     // Check if user is using Amber (NIP-46 remote signer)
-    else if (State.privateKey === 'amber') {
+    else if (privateKey === 'amber') {
         // Use Amber for remote signing
         const Amber = await import('./amber.js');
 
@@ -99,10 +155,10 @@ export async function signEvent(eventTemplate) {
     }
     // Use local private key with finalizeEvent
     else {
-        if (!State.privateKey) {
+        if (!privateKey) {
             throw new Error('Not authenticated. Please log in first.');
         }
-        return await window.NostrTools.finalizeEvent(eventTemplate, State.privateKey);
+        return await window.NostrTools.finalizeEvent(eventTemplate, privateKey);
     }
 }
 
@@ -124,6 +180,16 @@ export function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Validate URL scheme to only allow http:// and https://
+function isValidUrlScheme(url) {
+    try {
+        const urlObj = new URL(url);
+        return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
+    } catch (e) {
+        return false;
+    }
 }
 
 // Parse and format post content: links, images, mentions, and embedded notes
@@ -150,16 +216,27 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     // Uses ThumbHash for progressive loading if available
     const imageRegex = /(https?:\/\/[^\s<]+\.(jpg|jpeg|png|gif|webp|svg)(\?[^\s<]*)?)/gi;
     parsed = parsed.replace(imageRegex, (match, url) => {
+        // Validate URL scheme
+        if (!isValidUrlScheme(url)) {
+            return escapeHtml(match);
+        }
+        const escapedUrl = escapeHtml(url);
         const placeholder = window.ThumbHashLoader?.getPlaceholder(url);
         if (placeholder) {
-            return `<img src="${placeholder}" data-thumbhash-src="${url}" alt="Image" style="filter: blur(8px); transition: filter 0.3s; max-width: 100%;" onload="window.ThumbHashLoader?.onImageLoad(this)" />`;
+            return `<img src="${escapeHtml(placeholder)}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`;
         }
-        return `<img src="${url}" data-thumbhash-src="${url}" alt="Image" style="max-width: 100%;" onload="window.ThumbHashLoader?.onImageLoad(this)" />`;
+        return `<img src="${escapedUrl}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`;
     });
 
     // Parse video URLs (stop at whitespace or < to avoid grabbing <br> tags)
     const videoRegex = /(https?:\/\/[^\s<]+\.(mp4|webm|ogg)(\?[^\s<]*)?)/gi;
-    parsed = parsed.replace(videoRegex, '<video controls><source src="$1" /></video>');
+    parsed = parsed.replace(videoRegex, (match, url) => {
+        // Validate URL scheme
+        if (!isValidUrlScheme(url)) {
+            return escapeHtml(match);
+        }
+        return `<video controls><source src="${escapeHtml(url)}" /></video>`;
+    });
     
     // Parse nostr npub mentions - show as user names
     const npubRegex = /(nostr:)?(npub1[a-z0-9]{58})/gi;
@@ -171,9 +248,9 @@ export function parseContent(content, skipEmbeddedNotes = false) {
             const pubkey = decoded.data;
             const profile = profileCache[pubkey];
             const name = profile?.name || profile?.display_name || npub.slice(0, 12) + '...';
-            return `<span class="mention" onclick="viewUserProfilePage('${pubkey}'); event.stopPropagation();" style="cursor: pointer; color: #FF6600;">@${name}</span>`;
+            return `<span class="mention" data-action="view-profile" data-pubkey="${escapeHtml(pubkey)}">@${escapeHtml(name)}</span>`;
         } catch (e) {
-            return `<span class="mention">@${npub.slice(0, 12)}...</span>`;
+            return `<span class="mention">@${escapeHtml(npub.slice(0, 12))}...</span>`;
         }
     });
     
@@ -213,29 +290,38 @@ export function parseContent(content, skipEmbeddedNotes = false) {
                 const pubkey = decoded.data.pubkey;
                 const profile = profileCache[pubkey];
                 const name = profile?.name || profile?.display_name || nprofile.slice(0, 12) + '...';
-                return `<span class="mention" onclick="viewUserProfilePage('${pubkey}'); event.stopPropagation();" style="cursor: pointer; color: #FF6600;">@${name}</span>`;
+                return `<span class="mention" data-action="view-profile" data-pubkey="${escapeHtml(pubkey)}">@${escapeHtml(name)}</span>`;
             } else {
-                return `<span class="mention">@${nprofile.slice(0, 12)}...</span>`;
+                return `<span class="mention">@${escapeHtml(nprofile.slice(0, 12))}...</span>`;
             }
         } catch (e) {
             console.error('Error parsing nprofile:', e);
-            return `<span class="mention">@${nprofile.slice(0, 12)}...</span>`;
+            return `<span class="mention">@${escapeHtml(nprofile.slice(0, 12))}...</span>`;
         }
     });
     
     // Parse regular URLs (but not those already converted to images/videos)
     // Stop at whitespace or < to avoid grabbing <br> tags
     const urlRegex = /(?<!src=")(https?:\/\/[^\s<]+)(?!\.(jpg|jpeg|png|gif|webp|svg|mp4|webm|ogg))/gi;
-    parsed = parsed.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+    parsed = parsed.replace(urlRegex, (match, url) => {
+        // Validate URL scheme
+        if (!isValidUrlScheme(match)) {
+            return escapeHtml(match);
+        }
+        return `<a href="${escapeHtml(match)}" target="_blank" rel="noopener">${escapeHtml(match)}</a>`;
+    });
     
     // Sanitize with DOMPurify to prevent XSS
     if (typeof DOMPurify !== 'undefined') {
         parsed = DOMPurify.sanitize(parsed, {
             ALLOWED_TAGS: ['a', 'img', 'video', 'source', 'span', 'div', 'br', 'p'],
-            ALLOWED_ATTR: ['href', 'src', 'target', 'rel', 'class', 'data-nevent', 'data-noteid', 'data-note1', 'alt', 'controls', 'style', 'onclick'],
+            ALLOWED_ATTR: ['href', 'src', 'target', 'rel', 'class', 'data-nevent', 'data-noteid', 'data-note1', 'alt', 'controls', 'data-pubkey', 'data-action', 'data-eventid'],
             ALLOW_DATA_ATTR: true,
-            ADD_ATTR: ['target', 'onclick']
+            ADD_ATTR: ['target']
         });
+    } else {
+        // Fallback: return escaped plaintext if DOMPurify is not available
+        return escapeHtml(content);
     }
     
     return parsed;
@@ -445,15 +531,18 @@ function renderEmbeddedNote(event, State) {
     const content = event.content ? event.content.slice(0, 200) + (event.content.length > 200 ? '...' : '') : '';
     const timeAgo = formatTimeAgo(event.created_at * 1000);
 
+    // Validate author picture URL
+    const hasValidPicture = authorPicture && isValidUrlScheme(authorPicture);
+
     return `
-        <div class="embedded-note-content" onclick="openThreadView('${event.id}')" style="cursor: pointer; background: rgba(255,255,255,0.03); border: 1px solid #333; border-radius: 8px; padding: 10px; margin-top: 8px;">
+        <div class="embedded-note-content" data-action="open-thread" data-eventid="${escapeHtml(event.id)}">
             <div style="display: flex !important; flex-direction: row !important; align-items: center !important; gap: 8px !important; margin-bottom: 6px;">
-                ${authorPicture ?
-                    `<img src="${authorPicture}" style="width: 20px !important; height: 20px !important; max-width: 20px !important; max-height: 20px !important; min-width: 20px !important; min-height: 20px !important; border-radius: 50% !important; object-fit: cover !important; flex-shrink: 0 !important; display: inline-block !important;" onerror="this.style.display='none'">` :
-                    `<div style="width: 20px !important; height: 20px !important; min-width: 20px !important; min-height: 20px !important; border-radius: 50% !important; background: linear-gradient(135deg, #FF6600, #8B5CF6) !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; color: white !important; font-size: 10px !important; font-weight: bold !important; flex-shrink: 0 !important;">${authorName.charAt(0).toUpperCase()}</div>`
+                ${hasValidPicture ?
+                    `<img src="${escapeHtml(authorPicture)}" style="width: 20px !important; height: 20px !important; max-width: 20px !important; max-height: 20px !important; min-width: 20px !important; min-height: 20px !important; border-radius: 50% !important; object-fit: cover !important; flex-shrink: 0 !important; display: inline-block !important;" onerror="this.style.display='none'">` :
+                    `<div style="width: 20px !important; height: 20px !important; min-width: 20px !important; min-height: 20px !important; border-radius: 50% !important; background: linear-gradient(135deg, #FF6600, #8B5CF6) !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; color: white !important; font-size: 10px !important; font-weight: bold !important; flex-shrink: 0 !important;">${escapeHtml(authorName.charAt(0).toUpperCase())}</div>`
                 }
-                <span style="color: #ccc !important; font-weight: 500 !important; font-size: 13px !important; display: inline !important;">${authorName}</span>
-                <span style="color: #666 !important; font-size: 12px !important; display: inline !important;">${timeAgo}</span>
+                <span style="color: #ccc !important; font-weight: 500 !important; font-size: 13px !important; display: inline !important;">${escapeHtml(authorName)}</span>
+                <span style="color: #666 !important; font-size: 12px !important; display: inline !important;">${escapeHtml(timeAgo)}</span>
             </div>
             <div style="color: #aaa !important; font-size: 14px !important; line-height: 1.4 !important;">${parseContent(content, true)}</div>
         </div>
@@ -472,4 +561,51 @@ function formatTimeAgo(timestamp) {
     if (hours > 0) return `${hours}h`;
     if (minutes > 0) return `${minutes}m`;
     return 'now';
+}
+
+// ==================== GLOBAL EVENT DELEGATION ====================
+
+// Set up global event delegation for data-action clicks
+// This prevents XSS by avoiding inline onclick handlers
+export function initGlobalEventDelegation() {
+    // Remove any existing listener to prevent duplicates
+    if (window._utilsEventDelegationInitialized) {
+        return;
+    }
+    window._utilsEventDelegationInitialized = true;
+
+    document.addEventListener('click', (e) => {
+        // Find the closest element with data-action attribute
+        const actionElement = e.target.closest('[data-action]');
+        if (!actionElement) return;
+
+        const action = actionElement.dataset.action;
+
+        // Handle view-profile action
+        if (action === 'view-profile') {
+            const pubkey = actionElement.dataset.pubkey;
+            if (pubkey && typeof viewUserProfilePage === 'function') {
+                viewUserProfilePage(pubkey);
+                e.stopPropagation();
+            }
+        }
+        // Handle open-thread action
+        else if (action === 'open-thread') {
+            const eventId = actionElement.dataset.eventid;
+            if (eventId && typeof openThreadView === 'function') {
+                openThreadView(eventId);
+                e.stopPropagation();
+            }
+        }
+    });
+}
+
+// Auto-initialize when this module loads
+if (typeof document !== 'undefined') {
+    // Use DOMContentLoaded if document isn't ready yet, otherwise init immediately
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initGlobalEventDelegation);
+    } else {
+        initGlobalEventDelegation();
+    }
 }
