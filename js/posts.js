@@ -1499,7 +1499,7 @@ export async function fetchMuteList() {
 export async function publishMuteList() {
     console.log('📤 Publishing mute list...');
 
-    if (!State.privateKey || !State.publicKey) {
+    if (!State.hasPrivateKey() || !State.publicKey) {
         console.error('Cannot publish mute list - no keys available');
         return false;
     }
@@ -1521,7 +1521,7 @@ export async function publishMuteList() {
         };
 
         // Sign the event
-        const signedEvent = window.NostrTools.finalizeEvent(muteListEvent, State.privateKey);
+        const signedEvent = window.NostrTools.finalizeEvent(muteListEvent, State.getPrivateKeyForSigning());
 
         // Publish to relays
         const publishPromises = State.pool.publish(writeRelays, signedEvent);
@@ -4430,7 +4430,7 @@ export async function handleSmartPaste(event) {
 // Toggle the visibility of the new post composition area
 export function toggleCompose() {
     // Check if user is logged in first
-    if (!State.privateKey) {
+    if (!State.hasPrivateKey()) {
         // Show login options instead of compose area
         if (window.showAuthUI) {
             window.showAuthUI();
@@ -4922,19 +4922,20 @@ export function removeMedia(context) {
 // Upload media to nostr.build with NIP-98 authentication
 async function uploadMediaToBlossom() {
     if (!currentMediaFile) return null;
-    
+
     console.log('Starting nostr.build upload for file:', currentMediaFile.name, 'Size:', currentMediaFile.size, 'Type:', currentMediaFile.type);
-    
+
     try {
         // Create NIP-98 auth event
         let authEvent;
 
-        if (State.privateKey === 'extension' || State.privateKey === 'nsec-app') {
+        const privateKey = State.getPrivateKeyForSigning();
+        if (privateKey === 'extension' || privateKey === 'nsec-app') {
             // Use window.nostr to sign (browser extension or nsec.app)
             if (!window.nostr) {
                 throw new Error('window.nostr not available');
             }
-            
+
             const unsignedEvent = {
                 kind: 27235, // NIP-98 HTTP Auth kind
                 created_at: Math.floor(Date.now() / 1000),
@@ -4945,7 +4946,7 @@ async function uploadMediaToBlossom() {
                 content: '',
                 pubkey: State.publicKey
             };
-            
+
             authEvent = await window.nostr.signEvent(unsignedEvent);
         } else {
             // Sign with private key

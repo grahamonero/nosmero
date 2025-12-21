@@ -614,24 +614,25 @@ async function updateTransactions() {
                 dateStr = date.toLocaleDateString();
             }
 
-            const shortTxid = tx.txid ? `${tx.txid.slice(0, 6)}...` : '';
+            const shortTxid = tx.txid ? `${escapeHtml(tx.txid.slice(0, 6))}...` : '';
+            const escapedTxid = escapeAttribute(tx.txid);
 
             return `
-                <div onclick="window.WalletModal.showTxDetail('${tx.txid}')" style="padding: 14px; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                <div data-txid="${escapedTxid}" data-action="show-tx-detail" style="padding: 14px; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px; cursor: pointer;">
                     <div style="width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; background: ${isIncoming ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 102, 0, 0.2)'};">
                         ${isIncoming ? '📥' : '📤'}
                     </div>
                     <div style="flex: 1; min-width: 0;">
                         <div style="font-weight: 600; font-size: 14px; font-family: monospace; color: ${isIncoming ? '#4ade80' : '#FF6600'};">
-                            ${isIncoming ? '+' : '-'}${amountXMR} XMR
+                            ${isIncoming ? '+' : '-'}${escapeHtml(amountXMR)} XMR
                         </div>
                         <div style="display: flex; justify-content: space-between; margin-top: 4px;">
-                            <span style="color: #666; font-size: 11px;">${dateStr}</span>
+                            <span style="color: #666; font-size: 11px;">${escapeHtml(dateStr)}</span>
                             <span style="color: #555; font-size: 10px; font-family: monospace;">${shortTxid}</span>
                         </div>
                     </div>
                     <div style="padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background: ${isConfirmed ? 'rgba(74, 222, 128, 0.1)' : 'rgba(255, 193, 7, 0.1)'}; color: ${isConfirmed ? '#4ade80' : '#ffc107'};">
-                        ${isConfirmed ? '✓' : confirmations + '/10'}
+                        ${isConfirmed ? '✓' : escapeHtml(confirmations) + '/10'}
                     </div>
                 </div>
             `;
@@ -986,7 +987,7 @@ export async function executeBatchSend() {
 async function publishBatchVerifiedDisclosure(noteId, amount, txHash, txKey, recipientPubkey) {
     try {
         const senderPubkey = State.publicKey;
-        const privateKey = State.privateKey;
+        const privateKey = State.getPrivateKeyForSigning();
 
         if (!senderPubkey || !privateKey) {
             console.warn('[WalletModal] No pubkey or private key for disclosure');
@@ -1069,30 +1070,48 @@ function showBatchSuccessView(txHash, tipCount, disclosureMode) {
         ? 'Verified disclosures published'
         : 'Sent anonymously (no disclosure)';
 
+    const escapedTxHash = escapeAttribute(txHash);
+
     getContentEl().innerHTML = `
         <div style="text-align: center; padding: 40px 20px;">
             <div style="font-size: 64px; margin-bottom: 20px;">🎉</div>
-            <h2 style="color: #10B981; margin-bottom: 16px;">${tipCount} Tips Sent!</h2>
-            <p style="color: #888; margin-bottom: 24px;">${disclosureMsg}</p>
+            <h2 style="color: #10B981; margin-bottom: 16px;">${escapeHtml(tipCount)} Tips Sent!</h2>
+            <p style="color: #888; margin-bottom: 24px;">${escapeHtml(disclosureMsg)}</p>
             <div style="background: #0a0a0a; border-radius: 8px; padding: 12px; margin-bottom: 24px;">
                 <div style="color: #666; font-size: 12px; margin-bottom: 4px;">Transaction ID</div>
-                <div onclick="navigator.clipboard.writeText('${txHash}'); window.WalletModal.showToastMsg('Copied!')" style="font-family: monospace; font-size: 10px; color: #aaa; word-break: break-all; cursor: pointer;">
-                    ${txHash} 📋
+                <div data-copy-text="${escapedTxHash}" data-action="copy-to-clipboard" style="font-family: monospace; font-size: 10px; color: #aaa; word-break: break-all; cursor: pointer;">
+                    ${escapeHtml(txHash)} 📋
                 </div>
             </div>
-            <button onclick="window.WalletModal.backToDashboard()" style="width: 100%; padding: 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 12px; color: #fff; cursor: pointer; font-size: 15px; font-weight: 600;">Done</button>
+            <button data-action="back-to-dashboard" style="width: 100%; padding: 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 12px; color: #fff; cursor: pointer; font-size: 15px; font-weight: 600;">Done</button>
         </div>
     `;
 }
 
 /**
- * Helper to escape HTML
+ * Helper to escape HTML entities for safe insertion into HTML content
  */
 function escapeHtml(text) {
-    if (!text) return '';
+    if (text === null || text === undefined) return '';
+    const str = String(text);
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = str;
     return div.innerHTML;
+}
+
+/**
+ * Helper to escape text for safe use in HTML attributes (including onclick)
+ * Escapes single quotes, double quotes, and backslashes
+ */
+function escapeAttribute(text) {
+    if (text === null || text === undefined) return '';
+    const str = String(text);
+    return str
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
 
 /**
@@ -1194,7 +1213,7 @@ function showConfirmView(txDetails) {
 
     // Check if verified disclosure is available (local key only)
     // User has a local key if privateKey is a valid hex string (not 'extension', 'amber', 'nsec-app')
-    const privateKey = State.privateKey;
+    const privateKey = State.getPrivateKeyForSigning();
     const isLocalKey = privateKey &&
                        privateKey !== 'extension' &&
                        privateKey !== 'amber' &&
@@ -1326,7 +1345,7 @@ async function publishVerifiedDisclosure(txHash, txKey) {
 
     const { noteId, amount } = tipMeta;
     const senderPubkey = State.publicKey;
-    const privateKey = State.privateKey;
+    const privateKey = State.getPrivateKeyForSigning();
 
     if (!senderPubkey || !privateKey) {
         throw new Error('Not logged in');
@@ -1781,20 +1800,22 @@ export async function showTxDetail(txid) {
         if (recipients.length > 0) {
             recipientsHtml = `
                 <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #333;">
-                    <div style="color: #888; font-size: 12px; margin-bottom: 8px;">Recipients (${recipients.length})</div>
-                    ${recipients.map(r => `
+                    <div style="color: #888; font-size: 12px; margin-bottom: 8px;">Recipients (${escapeHtml(recipients.length)})</div>
+                    ${recipients.map(r => {
+                        const escapedNoteId = escapeAttribute(r.noteId);
+                        return `
                         <div style="background: #0a0a0a; padding: 10px; border-radius: 6px; margin-bottom: 6px;">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <span style="color: #FF6600; font-size: 13px;">${escapeHtml(r.authorName || 'Unknown')}</span>
-                                <span style="color: #fff; font-size: 12px;">${r.amount || '?'} XMR</span>
+                                <span style="color: #fff; font-size: 12px;">${escapeHtml(r.amount || '?')} XMR</span>
                             </div>
                             ${r.noteId ? `
-                                <a href="javascript:void(0)" onclick="window.WalletModal.closeWalletModal(); window.navigateToNote && window.navigateToNote('${r.noteId}')" style="color: #8B5CF6; font-size: 11px; display: block; margin-top: 4px;">
-                                    📝 View Note: ${r.noteId.slice(0, 8)}...
+                                <a href="javascript:void(0)" data-note-id="${escapedNoteId}" data-action="navigate-to-note" style="color: #8B5CF6; font-size: 11px; display: block; margin-top: 4px;">
+                                    📝 View Note: ${escapeHtml(r.noteId.slice(0, 8))}...
                                 </a>
                             ` : ''}
                         </div>
-                    `).join('')}
+                    `;}).join('')}
                 </div>
             `;
         }
@@ -1802,15 +1823,18 @@ export async function showTxDetail(txid) {
         // Build txKey HTML if available
         let txKeyHtml = '';
         if (txKey && !isIncoming) {
+            const escapedTxKey = escapeAttribute(txKey);
             txKeyHtml = `
                 <div style="margin-top: 16px;">
                     <div style="color: #666; font-size: 12px; margin-bottom: 8px;">TX Secret Key (for verification)</div>
-                    <div onclick="navigator.clipboard.writeText('${txKey}'); window.WalletModal.showToastMsg('Copied!')" style="font-family: monospace; font-size: 9px; color: #aaa; word-break: break-all; background: #0a0a0a; padding: 12px; border-radius: 8px; cursor: pointer;">
-                        ${txKey} 📋
+                    <div data-copy-text="${escapedTxKey}" data-action="copy-to-clipboard" style="font-family: monospace; font-size: 9px; color: #aaa; word-break: break-all; background: #0a0a0a; padding: 12px; border-radius: 8px; cursor: pointer;">
+                        ${escapeHtml(txKey)} 📋
                     </div>
                 </div>
             `;
         }
+
+        const escapedHash = escapeAttribute(hash);
 
         getContentEl().innerHTML = `
             <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; border: 1px solid var(--border-color);">
@@ -1820,34 +1844,34 @@ export async function showTxDetail(txid) {
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #333;">
                     <span style="color: #999;">Amount</span>
-                    <span style="color: ${isIncoming ? '#4ade80' : '#FF6600'}; font-weight: 600;">${isIncoming ? '+' : '-'}${amountXMR} XMR</span>
+                    <span style="color: ${isIncoming ? '#4ade80' : '#FF6600'}; font-weight: 600;">${isIncoming ? '+' : '-'}${escapeHtml(amountXMR)} XMR</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #333;">
                     <span style="color: #999;">Fee</span>
-                    <span style="color: #ccc;">${feeXMR} XMR</span>
+                    <span style="color: #ccc;">${escapeHtml(feeXMR)} XMR</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #333;">
                     <span style="color: #999;">Status</span>
-                    <span style="color: ${confirmations >= 10 ? '#4ade80' : '#ffc107'};">${status}</span>
+                    <span style="color: ${confirmations >= 10 ? '#4ade80' : '#ffc107'};">${escapeHtml(status)}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #333;">
                     <span style="color: #999;">Date</span>
-                    <span style="color: #ccc;">${dateStr}</span>
+                    <span style="color: #ccc;">${escapeHtml(dateStr)}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #333;">
                     <span style="color: #999;">Block</span>
-                    <span style="color: #ccc;">${height || 'Pending'}</span>
+                    <span style="color: #ccc;">${escapeHtml(height || 'Pending')}</span>
                 </div>
                 <div style="margin-top: 16px;">
                     <div style="color: #666; font-size: 12px; margin-bottom: 8px;">Transaction ID</div>
-                    <div onclick="navigator.clipboard.writeText('${hash}'); window.WalletModal.showToastMsg('Copied!')" style="font-family: monospace; font-size: 9px; color: #aaa; word-break: break-all; background: #0a0a0a; padding: 12px; border-radius: 8px; cursor: pointer;">
-                        ${hash} 📋
+                    <div data-copy-text="${escapedHash}" data-action="copy-to-clipboard" style="font-family: monospace; font-size: 9px; color: #aaa; word-break: break-all; background: #0a0a0a; padding: 12px; border-radius: 8px; cursor: pointer;">
+                        ${escapeHtml(hash)} 📋
                     </div>
                 </div>
                 ${txKeyHtml}
                 ${recipientsHtml}
             </div>
-            <button onclick="window.WalletModal.backToDashboard()" style="width: 100%; padding: 14px; background: #333; border: none; border-radius: 12px; color: #fff; cursor: pointer; font-size: 14px; margin-top: 16px;">← Back</button>
+            <button data-action="back-to-dashboard" style="width: 100%; padding: 14px; background: #333; border: none; border-radius: 12px; color: #fff; cursor: pointer; font-size: 14px; margin-top: 16px;">← Back</button>
         `;
     } catch (err) {
         console.error('[WalletModal] Failed to load tx details:', err);
@@ -1901,6 +1925,50 @@ window.WalletModal = {
     showTxDetail,
     showToastMsg
 };
+
+// Event delegation handler for data-action attributes (XSS mitigation)
+document.addEventListener('click', (event) => {
+    const target = event.target.closest('[data-action]');
+    if (!target) return;
+
+    const action = target.getAttribute('data-action');
+
+    switch (action) {
+        case 'show-tx-detail': {
+            const txid = target.getAttribute('data-txid');
+            if (txid) {
+                window.WalletModal.showTxDetail(txid);
+            }
+            break;
+        }
+        case 'copy-to-clipboard': {
+            const text = target.getAttribute('data-copy-text');
+            if (text) {
+                navigator.clipboard.writeText(text).then(() => {
+                    window.WalletModal.showToastMsg('Copied!');
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                });
+            }
+            break;
+        }
+        case 'navigate-to-note': {
+            const noteId = target.getAttribute('data-note-id');
+            if (noteId) {
+                window.WalletModal.closeWalletModal();
+                if (window.navigateToNote) {
+                    window.navigateToNote(noteId);
+                }
+            }
+            event.preventDefault();
+            break;
+        }
+        case 'back-to-dashboard': {
+            window.WalletModal.backToDashboard();
+            break;
+        }
+    }
+});
 
 // Also export openWalletModal to window for HTML onclick handlers
 window.openWalletModal = openWalletModal;

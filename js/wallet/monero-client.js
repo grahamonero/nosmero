@@ -13,14 +13,105 @@ let currentWallet = null;
 let isUnlocked = false;
 let unlockTimeout = null;
 let decryptedKeys = null;
+let walletCreationInProgress = false;
 
 // Configuration
 const UNLOCK_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_PIN_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes lockout after max attempts
 
+// Monero constants
+const MIN_AMOUNT = 1n; // Minimum 1 atomic unit (0.000000000001 XMR)
+const MAX_AMOUNT = 18446744073709551615n; // Max uint64 in Monero (18.446744073709551615 XMR)
+
 // Track which daemon is currently being used (for UI display)
 let currentDaemonUri = null;
+
+/**
+ * Validate amount for Monero transactions
+ * @param {bigint|string|number} amount - Amount in atomic units
+ * @param {string} context - Context for error message (e.g., "send", "sweep")
+ * @returns {bigint} Validated amount as bigint
+ * @throws {Error} If amount is invalid
+ */
+function validateAmount(amount, context = 'transaction') {
+    let amountBigInt;
+
+    // Convert to BigInt
+    try {
+        if (typeof amount === 'bigint') {
+            amountBigInt = amount;
+        } else if (typeof amount === 'string') {
+            // Check for invalid string formats
+            if (amount.trim() === '' || amount.includes('.')) {
+                throw new Error('Amount must be in atomic units (no decimals)');
+            }
+            amountBigInt = BigInt(amount);
+        } else if (typeof amount === 'number') {
+            if (!Number.isFinite(amount)) {
+                throw new Error('Amount must be a finite number');
+            }
+            if (amount < 0) {
+                throw new Error('Amount cannot be negative');
+            }
+            if (!Number.isInteger(amount)) {
+                throw new Error('Amount must be an integer (atomic units)');
+            }
+            amountBigInt = BigInt(amount);
+        } else {
+            throw new Error('Amount must be a number, string, or bigint');
+        }
+    } catch (e) {
+        if (e instanceof RangeError) {
+            throw new Error(`Invalid amount for ${context}: cannot convert to BigInt`);
+        }
+        throw new Error(`Invalid amount for ${context}: ${e.message}`);
+    }
+
+    // Validate range
+    if (amountBigInt < MIN_AMOUNT) {
+        throw new Error(`Amount for ${context} must be at least ${MIN_AMOUNT} atomic unit (0.000000000001 XMR)`);
+    }
+
+    if (amountBigInt > MAX_AMOUNT) {
+        throw new Error(`Amount for ${context} exceeds maximum (${MAX_AMOUNT} atomic units)`);
+    }
+
+    return amountBigInt;
+}
+
+/**
+ * Validate Monero address format
+ * @param {string} address - Monero address
+ * @param {string} context - Context for error message
+ * @throws {Error} If address is invalid
+ */
+function validateAddress(address, context = 'transaction') {
+    if (typeof address !== 'string' || address.trim() === '') {
+        throw new Error(`Invalid address for ${context}: must be a non-empty string`);
+    }
+
+    const trimmedAddress = address.trim();
+
+    // Monero mainnet addresses start with 4 (standard) or 8 (subaddress)
+    // Standard address: 95 chars, Subaddress: 95 chars, Integrated: 106 chars
+    if (!trimmedAddress.startsWith('4') && !trimmedAddress.startsWith('8')) {
+        throw new Error(`Invalid address for ${context}: must start with 4 or 8 (mainnet)`);
+    }
+
+    // Check length
+    if (trimmedAddress.length !== 95 && trimmedAddress.length !== 106) {
+        throw new Error(`Invalid address for ${context}: incorrect length (expected 95 or 106 characters)`);
+    }
+
+    // Check for valid base58 characters (Monero uses base58)
+    const base58Regex = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/;
+    if (!base58Regex.test(trimmedAddress)) {
+        throw new Error(`Invalid address for ${context}: contains invalid characters`);
+    }
+
+    return trimmedAddress;
+}
 
 /**
  * Check if user is accessing via Tor (.onion)
@@ -244,9 +335,22 @@ export async function restoreWallet(seed, pin, restoreHeight = 0) {
     }
 
     // Validate seed format (basic check)
+    if (typeof seed !== 'string' || seed.trim() === '') {
+        throw new Error('Seed phrase must be a non-empty string');
+    }
+
     const words = seed.trim().split(/\s+/);
     if (words.length !== 25) {
         throw new Error('Seed phrase must be exactly 25 words');
+    }
+
+    // Validate restore height
+    if (typeof restoreHeight !== 'number' || !Number.isInteger(restoreHeight) || restoreHeight < 0) {
+        throw new Error('Restore height must be a non-negative integer');
+    }
+
+    if (restoreHeight > Number.MAX_SAFE_INTEGER) {
+        throw new Error('Restore height is too large');
     }
 
     // Restore keys-only wallet
@@ -442,6 +546,8 @@ export function lock() {
         currentWallet = null;
     }
 
+    // Clear the wallet creation flag in case lock() is called during creation
+    walletCreationInProgress = false;
     isUnlocked = false;
 }
 
@@ -481,12 +587,41 @@ export async function getFullWallet() {
 
     resetUnlockTimeout();
 
+    // Race condition fix: If wallet creation is already in progress, wait for it
+    if (walletCreationInProgress) {
+        // Poll until wallet is created or creation fails
+        let attempts = 0;
+        const maxAttempts = 100; // 10 seconds max wait
+        while (walletCreationInProgress && attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
+        }
+
+        // If wallet was successfully created while waiting, return it
+        if (currentWallet) {
+            return currentWallet;
+        }
+
+        // If still in progress after timeout, throw error
+        if (walletCreationInProgress) {
+            throw new Error('Wallet creation timeout - another operation in progress');
+        }
+    }
+
+    // If wallet already exists, return it
+    if (currentWallet) {
+        return currentWallet;
+    }
+
     const MoneroTS = getMoneroTS();
     const currentPubkey = await getNostrPubkey();
     const walletData = await storage.loadWallet(currentPubkey);
 
-    // Create full wallet from keys
-    if (!currentWallet) {
+    // Set flag to prevent concurrent wallet creation
+    walletCreationInProgress = true;
+
+    try {
+        // Create full wallet from keys
         let serverUri = null;
         const torMode = isTorAccess();
 
@@ -594,9 +729,12 @@ export async function getFullWallet() {
         if (!isConnected) {
             console.error('[MoneroClient] Failed to connect to daemon:', serverUri);
         }
-    }
 
-    return currentWallet;
+        return currentWallet;
+    } finally {
+        // Clear the flag whether successful or not
+        walletCreationInProgress = false;
+    }
 }
 
 /**
@@ -787,13 +925,17 @@ function getPriorityEnum(priority) {
  * @returns {Promise<{fee: bigint, amount: bigint, address: string, txHash: string}>}
  */
 export async function createTransaction(address, amount, priority = 'normal') {
+    // Validate inputs before getting wallet
+    const validatedAddress = validateAddress(address, 'createTransaction');
+    const validatedAmount = validateAmount(amount, 'createTransaction');
+
     const wallet = await getFullWallet();
     const MoneroTS = getMoneroTS();
 
     // Ensure daemon connection before creating tx (Tor mode may have lost it)
     await ensureDaemonConnection(wallet);
 
-    const requestedAmount = BigInt(amount);
+    const requestedAmount = validatedAmount;
 
     // For Tor Browser: Use reconstruction pattern to avoid Worker serialization bugs
     // (BigInt serialization, circular refs, missing globalIndex)
@@ -841,7 +983,7 @@ export async function createTransaction(address, amount, priority = 'normal') {
         // Create transaction with explicit inputs
         const txConfig = {
             accountIndex: 0,
-            destinations: [{ address: address, amount: requestedAmount.toString() }],
+            destinations: [{ address: validatedAddress, amount: requestedAmount.toString() }],
             inputs: selectedInputs,
             priority: getPriorityEnum(priority),
             relay: false
@@ -852,7 +994,7 @@ export async function createTransaction(address, amount, priority = 'normal') {
         // Standard path for non-Tor browsers
         const txConfig = new MoneroTS.MoneroTxConfig({
             accountIndex: 0,
-            address: address,
+            address: validatedAddress,
             amount: requestedAmount,
             priority: getPriorityEnum(priority),
             relay: false
@@ -868,7 +1010,7 @@ export async function createTransaction(address, amount, priority = 'normal') {
     return {
         fee: fee,
         amount: requestedAmount,
-        address: address,
+        address: validatedAddress,
         txHash: txHash
     };
 }
@@ -880,6 +1022,22 @@ export async function createTransaction(address, amount, priority = 'normal') {
  * @returns {Promise<{fee: bigint, totalAmount: bigint, destinations: Array, txHash: string}>}
  */
 export async function createBatchTransaction(destinations, priority = 'normal') {
+    // Validate inputs
+    if (!Array.isArray(destinations) || destinations.length === 0) {
+        throw new Error('Destinations must be a non-empty array');
+    }
+
+    // Validate each destination
+    const validatedDestinations = destinations.map((dest, index) => {
+        if (!dest || typeof dest !== 'object') {
+            throw new Error(`Destination ${index} must be an object with address and amount`);
+        }
+        return {
+            address: validateAddress(dest.address, `batch destination ${index}`),
+            amount: validateAmount(dest.amount, `batch destination ${index}`)
+        };
+    });
+
     const wallet = await getFullWallet();
     const MoneroTS = getMoneroTS();
 
@@ -887,7 +1045,7 @@ export async function createBatchTransaction(destinations, priority = 'normal') 
     await ensureDaemonConnection(wallet);
 
     // Calculate total amount
-    const totalAmount = destinations.reduce((sum, dest) => sum + BigInt(dest.amount), 0n);
+    const totalAmount = validatedDestinations.reduce((sum, dest) => sum + dest.amount, 0n);
 
     // For Tor Browser: Use reconstruction pattern to avoid Worker serialization bugs
     if (isTorAccess()) {
@@ -907,7 +1065,7 @@ export async function createBatchTransaction(destinations, priority = 'normal') 
 
         let selectedInputs = [];
         let totalInputAmount = 0n;
-        let estimatedFee = BASE_FEE + (BigInt(destinations.length) * FEE_PER_OUTPUT);
+        let estimatedFee = BASE_FEE + (BigInt(validatedDestinations.length) * FEE_PER_OUTPUT);
 
         for (const input of sanitizedOutputs) {
             if (!input.amount || !input.globalIndex) {
@@ -916,7 +1074,7 @@ export async function createBatchTransaction(destinations, priority = 'normal') 
 
             selectedInputs.push(input);
             totalInputAmount += BigInt(input.amount);
-            estimatedFee = BASE_FEE + (BigInt(selectedInputs.length) * FEE_PER_INPUT) + (BigInt(destinations.length) * FEE_PER_OUTPUT);
+            estimatedFee = BASE_FEE + (BigInt(selectedInputs.length) * FEE_PER_INPUT) + (BigInt(validatedDestinations.length) * FEE_PER_OUTPUT);
 
             if (totalInputAmount >= totalAmount + estimatedFee) {
                 break;
@@ -927,10 +1085,10 @@ export async function createBatchTransaction(destinations, priority = 'normal') 
             throw new Error(`Insufficient funds. Have: ${totalInputAmount}, need: ${totalAmount + estimatedFee}`);
         }
 
-        // Convert destinations to plain objects with string amounts
-        const plainDestinations = destinations.map(dest => ({
+        // Convert validated destinations to plain objects with string amounts
+        const plainDestinations = validatedDestinations.map(dest => ({
             address: dest.address,
-            amount: BigInt(dest.amount).toString()
+            amount: dest.amount.toString()
         }));
 
         const txConfig = {
@@ -944,10 +1102,10 @@ export async function createBatchTransaction(destinations, priority = 'normal') 
         pendingTx = await wallet.createTx(txConfig);
     } else {
         // Standard path for non-Tor browsers
-        const moneroDestinations = destinations.map(dest => {
+        const moneroDestinations = validatedDestinations.map(dest => {
             return new MoneroTS.MoneroDestination({
                 address: dest.address,
-                amount: BigInt(dest.amount)
+                amount: dest.amount
             });
         });
 
@@ -968,7 +1126,7 @@ export async function createBatchTransaction(destinations, priority = 'normal') 
     return {
         fee: fee,
         totalAmount: totalAmount,
-        destinations: destinations,
+        destinations: validatedDestinations,
         txHash: txHash
     };
 }
@@ -1157,13 +1315,17 @@ export function hasPendingTransaction() {
  * @returns {Promise<{txHash: string, fee: bigint}>}
  */
 export async function send(address, amount, priority = 'normal') {
+    // Validate inputs
+    const validatedAddress = validateAddress(address, 'send');
+    const validatedAmount = validateAmount(amount, 'send');
+
     const wallet = await getFullWallet();
     const MoneroTS = getMoneroTS();
 
     const txConfig = new MoneroTS.MoneroTxConfig({
         accountIndex: 0,
-        address: address,
-        amount: BigInt(amount),
+        address: validatedAddress,
+        amount: validatedAmount,
         priority: getPriorityEnum(priority),
         relay: true
     });
@@ -1182,12 +1344,19 @@ export async function send(address, amount, priority = 'normal') {
  * @returns {Promise<{txHash: string, amount: bigint, fee: bigint}>}
  */
 export async function sweepAll(address) {
+    // Validate address
+    const validatedAddress = validateAddress(address, 'sweepAll');
+
     const wallet = await getFullWallet();
 
     const txs = await wallet.sweepUnlocked({
-        address: address,
+        address: validatedAddress,
         relay: true
     });
+
+    if (!txs || txs.length === 0) {
+        throw new Error('Sweep failed: no transactions created (no spendable funds?)');
+    }
 
     const tx = txs[0];
     return {
@@ -1203,6 +1372,15 @@ export async function sweepAll(address) {
  * @returns {Promise<Array>}
  */
 export async function getTransactions(limit = 50) {
+    // Validate limit
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) {
+        throw new Error('Transaction limit must be a positive integer');
+    }
+
+    if (limit > 10000) {
+        throw new Error('Transaction limit too large (max 10000)');
+    }
+
     const wallet = await getFullWallet();
 
     let txs = [];
@@ -1441,10 +1619,21 @@ export async function deleteWallet() {
  * @returns {Promise<string|null>} Transaction key or null if not found
  */
 export async function getCachedTxKey(txid) {
+    // Validate txid
+    if (typeof txid !== 'string' || txid.trim() === '') {
+        throw new Error('Transaction ID must be a non-empty string');
+    }
+
+    // Monero transaction hashes are 64 hex characters
+    const trimmedTxid = txid.trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(trimmedTxid)) {
+        throw new Error('Invalid transaction ID format (must be 64 hex characters)');
+    }
+
     try {
         const currentPubkey = await getNostrPubkey();
         const cachedTxs = await storage.getCachedTransactions(currentPubkey, 1000);
-        const cached = cachedTxs.find(tx => tx.txid === txid);
+        const cached = cachedTxs.find(tx => tx.txid === trimmedTxid);
         return cached?.txKey || null;
     } catch (e) {
         console.warn('[MoneroClient] Could not get cached tx key:', e.message);
@@ -1502,11 +1691,54 @@ export function formatXMR(atomicUnits, decimals = 12) {
  * @returns {bigint}
  */
 export function parseXMR(xmr) {
-    const amount = parseFloat(xmr);
-    if (isNaN(amount) || amount < 0) {
-        throw new Error('Invalid XMR amount');
+    // Validate input type
+    if (typeof xmr !== 'string') {
+        throw new Error('XMR amount must be a string');
     }
-    return BigInt(Math.round(amount * 1e12));
+
+    const trimmed = xmr.trim();
+    if (trimmed === '') {
+        throw new Error('XMR amount cannot be empty');
+    }
+
+    // Parse as float
+    const amount = parseFloat(trimmed);
+
+    // Check for NaN
+    if (isNaN(amount)) {
+        throw new Error('Invalid XMR amount: not a number');
+    }
+
+    // Check for negative
+    if (amount < 0) {
+        throw new Error('XMR amount cannot be negative');
+    }
+
+    // Check for infinity
+    if (!Number.isFinite(amount)) {
+        throw new Error('XMR amount must be finite');
+    }
+
+    // Convert to atomic units (1 XMR = 1e12 atomic units)
+    const atomicUnits = Math.round(amount * 1e12);
+
+    // Validate the result can be safely converted to BigInt
+    if (!Number.isSafeInteger(atomicUnits)) {
+        throw new Error('XMR amount too large or has too many decimal places');
+    }
+
+    const result = BigInt(atomicUnits);
+
+    // Validate against min/max
+    if (result < MIN_AMOUNT) {
+        throw new Error(`XMR amount must be at least ${Number(MIN_AMOUNT) / 1e12} XMR`);
+    }
+
+    if (result > MAX_AMOUNT) {
+        throw new Error(`XMR amount exceeds maximum (${Number(MAX_AMOUNT) / 1e12} XMR)`);
+    }
+
+    return result;
 }
 
 // Export wallet state getters

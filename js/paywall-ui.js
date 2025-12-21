@@ -20,6 +20,23 @@ let confirmationPollInterval = null;
 // Pending payments storage key
 const PENDING_PAYMENTS_KEY = 'paywall_pending_payments';
 
+// ==================== VALIDATION HELPERS ====================
+
+/**
+ * Validate Monero address format
+ * @param {string} address - Monero address to validate
+ * @returns {boolean} - True if valid
+ */
+function isValidMoneroAddress(address) {
+    if (!address || typeof address !== 'string') {
+        return false;
+    }
+    // Monero mainnet addresses: standard (4), integrated (4), subaddress (8)
+    // Must be 95 or 106 characters for standard/subaddress, or 106 for integrated
+    const addressRegex = /^[48][1-9A-HJ-NP-Za-km-z]{94,105}$/;
+    return addressRegex.test(address);
+}
+
 // ==================== MODAL MANAGEMENT ====================
 
 /**
@@ -147,7 +164,14 @@ function updateModalProgress(progress) {
  */
 function renderPaymentMethodSelection(paywall, hasWallet, isUnlocked) {
     const content = document.getElementById('paywallModalContent');
-    const priceStr = paywall.priceXmr.toFixed(12).replace(/\.?0+$/, '');
+
+    // Validate price is a number
+    if (typeof paywall.priceXmr !== 'number' || isNaN(paywall.priceXmr) || paywall.priceXmr < 0) {
+        showError('Invalid price');
+        return;
+    }
+
+    const priceStr = Utils.escapeHtml(paywall.priceXmr.toFixed(12).replace(/\.?0+$/, ''));
 
     content.innerHTML = `
         <div class="paywall-modal-body">
@@ -308,8 +332,18 @@ function showExternalWalletPayment() {
     const priceStr = currentPaywall.priceXmr.toFixed(12).replace(/\.?0+$/, '');
     const address = currentPaywall.paymentAddress;
 
+    // Validate Monero address before displaying
+    if (!isValidMoneroAddress(address)) {
+        showError('Invalid payment address');
+        return;
+    }
+
     // Create monero: URI for QR code
     const moneroUri = `monero:${address}?tx_amount=${priceStr}`;
+
+    // Escape data for safe display
+    const addressShort = Utils.escapeHtml(address.substring(0, 20) + '...' + address.substring(address.length - 10));
+    const priceStrEscaped = Utils.escapeHtml(priceStr);
 
     content.innerHTML = `
         <div class="paywall-modal-body">
@@ -323,27 +357,18 @@ function showExternalWalletPayment() {
                     <div id="paywallQrCode" class="paywall-qr"></div>
                 </div>
 
-                <div class="paywall-uri-box" style="margin-bottom: 12px;">
-                    <button class="paywall-copy-uri-btn" onclick="NostrPaywall.copyToClipboard('${moneroUri}', this)" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                        <span>📋</span> Copy Payment URI
-                    </button>
-                    <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: center;">
-                        Paste into your mobile wallet app
-                    </p>
-                </div>
-
                 <div class="paywall-address-box">
                     <label>Payment Address</label>
-                    <div class="address-copy" onclick="NostrPaywall.copyToClipboard('${address}', this)">
-                        <code>${address.substring(0, 20)}...${address.substring(address.length - 10)}</code>
+                    <div class="address-copy" data-action="copy-address">
+                        <code>${addressShort}</code>
                         <span class="copy-icon">📋</span>
                     </div>
                 </div>
 
                 <div class="paywall-amount-box">
                     <label>Amount</label>
-                    <div class="amount-copy" onclick="NostrPaywall.copyToClipboard('${priceStr}', this)">
-                        <code>${priceStr} XMR</code>
+                    <div class="amount-copy" data-action="copy-amount">
+                        <code>${priceStrEscaped} XMR</code>
                         <span class="copy-icon">📋</span>
                     </div>
                 </div>
@@ -369,6 +394,18 @@ function showExternalWalletPayment() {
             </button>
         </div>
     `;
+
+    // Store full data for copying (not in HTML)
+    content.querySelector('[data-action="copy-address"]').dataset.copyText = address;
+    content.querySelector('[data-action="copy-amount"]').dataset.copyText = priceStr;
+
+    // Add click handlers
+    content.querySelector('[data-action="copy-address"]').addEventListener('click', function() {
+        copyToClipboard(this.dataset.copyText, this);
+    });
+    content.querySelector('[data-action="copy-amount"]').addEventListener('click', function() {
+        copyToClipboard(this.dataset.copyText, this);
+    });
 
     // Generate QR code
     generateQrCode('paywallQrCode', moneroUri);
@@ -409,8 +446,16 @@ function generateQrCode(elementId, data) {
             colorLight: '#ffffff'
         });
     } else {
-        // Fallback: show the URI as text
-        container.innerHTML = `<div style="padding: 20px; background: #fff; border-radius: 8px; word-break: break-all; font-size: 10px; color: #000;">${data}</div>`;
+        // Fallback: show the URI as text (safely)
+        const fallbackDiv = document.createElement('div');
+        fallbackDiv.style.padding = '20px';
+        fallbackDiv.style.background = '#fff';
+        fallbackDiv.style.borderRadius = '8px';
+        fallbackDiv.style.wordBreak = 'break-all';
+        fallbackDiv.style.fontSize = '10px';
+        fallbackDiv.style.color = '#000';
+        fallbackDiv.textContent = data; // Use textContent to prevent XSS
+        container.appendChild(fallbackDiv);
     }
 }
 
@@ -551,7 +596,14 @@ function removePendingPayment(noteId) {
  */
 function showPendingConfirmation(payment) {
     const content = document.getElementById('paywallModalContent');
-    const txidShort = payment.txid.substring(0, 16) + '...' + payment.txid.substring(payment.txid.length - 8);
+
+    // Validate and sanitize txid before displaying
+    if (!payment.txid || !/^[a-fA-F0-9]{64}$/.test(payment.txid)) {
+        showError('Invalid transaction ID');
+        return;
+    }
+
+    const txidShort = Utils.escapeHtml(payment.txid.substring(0, 16) + '...' + payment.txid.substring(payment.txid.length - 8));
 
     content.innerHTML = `
         <div class="paywall-modal-body">
@@ -726,15 +778,22 @@ async function showConfirmation(paywall, txPreview) {
     const content = document.getElementById('paywallModalContent');
     const MoneroClient = await import('./wallet/monero-client.js');
 
-    const feeXmr = MoneroClient.formatXMR(txPreview.fee);
+    // Validate and escape all numeric values
+    if (typeof paywall.priceXmr !== 'number' || isNaN(paywall.priceXmr) || paywall.priceXmr < 0) {
+        showError('Invalid price');
+        return;
+    }
+
+    const feeXmr = Utils.escapeHtml(MoneroClient.formatXMR(txPreview.fee));
     const totalAtomic = txPreview.amount + txPreview.fee;
-    const totalXmr = MoneroClient.formatXMR(totalAtomic);
+    const totalXmr = Utils.escapeHtml(MoneroClient.formatXMR(totalAtomic));
+    const priceXmr = Utils.escapeHtml(paywall.priceXmr.toString());
 
     content.innerHTML = `
         <div class="paywall-modal-body">
             <div class="paywall-modal-row">
                 <span class="paywall-modal-label">Content Price</span>
-                <span class="paywall-modal-value highlight">${paywall.priceXmr} XMR</span>
+                <span class="paywall-modal-value highlight">${priceXmr} XMR</span>
             </div>
             <div class="paywall-modal-row">
                 <span class="paywall-modal-label">Network Fee</span>
@@ -881,7 +940,16 @@ export function closeModal(event) {
  */
 async function getCreatorDecryptionKey(noteId, creatorPubkey) {
     try {
-        const response = await fetch(`/api/paywall/creator-key/${noteId}/${creatorPubkey}`);
+        // Validate inputs before using in URL
+        if (!noteId || typeof noteId !== 'string' || noteId.length > 100) {
+            return null;
+        }
+        if (!creatorPubkey || typeof creatorPubkey !== 'string' || !/^[a-f0-9]{64}$/i.test(creatorPubkey)) {
+            return null;
+        }
+
+        // URL encode to prevent injection
+        const response = await fetch(`/api/paywall/creator-key/${encodeURIComponent(noteId)}/${encodeURIComponent(creatorPubkey)}`);
         const data = await response.json();
         if (data.success && data.decryption_key) {
             return data.decryption_key;
@@ -898,7 +966,9 @@ async function getCreatorDecryptionKey(noteId, creatorPubkey) {
  * @param {string} decryptionKey
  */
 async function revealContent(noteId, decryptionKey) {
-    const container = document.querySelector(`.paywall-locked[data-note-id="${noteId}"]`);
+    // Escape noteId for safe CSS selector usage
+    const escapedNoteId = CSS.escape(noteId);
+    const container = document.querySelector(`.paywall-locked[data-note-id="${escapedNoteId}"]`);
     if (!container) {
         console.warn('[PaywallUI] Container not found for', noteId);
         return;
@@ -923,7 +993,8 @@ async function revealContent(noteId, decryptionKey) {
             if (paywall) {
                 // For now, fetch encrypted content from paywall API if stored there
                 // In production, this might come from the relay
-                const response = await fetch(`/api/paywall/info/${noteId}`);
+                // URL encode noteId to prevent injection
+                const response = await fetch(`/api/paywall/info/${encodeURIComponent(noteId)}`);
                 const data = await response.json();
                 if (data.success && data.paywall?.encryptedContent) {
                     encryptedContent = data.paywall.encryptedContent;
@@ -986,7 +1057,9 @@ export async function processPaywalledNotes(container) {
 
         const event = State.eventCache[noteId];
         // Check both data-note-id and data-post-id - only get .post elements
-        const elements = container.querySelectorAll(`.post[data-note-id="${noteId}"], .post[data-post-id="${noteId}"]`);
+        // Escape noteId for safe CSS selector usage
+        const escapedNoteId = CSS.escape(noteId);
+        const elements = container.querySelectorAll(`.post[data-note-id="${escapedNoteId}"], .post[data-post-id="${escapedNoteId}"]`);
         if (elements.length === 0) continue;
 
         // Check if user is the creator - they always see their own unlocked content

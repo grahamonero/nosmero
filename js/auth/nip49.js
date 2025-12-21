@@ -32,6 +32,11 @@ async function loadNobleLibraries() {
     const ciphersModule = await import('https://esm.sh/@noble/ciphers@0.5.3/chacha');
     xchacha20poly1305 = ciphersModule.xchacha20poly1305;
 
+    // Validate that libraries loaded correctly
+    if (typeof scrypt !== 'function' || typeof xchacha20poly1305 !== 'function') {
+      throw new Error('Crypto libraries loaded but are not functions');
+    }
+
     console.log('[NIP-49] Noble crypto libraries loaded');
   } catch (error) {
     console.error('[NIP-49] Failed to load crypto libraries:', error);
@@ -46,9 +51,16 @@ async function loadNobleLibraries() {
 const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 
 function bech32Polymod(values) {
+  if (!Array.isArray(values)) {
+    throw new Error('bech32Polymod: values must be an array');
+  }
+
   const GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
   let chk = 1;
   for (const v of values) {
+    if (typeof v !== 'number' || v < 0 || v > 31 || !Number.isInteger(v)) {
+      throw new Error('bech32Polymod: invalid value in array (must be integers 0-31)');
+    }
     const b = chk >> 25;
     chk = ((chk & 0x1ffffff) << 5) ^ v;
     for (let i = 0; i < 5; i++) {
@@ -59,6 +71,15 @@ function bech32Polymod(values) {
 }
 
 function bech32HrpExpand(hrp) {
+  if (typeof hrp !== 'string' || hrp.length === 0) {
+    throw new Error('bech32HrpExpand: hrp must be a non-empty string');
+  }
+
+  // Validate HRP contains only valid characters (lowercase letters and numbers)
+  if (!/^[a-z0-9]+$/.test(hrp)) {
+    throw new Error('bech32HrpExpand: hrp must contain only lowercase letters and numbers');
+  }
+
   const ret = [];
   for (const c of hrp) {
     ret.push(c.charCodeAt(0) >> 5);
@@ -71,6 +92,10 @@ function bech32HrpExpand(hrp) {
 }
 
 function bech32CreateChecksum(hrp, data) {
+  if (!Array.isArray(data)) {
+    throw new Error('bech32CreateChecksum: data must be an array');
+  }
+
   const values = [...bech32HrpExpand(hrp), ...data];
   const polymod = bech32Polymod([...values, 0, 0, 0, 0, 0, 0]) ^ 1;
   const ret = [];
@@ -81,16 +106,37 @@ function bech32CreateChecksum(hrp, data) {
 }
 
 function bech32VerifyChecksum(hrp, data) {
+  if (!Array.isArray(data)) {
+    throw new Error('bech32VerifyChecksum: data must be an array');
+  }
+
   return bech32Polymod([...bech32HrpExpand(hrp), ...data]) === 1;
 }
 
 function convertBits(data, fromBits, toBits, pad) {
+  if (!Array.isArray(data)) {
+    throw new Error('convertBits: data must be an array');
+  }
+  if (typeof fromBits !== 'number' || fromBits <= 0 || fromBits > 8 || !Number.isInteger(fromBits)) {
+    throw new Error('convertBits: fromBits must be an integer between 1 and 8');
+  }
+  if (typeof toBits !== 'number' || toBits <= 0 || toBits > 8 || !Number.isInteger(toBits)) {
+    throw new Error('convertBits: toBits must be an integer between 1 and 8');
+  }
+
   let acc = 0;
   let bits = 0;
   const ret = [];
   const maxv = (1 << toBits) - 1;
 
   for (const value of data) {
+    if (typeof value !== 'number' || value < 0 || !Number.isInteger(value)) {
+      throw new Error('convertBits: data contains invalid values');
+    }
+    if (value > ((1 << fromBits) - 1)) {
+      throw new Error(`convertBits: value ${value} exceeds ${fromBits}-bit range`);
+    }
+
     acc = (acc << fromBits) | value;
     bits += fromBits;
     while (bits >= toBits) {
@@ -103,33 +149,64 @@ function convertBits(data, fromBits, toBits, pad) {
     if (bits > 0) {
       ret.push((acc << (toBits - bits)) & maxv);
     }
+  } else {
+    // If not padding, ensure no leftover bits
+    if (bits >= fromBits || ((acc << (toBits - bits)) & maxv)) {
+      throw new Error('convertBits: invalid padding');
+    }
   }
 
   return ret;
 }
 
 function bech32Encode(hrp, data) {
+  if (!Array.isArray(data)) {
+    throw new Error('bech32Encode: data must be an array');
+  }
+
   const combined = [...data, ...bech32CreateChecksum(hrp, data)];
   let result = hrp + '1';
   for (const d of combined) {
+    if (typeof d !== 'number' || d < 0 || d > 31 || !Number.isInteger(d)) {
+      throw new Error('bech32Encode: data contains invalid values (must be 0-31)');
+    }
     result += BECH32_CHARSET[d];
   }
   return result;
 }
 
 function bech32Decode(str) {
+  if (typeof str !== 'string' || str.length === 0) {
+    throw new Error('bech32Decode: input must be a non-empty string');
+  }
+
+  // Maximum bech32 length is 90 characters per BIP-173
+  if (str.length > 90) {
+    throw new Error('bech32Decode: string too long (max 90 characters)');
+  }
+
+  // Validate no mixed case
+  if (str !== str.toLowerCase() && str !== str.toUpperCase()) {
+    throw new Error('bech32Decode: mixed case strings are invalid');
+  }
+
   const pos = str.lastIndexOf('1');
   if (pos < 1 || pos + 7 > str.length) {
-    throw new Error('Invalid bech32 string');
+    throw new Error('Invalid bech32 string: separator not found or too short');
   }
 
   const hrp = str.slice(0, pos).toLowerCase();
   const dataStr = str.slice(pos + 1).toLowerCase();
 
+  // Validate HRP
+  if (!/^[a-z0-9]+$/.test(hrp)) {
+    throw new Error('Invalid bech32 HRP: must contain only lowercase letters and numbers');
+  }
+
   const data = [];
   for (const c of dataStr) {
     const idx = BECH32_CHARSET.indexOf(c);
-    if (idx === -1) throw new Error('Invalid bech32 character');
+    if (idx === -1) throw new Error(`Invalid bech32 character: ${c}`);
     data.push(idx);
   }
 
@@ -144,6 +221,9 @@ function bech32Decode(str) {
  * Convert bytes to 5-bit groups for bech32
  */
 function toWords(bytes) {
+  if (!bytes || (typeof bytes !== 'object' && !Array.isArray(bytes))) {
+    throw new Error('toWords: bytes must be a Uint8Array or array');
+  }
   return convertBits(Array.from(bytes), 8, 5, true);
 }
 
@@ -151,6 +231,9 @@ function toWords(bytes) {
  * Convert 5-bit groups back to bytes
  */
 function fromWords(words) {
+  if (!Array.isArray(words)) {
+    throw new Error('fromWords: words must be an array');
+  }
   return new Uint8Array(convertBits(words, 5, 8, false));
 }
 
@@ -158,6 +241,13 @@ function fromWords(words) {
  * Normalize password to NFKC as per NIP-49 spec
  */
 function normalizePassword(password) {
+  if (typeof password !== 'string') {
+    throw new Error('normalizePassword: password must be a string');
+  }
+  if (password.length === 0) {
+    throw new Error('normalizePassword: password cannot be empty');
+  }
+
   return new TextEncoder().encode(password.normalize('NFKC'));
 }
 
@@ -165,18 +255,43 @@ function normalizePassword(password) {
  * Decode nsec bech32 to raw private key bytes
  */
 function decodeNsec(nsec) {
-  if (!nsec.startsWith('nsec1')) {
-    throw new Error('Invalid nsec format');
+  if (typeof nsec !== 'string') {
+    throw new Error('decodeNsec: nsec must be a string');
   }
-  const { data } = bech32Decode(nsec);
-  return fromWords(data);
+  if (!nsec.startsWith('nsec1')) {
+    throw new Error('Invalid nsec format: must start with nsec1');
+  }
+
+  const { hrp, data } = bech32Decode(nsec);
+
+  if (hrp !== 'nsec') {
+    throw new Error(`Invalid nsec HRP: expected 'nsec', got '${hrp}'`);
+  }
+
+  const privateKeyBytes = fromWords(data);
+
+  if (privateKeyBytes.length !== 32) {
+    throw new Error(`Invalid nsec length: expected 32 bytes, got ${privateKeyBytes.length}`);
+  }
+
+  return privateKeyBytes;
 }
 
 /**
  * Encode raw private key bytes to nsec bech32
  */
 function encodeNsec(privateKeyBytes) {
-  const words = toWords(privateKeyBytes);
+  if (!privateKeyBytes || (typeof privateKeyBytes !== 'object' && !Array.isArray(privateKeyBytes))) {
+    throw new Error('encodeNsec: privateKeyBytes must be a Uint8Array or array');
+  }
+
+  const bytesArray = privateKeyBytes instanceof Uint8Array ? privateKeyBytes : new Uint8Array(privateKeyBytes);
+
+  if (bytesArray.length !== 32) {
+    throw new Error(`Invalid private key length: expected 32 bytes, got ${bytesArray.length}`);
+  }
+
+  const words = toWords(bytesArray);
   return bech32Encode('nsec', words);
 }
 
@@ -189,9 +304,37 @@ function encodeNsec(privateKeyBytes) {
  * @returns {Promise<string>} The encrypted key in ncryptsec format
  */
 export async function encrypt(nsec, password, logN = DEFAULT_LOG_N) {
+  // Validate inputs before loading libraries
+  if (typeof nsec !== 'string' || nsec.length === 0) {
+    throw new Error('encrypt: nsec must be a non-empty string');
+  }
+
+  if (typeof password !== 'string') {
+    throw new Error('encrypt: password must be a string');
+  }
+
+  if (password.length === 0) {
+    throw new Error('encrypt: password cannot be empty');
+  }
+
+  // Validate password strength
+  const passwordValidation = validatePassword(password);
+  if (!passwordValidation.valid) {
+    throw new Error(`encrypt: ${passwordValidation.error}`);
+  }
+
+  // Validate logN parameter
+  if (typeof logN !== 'number' || !Number.isInteger(logN)) {
+    throw new Error('encrypt: logN must be an integer');
+  }
+
+  if (logN < 8 || logN > 20) {
+    throw new Error('encrypt: logN must be between 8 and 20 (256 to 1,048,576 iterations)');
+  }
+
   await loadNobleLibraries();
 
-  // Decode nsec to raw bytes
+  // Decode nsec to raw bytes (this will throw if invalid)
   const privateKey = decodeNsec(nsec);
 
   if (privateKey.length !== 32) {
@@ -241,31 +384,72 @@ export async function encrypt(nsec, password, logN = DEFAULT_LOG_N) {
  * @returns {Promise<string>} The decrypted key in nsec format
  */
 export async function decrypt(ncryptsec, password) {
-  await loadNobleLibraries();
-
-  if (!ncryptsec.startsWith('ncryptsec1')) {
-    throw new Error('Invalid ncryptsec format');
+  // Validate inputs before loading libraries
+  if (typeof ncryptsec !== 'string' || ncryptsec.length === 0) {
+    throw new Error('decrypt: ncryptsec must be a non-empty string');
   }
 
+  if (typeof password !== 'string') {
+    throw new Error('decrypt: password must be a string');
+  }
+
+  if (password.length === 0) {
+    throw new Error('decrypt: password cannot be empty');
+  }
+
+  // Validate password length (not strength, as it might be an old password)
+  if (password.length > 128) {
+    throw new Error('decrypt: password too long (max 128 characters)');
+  }
+
+  if (!ncryptsec.startsWith('ncryptsec1')) {
+    throw new Error('Invalid ncryptsec format: must start with ncryptsec1');
+  }
+
+  await loadNobleLibraries();
+
   // Decode bech32
-  const { data } = bech32Decode(ncryptsec);
+  const { hrp, data } = bech32Decode(ncryptsec);
+
+  // Validate HRP
+  if (hrp !== 'ncryptsec') {
+    throw new Error(`Invalid ncryptsec HRP: expected 'ncryptsec', got '${hrp}'`);
+  }
+
   const payload = fromWords(data);
 
   if (payload.length !== 91) {
-    throw new Error(`Invalid ncryptsec length: ${payload.length}`);
+    throw new Error(`Invalid ncryptsec payload length: expected 91 bytes, got ${payload.length}`);
   }
 
   // Parse payload
   const version = payload[0];
   if (version !== 0x02) {
-    throw new Error(`Unsupported ncryptsec version: ${version}`);
+    throw new Error(`Unsupported ncryptsec version: ${version} (only version 0x02 is supported)`);
   }
 
   const logN = payload[1];
+
+  // Validate logN parameter is reasonable
+  if (logN < 8 || logN > 20) {
+    throw new Error(`Invalid logN parameter: ${logN} (must be between 8 and 20)`);
+  }
+
   const salt = payload.slice(2, 18);
   const nonce = payload.slice(18, 42);
   const keySecurity = payload[42];
   const ciphertext = payload.slice(43);
+
+  // Validate component lengths
+  if (salt.length !== 16) {
+    throw new Error(`Invalid salt length: ${salt.length}`);
+  }
+  if (nonce.length !== 24) {
+    throw new Error(`Invalid nonce length: ${nonce.length}`);
+  }
+  if (ciphertext.length !== 48) {
+    throw new Error(`Invalid ciphertext length: ${ciphertext.length} (expected 48 for 32-byte key + 16-byte auth tag)`);
+  }
 
   // Derive key using scrypt
   const normalizedPassword = normalizePassword(password);
@@ -281,8 +465,19 @@ export async function decrypt(ncryptsec, password) {
 
   try {
     const privateKey = cipher.decrypt(ciphertext);
+
+    // Validate decrypted private key length
+    if (privateKey.length !== 32) {
+      throw new Error(`Decrypted key has invalid length: ${privateKey.length} (expected 32 bytes)`);
+    }
+
     return encodeNsec(privateKey);
   } catch (error) {
+    // Preserve original error if it's already a validation error
+    if (error.message.includes('Decrypted key has invalid length')) {
+      throw error;
+    }
+    // Otherwise, it's likely a wrong password or corrupted data
     throw new Error('Decryption failed - wrong password or corrupted data');
   }
 }
@@ -292,12 +487,37 @@ export async function decrypt(ncryptsec, password) {
  */
 export function isValidNcryptsec(str) {
   if (!str || typeof str !== 'string') return false;
+  if (str.length === 0) return false;
   if (!str.startsWith('ncryptsec1')) return false;
 
   try {
-    const { data } = bech32Decode(str);
+    const { hrp, data } = bech32Decode(str);
+
+    // Validate HRP
+    if (hrp !== 'ncryptsec') return false;
+
     const payload = fromWords(data);
-    return payload.length === 91 && payload[0] === 0x02;
+
+    // Validate payload structure
+    if (payload.length !== 91) return false;
+
+    // Validate version
+    if (payload[0] !== 0x02) return false;
+
+    // Validate logN is in reasonable range
+    const logN = payload[1];
+    if (logN < 8 || logN > 20) return false;
+
+    // Validate component lengths
+    const salt = payload.slice(2, 18);
+    const nonce = payload.slice(18, 42);
+    const ciphertext = payload.slice(43);
+
+    if (salt.length !== 16) return false;
+    if (nonce.length !== 24) return false;
+    if (ciphertext.length !== 48) return false;
+
+    return true;
   } catch {
     return false;
   }
@@ -305,10 +525,12 @@ export function isValidNcryptsec(str) {
 
 /**
  * Validate password strength
+ * @param {string} password - The password to validate
+ * @returns {{valid: boolean, error?: string}} Validation result
  */
 export function validatePassword(password) {
   if (!password || typeof password !== 'string') {
-    return { valid: false, error: 'Password is required' };
+    return { valid: false, error: 'Password is required and must be a string' };
   }
 
   if (password.length < 8) {
@@ -317,6 +539,18 @@ export function validatePassword(password) {
 
   if (password.length > 128) {
     return { valid: false, error: 'Password must be 128 characters or less' };
+  }
+
+  // Check for null bytes which could cause issues with normalization
+  if (password.includes('\0')) {
+    return { valid: false, error: 'Password cannot contain null bytes' };
+  }
+
+  // Validate that password can be normalized
+  try {
+    password.normalize('NFKC');
+  } catch (error) {
+    return { valid: false, error: 'Password contains invalid Unicode characters' };
   }
 
   return { valid: true };

@@ -2,14 +2,14 @@
 // Phase 5: Authentication & User Management
 // Functions for login, logout, account creation, and key management
 
-import { encryptData, decryptData, deriveKey } from './crypto.js';
+import { encryptData, decryptData } from './crypto.js';
 import { showNotification } from './utils.js';
 import { loadNostrLogin } from './nostr-login-loader.js';
 import * as State from './state.js';
 import {
     setPrivateKey,
     setPublicKey,
-    privateKey,
+    getPrivateKeyForSigning,
     publicKey,
     posts,
     homeFeedCache,
@@ -70,8 +70,7 @@ export async function storeSecurePrivateKey(privateKey, pin) {
     }
     
     try {
-        const key = await deriveKey(pin);
-        const encrypted = await encryptData(privateKey, key);
+        const encrypted = await encryptData(privateKey, pin);
         localStorage.setItem('nostr-private-key-encrypted', encrypted);
         localStorage.setItem('encryption-enabled', 'true');
         // Remove unencrypted version if it exists
@@ -96,8 +95,7 @@ export async function getSecurePrivateKey(pin) {
     if (!encryptedKey || !pin) return null;
     
     try {
-        const key = await deriveKey(pin);
-        return await decryptData(encryptedKey, key);
+        return await decryptData(encryptedKey, pin);
     } catch (error) {
         console.error('Failed to decrypt private key:', error);
         return null;
@@ -749,7 +747,7 @@ export async function logout() {
     State.setLastViewedMessagesTime(Math.floor(Date.now() / 1000));
 
     // Disconnect Amber if active (WITH RETRY LOGIC)
-    if (privateKey === 'amber') {
+    if (getPrivateKeyForSigning() === 'amber') {
         console.log('🔌 Disconnecting from Amber...');
 
         let disconnectSuccess = false;

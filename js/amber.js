@@ -32,6 +32,67 @@ function bytesToHex(bytes) {
 // ==================== BUNKER URI PARSING ====================
 
 /**
+ * Validate relay URL format
+ * @param {string} url - Relay URL to validate
+ * @returns {boolean} True if valid
+ */
+function isValidRelayURL(url) {
+    if (!url || typeof url !== 'string') {
+        return false;
+    }
+
+    // Trim whitespace
+    url = url.trim();
+
+    // Must start with wss:// or ws://
+    if (!url.startsWith('wss://') && !url.startsWith('ws://')) {
+        return false;
+    }
+
+    // Try to parse as URL
+    try {
+        const parsed = new URL(url);
+
+        // Ensure protocol is wss or ws
+        if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:') {
+            return false;
+        }
+
+        // Ensure hostname exists and is not empty
+        if (!parsed.hostname || parsed.hostname.length === 0) {
+            return false;
+        }
+
+        // Prevent common injection attempts
+        if (url.includes('<') || url.includes('>') || url.includes('"') || url.includes("'")) {
+            return false;
+        }
+
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Validate hex string format
+ * @param {string} hex - Hex string to validate
+ * @param {number} expectedLength - Expected length in characters
+ * @returns {boolean} True if valid
+ */
+function isValidHexString(hex, expectedLength) {
+    if (!hex || typeof hex !== 'string') {
+        return false;
+    }
+
+    if (hex.length !== expectedLength) {
+        return false;
+    }
+
+    return /^[0-9a-f]+$/i.test(hex);
+}
+
+/**
  * Parse bunker:// URI manually
  * Format: bunker://<pubkey>?relay=<relay1>&relay=<relay2>&secret=<optional>
  * @param {string} uri - Bunker URI
@@ -39,6 +100,20 @@ function bytesToHex(bytes) {
  */
 function parseBunkerURI(uri) {
     try {
+        // Input validation
+        if (!uri || typeof uri !== 'string') {
+            throw new Error('Bunker URI must be a non-empty string');
+        }
+
+        // Trim whitespace
+        uri = uri.trim();
+
+        // Check for reasonable length (prevent DoS)
+        if (uri.length > 10000) {
+            throw new Error('Bunker URI is too long');
+        }
+
+        // Validate scheme
         if (!uri.startsWith('bunker://')) {
             throw new Error('Invalid bunker URI - must start with bunker://');
         }
@@ -46,26 +121,47 @@ function parseBunkerURI(uri) {
         // Remove bunker:// prefix
         const withoutProtocol = uri.substring(9);
 
+        // Validate that there's content after the scheme
+        if (withoutProtocol.length === 0) {
+            throw new Error('Bunker URI missing pubkey and parameters');
+        }
+
         // Split pubkey and query params
         const [pubkey, queryString] = withoutProtocol.split('?');
 
-        if (!pubkey || pubkey.length !== 64) {
-            throw new Error('Invalid signer public key in bunker URI');
+        // Validate pubkey format (64 hex characters)
+        if (!isValidHexString(pubkey, 64)) {
+            throw new Error('Invalid signer public key in bunker URI (must be 64 hex characters)');
+        }
+
+        // Require query string
+        if (!queryString || queryString.trim().length === 0) {
+            throw new Error('Bunker URI missing required parameters');
         }
 
         // Parse query parameters manually to get ALL relays
         const relays = [];
         let secret = null;
 
-        if (queryString) {
-            const relayMatches = queryString.matchAll(/relay=([^&]+)/g);
-            for (const match of relayMatches) {
-                relays.push(decodeURIComponent(match[1]));
+        const relayMatches = queryString.matchAll(/relay=([^&]+)/g);
+        for (const match of relayMatches) {
+            const relayUrl = decodeURIComponent(match[1]);
+
+            // Validate each relay URL
+            if (!isValidRelayURL(relayUrl)) {
+                throw new Error(`Invalid relay URL: ${relayUrl} (must be wss:// or ws://)`);
             }
 
-            const secretMatch = queryString.match(/secret=([^&]+)/);
-            if (secretMatch) {
-                secret = decodeURIComponent(secretMatch[1]);
+            relays.push(relayUrl);
+        }
+
+        const secretMatch = queryString.match(/secret=([^&]+)/);
+        if (secretMatch) {
+            secret = decodeURIComponent(secretMatch[1]);
+
+            // Validate secret is not empty
+            if (!secret || secret.trim().length === 0) {
+                throw new Error('Secret parameter is empty');
             }
         }
 
@@ -181,6 +277,38 @@ async function sendRequest(method, params = []) {
  */
 async function handleResponse(event) {
     try {
+        // Validate event object
+        if (!event || typeof event !== 'object') {
+            console.error('❌ Invalid event object received');
+            return;
+        }
+
+        // Validate required event fields
+        if (!event.id || typeof event.id !== 'string') {
+            console.error('❌ Event missing valid id');
+            return;
+        }
+
+        if (!event.pubkey || typeof event.pubkey !== 'string') {
+            console.error('❌ Event missing valid pubkey');
+            return;
+        }
+
+        if (!isValidHexString(event.pubkey, 64)) {
+            console.error('❌ Event pubkey is not a valid hex string');
+            return;
+        }
+
+        if (typeof event.kind !== 'number' || event.kind !== 24133) {
+            console.error('❌ Event kind is not 24133');
+            return;
+        }
+
+        if (!event.content || typeof event.content !== 'string') {
+            console.error('❌ Event missing valid content');
+            return;
+        }
+
         console.log('📨 Raw NIP-46 response event received:', {
             id: event.id.slice(0, 8) + '...',
             pubkey: event.pubkey.slice(0, 8) + '...',
@@ -198,6 +326,17 @@ async function handleResponse(event) {
 
         const response = JSON.parse(plaintext);
         console.log('📥 Parsed NIP-46 response:', response);
+
+        // Validate response structure
+        if (!response || typeof response !== 'object') {
+            console.error('❌ Invalid response structure');
+            return;
+        }
+
+        if (!response.id || typeof response.id !== 'string') {
+            console.error('❌ Response missing valid id');
+            return;
+        }
 
         // Find pending request
         const pending = pendingRequests.get(response.id);
@@ -250,6 +389,11 @@ export async function connect(bunkerURI) {
     try {
         console.log('🔗 Connecting to Amber signer...');
 
+        // Validate bunkerURI parameter
+        if (!bunkerURI || typeof bunkerURI !== 'string') {
+            throw new Error('Bunker URI is required and must be a string');
+        }
+
         // If already connected, disconnect first to clean up state
         if (connectionStatus !== 'disconnected' || remotePubkey !== null) {
             console.log('⚠️ Previous connection detected, disconnecting first...');
@@ -260,7 +404,7 @@ export async function connect(bunkerURI) {
 
         connectionStatus = 'connecting';
 
-        // Parse the bunker URI
+        // Parse the bunker URI (validates format and components)
         const bunkerInfo = parseBunkerURI(bunkerURI);
         console.log('📱 Parsed bunker info:', {
             pubkey: bunkerInfo.pubkey.slice(0, 8) + '...',
@@ -467,6 +611,11 @@ export async function restoreConnection(bunkerURI) {
     try {
         console.log('🔄 Restoring Amber connection...');
 
+        // Validate bunkerURI parameter
+        if (!bunkerURI || typeof bunkerURI !== 'string') {
+            throw new Error('Bunker URI is required and must be a string');
+        }
+
         // Attempt to reconnect
         await connect(bunkerURI);
 
@@ -494,6 +643,33 @@ export async function signEvent(eventTemplate) {
 
         if (!userPubkey) {
             throw new Error('User pubkey not available');
+        }
+
+        // Validate event template
+        if (!eventTemplate || typeof eventTemplate !== 'object') {
+            throw new Error('Event template must be an object');
+        }
+
+        // Validate kind (must be a non-negative integer)
+        if (typeof eventTemplate.kind !== 'number' || eventTemplate.kind < 0 || !Number.isInteger(eventTemplate.kind)) {
+            throw new Error('Event kind must be a non-negative integer');
+        }
+
+        // Validate content (must be a string)
+        if (eventTemplate.content !== undefined && typeof eventTemplate.content !== 'string') {
+            throw new Error('Event content must be a string');
+        }
+
+        // Validate tags (must be an array)
+        if (eventTemplate.tags !== undefined && !Array.isArray(eventTemplate.tags)) {
+            throw new Error('Event tags must be an array');
+        }
+
+        // Validate created_at (if provided, must be a positive integer)
+        if (eventTemplate.created_at !== undefined) {
+            if (typeof eventTemplate.created_at !== 'number' || eventTemplate.created_at < 0 || !Number.isInteger(eventTemplate.created_at)) {
+                throw new Error('Event created_at must be a non-negative integer');
+            }
         }
 
         console.log('✍️ Requesting signature from Amber for kind', eventTemplate.kind);
@@ -554,6 +730,16 @@ export async function nip04Encrypt(recipientPubkey, plaintext) {
             throw new Error('Not connected to Amber');
         }
 
+        // Validate recipient pubkey
+        if (!isValidHexString(recipientPubkey, 64)) {
+            throw new Error('Invalid recipient public key (must be 64 hex characters)');
+        }
+
+        // Validate plaintext
+        if (typeof plaintext !== 'string') {
+            throw new Error('Plaintext must be a string');
+        }
+
         console.log('🔒 Requesting NIP-04 encryption from Amber...');
 
         const ciphertext = await sendRequest('nip04_encrypt', [recipientPubkey, plaintext]);
@@ -577,6 +763,16 @@ export async function nip04Decrypt(senderPubkey, ciphertext) {
     try {
         if (connectionStatus !== 'connected') {
             throw new Error('Not connected to Amber');
+        }
+
+        // Validate sender pubkey
+        if (!isValidHexString(senderPubkey, 64)) {
+            throw new Error('Invalid sender public key (must be 64 hex characters)');
+        }
+
+        // Validate ciphertext
+        if (typeof ciphertext !== 'string' || ciphertext.trim().length === 0) {
+            throw new Error('Ciphertext must be a non-empty string');
         }
 
         console.log('🔓 Requesting NIP-04 decryption from Amber...');
@@ -604,6 +800,16 @@ export async function nip44Encrypt(recipientPubkey, plaintext) {
             throw new Error('Not connected to Amber');
         }
 
+        // Validate recipient pubkey
+        if (!isValidHexString(recipientPubkey, 64)) {
+            throw new Error('Invalid recipient public key (must be 64 hex characters)');
+        }
+
+        // Validate plaintext
+        if (typeof plaintext !== 'string') {
+            throw new Error('Plaintext must be a string');
+        }
+
         console.log('🔒 Requesting NIP-44 encryption from Amber...');
 
         const ciphertext = await sendRequest('nip44_encrypt', [recipientPubkey, plaintext]);
@@ -627,6 +833,16 @@ export async function nip44Decrypt(senderPubkey, ciphertext) {
     try {
         if (connectionStatus !== 'connected') {
             throw new Error('Not connected to Amber');
+        }
+
+        // Validate sender pubkey
+        if (!isValidHexString(senderPubkey, 64)) {
+            throw new Error('Invalid sender public key (must be 64 hex characters)');
+        }
+
+        // Validate ciphertext
+        if (typeof ciphertext !== 'string' || ciphertext.trim().length === 0) {
+            throw new Error('Ciphertext must be a non-empty string');
         }
 
         console.log('🔓 Requesting NIP-44 decryption from Amber...');

@@ -232,8 +232,9 @@ export function wrapGiftMessageWithRecipient(content, senderPrivateKey, wrapReci
         const conversationKey = nip44.getConversationKey(senderPrivateKey, wrapRecipientPubkey);
         const encryptedRumor = nip44.encrypt(JSON.stringify(rumor), conversationKey);
 
-        // Step 3: Create the gift wrap (kind 1059) with randomized timestamp (±2 days)
-        const randomOffset = Math.floor(Math.random() * 4 * 24 * 60 * 60) - (2 * 24 * 60 * 60); // ±2 days in seconds
+        // Step 3: Create the gift wrap (kind 1059) with randomized timestamp (0 to -2 days)
+        // Per NIP-17 spec: timestamps SHOULD be in the past to avoid relay rejection
+        const randomOffset = -Math.floor(Math.random() * 2 * 24 * 60 * 60); // 0 to -2 days in seconds
         const giftWrap = {
             kind: 1059,
             created_at: Math.floor(Date.now() / 1000) + randomOffset,

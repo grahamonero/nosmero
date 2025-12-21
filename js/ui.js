@@ -6,7 +6,7 @@ import { showNotification, signEvent, escapeHtml } from './utils.js';
 import { wrapGiftMessage } from './crypto.js';
 import { loadNostrLogin } from './nostr-login-loader.js';
 import * as State from './state.js';
-import { zapQueue, privateKey } from './state.js';
+import { zapQueue, hasPrivateKey } from './state.js';
 import { isMobile } from './platform-detect.js';
 import { openGenericMoneroUri } from './wallet-deep-links.js';
 
@@ -25,7 +25,7 @@ export function showWelcomeModalIfFirstVisit() {
     // Check if user has seen welcome modal before
     const hasSeenWelcome = localStorage.getItem('nosmero-welcome-seen');
     
-    if (!hasSeenWelcome && !privateKey) {
+    if (!hasSeenWelcome && !hasPrivateKey()) {
         // Show welcome modal
         const welcomeModal = document.getElementById('welcomeModal');
         if (welcomeModal) {
@@ -56,10 +56,15 @@ export function closeWelcomeModalAndCreate() {
     // Show login modal with create account option pre-selected
     const loginModal = document.getElementById('loginModal');
     if (loginModal) {
-        // Click the generate keys button to show create account form
-        const generateBtn = document.querySelector('[onclick="generateNewKeys()"]');
+        // Trigger the generate keys button via data-action attribute instead
+        const generateBtn = document.querySelector('[data-action="generate-keys"]') ||
+                           document.querySelector('#generateKeysBtn') ||
+                           document.querySelector('.generate-keys-btn');
         if (generateBtn) {
             generateBtn.click();
+        } else if (window.generateNewKeys) {
+            // Fallback: call the function directly if button not found
+            window.generateNewKeys();
         }
     }
 }
@@ -243,14 +248,14 @@ export function showLoginWithNsec() {
                 <div style="margin-bottom: 30px;">
                     <input type="password" id="nsecInput" placeholder="nsec1..."
                            style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 20px;"
-                           onkeypress="if(event.key==='Enter') loginWithNsec()">
+                           data-action="nsec-login">
 
                     <div style="display: flex; gap: 12px; justify-content: center;">
-                        <button onclick="loginWithNsec()"
+                        <button data-action="nsec-login"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold;">
                             🔑 Login
                         </button>
-                        <button onclick="showAuthUI()"
+                        <button data-action="show-auth"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
                             ← Back
                         </button>
@@ -276,10 +281,21 @@ export function showLoginWithNsec() {
             </div>
         `;
 
-        // Focus the input field
+        // Focus the input field and attach event listeners
         setTimeout(() => {
             const input = document.getElementById('nsecInput');
-            if (input) input.focus();
+            if (input) {
+                input.focus();
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') window.loginWithNsec();
+                });
+            }
+
+            // Attach button event listeners
+            const loginBtn = feed.querySelector('[data-action="nsec-login"]');
+            const backBtn = feed.querySelector('[data-action="show-auth"]');
+            if (loginBtn) loginBtn.addEventListener('click', () => window.loginWithNsec());
+            if (backBtn) backBtn.addEventListener('click', () => window.showAuthUI());
         }, 100);
     }
 }
@@ -300,14 +316,14 @@ export function showLoginWithAmber() {
                 <div style="margin-bottom: 30px;">
                     <input type="text" id="amberBunkerInput" placeholder="Paste your bunker:// URI from Amber..."
                            style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 20px;"
-                           onkeypress="if(event.key==='Enter') loginWithAmber()">
+                           data-action="amber-login">
 
                     <div style="display: flex; gap: 12px; justify-content: center;">
-                        <button onclick="loginWithAmber()"
+                        <button data-action="amber-login"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #8B5CF6, #FF6600); color: #fff; font-weight: bold;">
                             📱 Connect to Amber
                         </button>
-                        <button onclick="showAuthUI()"
+                        <button data-action="show-auth"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
                             ← Back
                         </button>
@@ -338,10 +354,21 @@ export function showLoginWithAmber() {
             </div>
         `;
 
-        // Focus the input field
+        // Focus the input field and attach event listeners
         setTimeout(() => {
             const input = document.getElementById('amberBunkerInput');
-            if (input) input.focus();
+            if (input) {
+                input.focus();
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') window.loginWithAmber();
+                });
+            }
+
+            // Attach button event listeners
+            const loginBtn = feed.querySelector('button[data-action="amber-login"]');
+            const backBtn = feed.querySelector('button[data-action="show-auth"]');
+            if (loginBtn) loginBtn.addEventListener('click', () => window.loginWithAmber());
+            if (backBtn) backBtn.addEventListener('click', () => window.showAuthUI());
         }, 100);
     }
 }
@@ -397,11 +424,15 @@ export async function showLoginWithNsecApp() {
                         </p>
                     </div>
 
-                    <button onclick="showAuthUI()" style="margin-top: 20px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
+                    <button data-action="show-auth" style="margin-top: 20px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
                         ← Back to Login Options
                     </button>
                 </div>
             `;
+
+            // Attach event listener to back button
+            const backBtn = feed.querySelector('[data-action="show-auth"]');
+            if (backBtn) backBtn.addEventListener('click', () => window.showAuthUI());
         }
 
     } catch (error) {
@@ -434,15 +465,31 @@ export function showGeneratedKeyModal(nsec) {
                     • This is your only backup - if lost, your account is gone forever
                 </div>
                 <div style="display: flex; gap: 10px; justify-content: center;">
-                    <button onclick="copyToClipboard('${nsec}')" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                    <button data-action="copy-key" data-nsec="${escapeHtml(nsec)}" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                         📋 Copy Key
                     </button>
-                    <button onclick="closeKeyModal()" style="background: #333; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">
+                    <button data-action="close-key-modal" style="background: #333; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">
                         I've Saved It Safely
                     </button>
                 </div>
             </div>
         `;
+
+        // Attach event listeners
+        const copyBtn = keyModal.querySelector('[data-action="copy-key"]');
+        const closeBtn = keyModal.querySelector('[data-action="close-key-modal"]');
+
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => {
+                const keyToCopy = copyBtn.dataset.nsec;
+                window.copyToClipboard(keyToCopy);
+            });
+        }
+
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => window.closeKeyModal());
+        }
+
         keyModal.classList.add('show');
     }
 }
@@ -961,7 +1008,7 @@ window.submitDisclosurePrompt = async function() {
 async function handleTipDisclosureFromPrompt(postId, recipientPubkey, moneroAddress, amount, message, verificationData = null) {
     try {
         // Get required data
-        const senderPrivateKey = State.privateKey;
+        const senderPrivateKey = State.getPrivateKeyForSigning();
         const senderPubkey = State.publicKey;
 
         if (!senderPrivateKey || !senderPubkey) {
@@ -1167,7 +1214,7 @@ async function handleTipDisclosure(postId, authorName, moneroAddress, buttonElem
         }
 
         // Get required data
-        const senderPrivateKey = State.privateKey;
+        const senderPrivateKey = State.getPrivateKeyForSigning();
         const senderPubkey = State.publicKey;
 
         if (!senderPrivateKey || !senderPubkey) {
@@ -1284,7 +1331,7 @@ export function openLightningZapModal(postId, authorName, lightningAddress) {
 
     details.innerHTML = `
         <div style="margin-bottom: 16px; text-align: center;">
-            <strong>⚡ Lightning Zap ${authorName}</strong>
+            <strong>⚡ Lightning Zap ${escapeHtml(authorName)}</strong>
         </div>
         <div style="margin-bottom: 16px;">
             <label style="display: block; text-align: center; margin-bottom: 8px; color: #FFDF00; font-weight: bold;">
@@ -1298,10 +1345,10 @@ export function openLightningZapModal(postId, authorName, lightningAddress) {
                    style="width: 100%; padding: 10px; border: 2px solid #FFDF00; border-radius: 8px; font-size: 16px; text-align: center; background: #1a1a1a; color: #fff;">
         </div>
         <div style="margin-bottom: 20px; font-size: 12px; color: #666; word-break: break-all; text-align: center;">
-            ${lightningAddress}
+            ${escapeHtml(lightningAddress)}
         </div>
         <div style="margin-bottom: 20px; text-align: center; color: #ccc; font-size: 14px;">
-            Post: ${truncatedPostId}...
+            Post: ${escapeHtml(truncatedPostId)}...
         </div>
         <div style="text-align: center; color: #999; font-size: 12px; line-height: 1.4;">
             Lightning zapping requires a compatible wallet extension like Alby or nos2x.
@@ -1309,16 +1356,38 @@ export function openLightningZapModal(postId, authorName, lightningAddress) {
             Click the button below to initiate the Lightning payment.
         </div>
         <div style="display: flex; gap: 12px; justify-content: center; margin-top: 20px;">
-            <button onclick="sendLightningZap('${postId}', '${authorName}', '${lightningAddress}')"
+            <button data-action="send-lightning-zap"
+                    data-post-id="${escapeHtml(postId)}"
+                    data-author-name="${escapeHtml(authorName)}"
+                    data-lightning-address="${escapeHtml(lightningAddress)}"
                     style="background: linear-gradient(135deg, #FFDF00, #FF6600); border: none; color: #000; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                 ⚡ Send Lightning Zap
             </button>
-            <button onclick="closeLightningZapModal()"
+            <button data-action="close-lightning-modal"
                     style="background: #333; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
                 Cancel
             </button>
         </div>
     `;
+
+    // Attach event listeners
+    setTimeout(() => {
+        const sendBtn = details.querySelector('[data-action="send-lightning-zap"]');
+        const closeBtn = details.querySelector('[data-action="close-lightning-modal"]');
+
+        if (sendBtn) {
+            sendBtn.addEventListener('click', () => {
+                const pid = sendBtn.dataset.postId;
+                const aName = sendBtn.dataset.authorName;
+                const lAddr = sendBtn.dataset.lightningAddress;
+                sendLightningZap(pid, aName, lAddr);
+            });
+        }
+
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeLightningZapModal);
+        }
+    }, 0);
 
     const lightningModal = document.getElementById('lightningZapModal');
     if (lightningModal) {
@@ -2297,13 +2366,23 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
         // Add Load More button if there are more posts
         const loadMoreButton = hasMorePosts ? `
             <div id="profileLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
-                <button onclick="loadMoreProfilePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                <button data-action="load-more-profile" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                     Load More Posts (${remainingCount} available)
                 </button>
             </div>
         ` : '';
 
         userPostsContainer.innerHTML = renderedPosts.join('') + loadMoreButton;
+
+        // Attach event listener for Load More button
+        if (hasMorePosts) {
+            setTimeout(() => {
+                const loadMoreBtn = document.querySelector('[data-action="load-more-profile"]');
+                if (loadMoreBtn) {
+                    loadMoreBtn.addEventListener('click', () => loadMoreProfilePosts());
+                }
+            }, 0);
+        }
 
         // Process any embedded notes after rendering
         try {
@@ -2398,7 +2477,7 @@ async function loadMoreProfilePosts() {
         // Add new Load More button if needed
         const loadMoreButton = hasMorePosts ? `
             <div id="profileLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
-                <button onclick="loadMoreProfilePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                <button data-action="load-more-profile" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                     Load More Posts (${remainingCount} available)
                 </button>
             </div>
@@ -2408,6 +2487,16 @@ async function loadMoreProfilePosts() {
         const userPostsContainer = document.getElementById('userPostsContainer');
         if (userPostsContainer) {
             userPostsContainer.insertAdjacentHTML('beforeend', renderedPosts.join('') + loadMoreButton);
+
+            // Attach event listener for new Load More button
+            if (hasMorePosts) {
+                setTimeout(() => {
+                    const loadMoreBtn = document.querySelector('[data-action="load-more-profile"]');
+                    if (loadMoreBtn) {
+                        loadMoreBtn.addEventListener('click', () => loadMoreProfilePosts());
+                    }
+                }, 0);
+            }
         }
 
         // Process embedded notes
@@ -2491,38 +2580,38 @@ export async function viewUserProfilePage(pubkey) {
             <div style="max-width: 800px; margin: 0 auto; padding: 20px; word-wrap: break-word; overflow-wrap: break-word;">
                 <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid #333; border-radius: 16px; padding: 24px; margin-bottom: 24px;">
                     <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 16px;">
-                        ${userProfile.picture ? 
-                            `<img src="${userProfile.picture}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;" 
-                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                             <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>` : 
-                            `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>`
+                        ${userProfile.picture ?
+                            `<img src="${escapeHtml(userProfile.picture)}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;"
+                                 id="profileAvatar_${escapeHtml(pubkey)}">
+                             <div id="profileAvatarFallback_${escapeHtml(pubkey)}" style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${escapeHtml((userProfile.name || 'A').charAt(0).toUpperCase())}</div>` :
+                            `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${escapeHtml((userProfile.name || 'A').charAt(0).toUpperCase())}</div>`
                         }
                         <div style="flex: 1; min-width: 0; word-wrap: break-word; overflow-wrap: break-word;">
-                            <h1 style="color: #fff; font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${userProfile.name || 'Anonymous'}</h1>
-                            <p style="margin: 0 0 8px 0; color: #888; font-family: monospace; font-size: 14px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
-                            ${userProfile.nip05 ? `<div style="color: #10B981; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;">✅ ${userProfile.nip05}</div>` : ''}
-                            ${userProfile.about ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 8px; word-wrap: break-word;">${userProfile.about}</div>` : ''}
-                            ${userProfile.website ? `<div style="margin-bottom: 8px; word-wrap: break-word;"><a href="${userProfile.website}" target="_blank" style="color: #FF6600; text-decoration: none; font-size: 14px; word-break: break-all;">🔗 ${userProfile.website}</a></div>` : ''}
-                            ${userProfile.lud16 ? `<div style="color: #FFDF00; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;"><span style="margin-right: 6px;">⚡</span>Lightning: <span style="word-break: break-all;">${userProfile.lud16}</span></div>` : ''}
+                            <h1 style="color: #fff; font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${escapeHtml(userProfile.name || 'Anonymous')}</h1>
+                            <p style="margin: 0 0 8px 0; color: #888; font-family: monospace; font-size: 14px; word-break: break-all;">${escapeHtml(pubkey.substring(0, 8))}...${escapeHtml(pubkey.substring(56))}</p>
+                            ${userProfile.nip05 ? `<div style="color: #10B981; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;">✅ ${escapeHtml(userProfile.nip05)}</div>` : ''}
+                            ${userProfile.about ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 8px; word-wrap: break-word;">${escapeHtml(userProfile.about)}</div>` : ''}
+                            ${userProfile.website ? `<div style="margin-bottom: 8px; word-wrap: break-word;"><a href="${escapeHtml(userProfile.website)}" target="_blank" style="color: #FF6600; text-decoration: none; font-size: 14px; word-break: break-all;">🔗 ${escapeHtml(userProfile.website)}</a></div>` : ''}
+                            ${userProfile.lud16 ? `<div style="color: #FFDF00; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;"><span style="margin-right: 6px;">⚡</span>Lightning: <span style="word-break: break-all;">${escapeHtml(userProfile.lud16)}</span></div>` : ''}
                             <div id="uiProfileMoneroAddress" style="margin-bottom: 8px;"></div>
                         </div>
                     </div>
                     <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                        <div id="followingCount_${pubkey}" onclick="showFollowingList('${pubkey}')" style="cursor: pointer; text-align: center; color: #fff; padding: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 8px; min-width: 80px;">
+                        <div id="followingCount_${escapeHtml(pubkey)}" data-action="show-following" data-pubkey="${escapeHtml(pubkey)}" style="cursor: pointer; text-align: center; color: #fff; padding: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 8px; min-width: 80px;">
                             <div style="font-size: 18px; font-weight: bold;">-</div>
                             <div style="font-size: 12px; opacity: 0.8;">Following</div>
                         </div>
-                        <div id="followersCount_${pubkey}" onclick="showFollowersList('${pubkey}')" style="cursor: pointer; text-align: center; color: #fff; padding: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 8px; min-width: 80px;">
+                        <div id="followersCount_${escapeHtml(pubkey)}" data-action="show-followers" data-pubkey="${escapeHtml(pubkey)}" style="cursor: pointer; text-align: center; color: #fff; padding: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 8px; min-width: 80px;">
                             <div style="font-size: 18px; font-weight: bold;">-</div>
                             <div style="font-size: 12px; opacity: 0.8;">Followers</div>
                         </div>
                     </div>
                     <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-                        <button onclick="goBackFromProfile()" style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; border-radius: 8px; color: #FF6600; padding: 8px 16px; cursor: pointer; font-size: 14px;">← Back</button>
-                        <button id="followBtn_${pubkey}" onclick="toggleFollow('${pubkey}')" style="background: #6B73FF; border: none; border-radius: 8px; color: #fff; padding: 8px 16px; cursor: pointer; font-size: 14px; font-weight: bold;">
+                        <button data-action="go-back-profile" style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; border-radius: 8px; color: #FF6600; padding: 8px 16px; cursor: pointer; font-size: 14px;">← Back</button>
+                        <button id="followBtn_${escapeHtml(pubkey)}" data-action="toggle-follow" data-pubkey="${escapeHtml(pubkey)}" style="background: #6B73FF; border: none; border-radius: 8px; color: #fff; padding: 8px 16px; cursor: pointer; font-size: 14px; font-weight: bold;">
                             Following...
                         </button>
-                        <button onclick="copyUserNpub('${pubkey}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 8px 16px; cursor: pointer; font-size: 14px;">📋 Copy npub</button>
+                        <button data-action="copy-npub" data-pubkey="${escapeHtml(pubkey)}" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 8px 16px; cursor: pointer; font-size: 14px;">📋 Copy npub</button>
                     </div>
                 </div>
                 <div id="userPostsContainer" style="word-break: break-word; overflow-wrap: break-word; max-width: 100%; padding-bottom: 80px;">
@@ -2532,6 +2621,57 @@ export async function viewUserProfilePage(pubkey) {
                 </div>
             </div>
         `;
+
+        // Attach event listeners for profile buttons and avatar error handling
+        setTimeout(() => {
+            // Handle avatar image error
+            const avatar = document.getElementById(`profileAvatar_${pubkey}`);
+            const fallback = document.getElementById(`profileAvatarFallback_${pubkey}`);
+            if (avatar && fallback) {
+                avatar.addEventListener('error', () => {
+                    avatar.style.display = 'none';
+                    fallback.style.display = 'flex';
+                });
+            }
+
+            const followingBtn = profilePage.querySelector('[data-action="show-following"]');
+            const followersBtn = profilePage.querySelector('[data-action="show-followers"]');
+            const backBtn = profilePage.querySelector('[data-action="go-back-profile"]');
+            const toggleFollowBtn = profilePage.querySelector('[data-action="toggle-follow"]');
+            const copyNpubBtn = profilePage.querySelector('[data-action="copy-npub"]');
+
+            if (followingBtn) {
+                followingBtn.addEventListener('click', () => {
+                    const pk = followingBtn.dataset.pubkey;
+                    window.showFollowingList(pk);
+                });
+            }
+
+            if (followersBtn) {
+                followersBtn.addEventListener('click', () => {
+                    const pk = followersBtn.dataset.pubkey;
+                    window.showFollowersList(pk);
+                });
+            }
+
+            if (backBtn) {
+                backBtn.addEventListener('click', () => window.goBackFromProfile());
+            }
+
+            if (toggleFollowBtn) {
+                toggleFollowBtn.addEventListener('click', () => {
+                    const pk = toggleFollowBtn.dataset.pubkey;
+                    window.toggleFollow(pk);
+                });
+            }
+
+            if (copyNpubBtn) {
+                copyNpubBtn.addEventListener('click', () => {
+                    const pk = copyNpubBtn.dataset.pubkey;
+                    window.copyUserNpub(pk);
+                });
+            }
+        }, 0);
 
         // Update follow button state
         await updateFollowButton(pubkey);
@@ -2571,12 +2711,12 @@ async function loadAndDisplayMoneroAddress(pubkey, userProfile) {
 
         if (moneroAddress && moneroAddress.trim()) {
             // Display the Monero address with copy button
-            const shortAddress = `${moneroAddress.substring(0, 8)}...${moneroAddress.substring(moneroAddress.length - 8)}`;
+            const shortAddress = `${escapeHtml(moneroAddress.substring(0, 8))}...${escapeHtml(moneroAddress.substring(moneroAddress.length - 8))}`;
             addressContainer.innerHTML = `
                 <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid #FF6600; border-radius: 8px; padding: 12px; margin-top: 8px;">
                     <div style="color: #FF6600; font-size: 12px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
                         <span><span style="margin-right: 6px;">💰</span>MONERO ADDRESS</span>
-                        <button onclick="navigator.clipboard.writeText('${moneroAddress}'); window.NostrUtils.showNotification('Monero address copied!', 'success')"
+                        <button data-action="copy-monero-address" data-address="${escapeHtml(moneroAddress)}"
                                 style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 10px;">
                             Copy
                         </button>
@@ -2586,6 +2726,18 @@ async function loadAndDisplayMoneroAddress(pubkey, userProfile) {
                     </div>
                 </div>
             `;
+
+            // Attach event listener for copy button
+            setTimeout(() => {
+                const copyBtn = addressContainer.querySelector('[data-action="copy-monero-address"]');
+                if (copyBtn) {
+                    copyBtn.addEventListener('click', () => {
+                        const addr = copyBtn.dataset.address;
+                        navigator.clipboard.writeText(addr);
+                        window.NostrUtils.showNotification('Monero address copied!', 'success');
+                    });
+                }
+            }, 0);
         } else {
             // Clear the loading message if no address found
             addressContainer.innerHTML = '';
@@ -2775,7 +2927,7 @@ export async function toggleFollow(pubkey) {
             import('./relays.js')
         ]);
 
-        if (!StateModule.publicKey || !StateModule.privateKey) {
+        if (!StateModule.publicKey || !StateModule.hasPrivateKey()) {
             showWarningToast('Please log in to follow users', 'Login Required');
             return;
         }
@@ -3274,7 +3426,7 @@ export async function requestDeletion() {
             import('./utils.js')
         ]);
         
-        if (!State.privateKey) {
+        if (!State.hasPrivateKey()) {
             showNotification('You must be logged in to request deletion', 'error');
             document.getElementById('postMenu').style.display = 'none';
             return;
@@ -3589,7 +3741,7 @@ export function showZapQueue() {
                     <div style="font-size: 12px; color: #888; margin-top: 4px;">Verified tips with proof!</div>
                 </div>
                 <button id="queueWalletSendBtn"
-                        onclick="processQueueWithWallet()"
+                        data-action="process-queue-wallet"
                         style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                     Send All (${queue.length} tips)
                 </button>
@@ -3598,7 +3750,7 @@ export function showZapQueue() {
             <div style="text-align: center; color: #666; font-size: 12px; margin-bottom: 12px;">─── OR ───</div>
 
             <div style="margin-bottom: 16px;">
-                <button onclick="showBatchQrCodes()" style="width: 100%; background: #333; border: 1px solid #888; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                <button data-action="show-batch-qr" style="width: 100%; background: #333; border: 1px solid #888; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
                     Show QR Codes Sequentially
                 </button>
                 <div style="font-size: 11px; color: #666; text-align: center; margin-top: 4px;">For external wallet users</div>
@@ -3612,13 +3764,35 @@ export function showZapQueue() {
                             <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">${escapeHtml(item.amount || '0.00018')} XMR</div>
                             <div style="font-size: 12px; color: #666; margin-top: 4px; word-break: break-all;">${escapeHtml(item.moneroAddress.substring(0, 20))}...${escapeHtml(item.moneroAddress.substring(item.moneroAddress.length - 10))}</div>
                         </div>
-                        <button onclick="removeFromZapQueue(${index})" style="background: #ff6b6b; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                        <button data-action="remove-from-queue" data-index="${index}" style="background: #ff6b6b; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px;">
                             Remove
                         </button>
                     </div>
                 `).join('')}
             </div>
         `;
+
+        // Attach event listeners for queue buttons
+        setTimeout(() => {
+            const walletBtn = content.querySelector('[data-action="process-queue-wallet"]');
+            const batchQrBtn = content.querySelector('[data-action="show-batch-qr"]');
+            const removeButtons = content.querySelectorAll('[data-action="remove-from-queue"]');
+
+            if (walletBtn) {
+                walletBtn.addEventListener('click', () => window.processQueueWithWallet());
+            }
+
+            if (batchQrBtn) {
+                batchQrBtn.addEventListener('click', () => window.showBatchQrCodes());
+            }
+
+            removeButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const index = parseInt(btn.dataset.index, 10);
+                    removeFromZapQueue(index);
+                });
+            });
+        }, 0);
     }
 
     modal.classList.add('show');
@@ -3735,11 +3909,17 @@ export function showBatchQrCodes() {
                 <div class="modal-header">Batch Zap QR Codes</div>
                 <div id="batchQrContent"></div>
                 <div class="modal-footer">
-                    <button class="close-btn" onclick="closeBatchQrModal()">Close</button>
+                    <button class="close-btn" data-action="close-batch-qr">Close</button>
                 </div>
             </div>
         `;
         document.body.appendChild(modal);
+
+        // Attach event listener for close button
+        const closeBtn = modal.querySelector('[data-action="close-batch-qr"]');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => window.closeBatchQrModal());
+        }
     }
 
     modal.classList.add('show');
@@ -3800,16 +3980,16 @@ export function showBatchQrCodes() {
 
                 <div style="display: flex; gap: 12px; justify-content: center;">
                     ${currentIndex > 0 ? `
-                        <button onclick="window.batchQrPrevious()" style="background: #666; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                        <button data-action="batch-qr-previous" style="background: #666; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
                             ← Previous
                         </button>
                     ` : ''}
                     ${currentIndex < queue.length - 1 ? `
-                        <button onclick="window.batchQrNext()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        <button data-action="batch-qr-next" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                             Next →
                         </button>
                     ` : `
-                        <button onclick="window.finishBatchZap()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        <button data-action="finish-batch-zap" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                             Finish & Clear Queue
                         </button>
                     `}
@@ -3840,7 +4020,7 @@ export function showBatchQrCodes() {
             }
         }
 
-        // Attach copy button event listeners
+        // Attach copy button and navigation event listeners
         setTimeout(() => {
             const copyUriBtn = document.getElementById('batchCopyUriBtn');
             const copyAddrBtn = document.getElementById('batchCopyAddressBtn');
@@ -3860,10 +4040,41 @@ export function showBatchQrCodes() {
                 const txNote = `nosmero.com/n/${item.postId}`;
                 copyNoteBtn.onclick = () => copyMoneroFieldToClipboard(txNote, copyNoteBtn, 'Note');
             }
+
+            // Attach navigation button event listeners
+            const prevBtn = content.querySelector('[data-action="batch-qr-previous"]');
+            const nextBtn = content.querySelector('[data-action="batch-qr-next"]');
+            const finishBtn = content.querySelector('[data-action="finish-batch-zap"]');
+
+            if (prevBtn) {
+                prevBtn.addEventListener('click', () => {
+                    if (currentIndex > 0) {
+                        currentIndex--;
+                        showNextQr();
+                    }
+                });
+            }
+
+            if (nextBtn) {
+                nextBtn.addEventListener('click', () => {
+                    if (currentIndex < queue.length - 1) {
+                        currentIndex++;
+                        showNextQr();
+                    }
+                });
+            }
+
+            if (finishBtn) {
+                finishBtn.addEventListener('click', () => {
+                    clearZapQueue();
+                    closeBatchQrModal();
+                    alert(`✅ Batch zap complete! ${queue.length} zap${queue.length === 1 ? '' : 's'} processed.`);
+                });
+            }
         }, 0);
     }
 
-    // Navigation functions
+    // Legacy navigation functions (keep for backward compatibility if needed)
     window.batchQrNext = function() {
         if (currentIndex < queue.length - 1) {
             currentIndex++;
@@ -4065,11 +4276,20 @@ export function showToast(message, type = 'info', duration = 3000, title = '') {
             ${title ? `<div class="toast-title">${escapeHtml(title)}</div>` : ''}
             <div class="toast-message">${escapeHtml(message)}</div>
         </div>
-        <button class="toast-close" onclick="window.dismissToast(${toastId})">×</button>
+        <button class="toast-close" data-action="dismiss-toast" data-toast-id="${toastId}">×</button>
         ${duration > 0 ? `<div class="toast-progress" style="animation-duration: ${duration}ms;"></div>` : ''}
     `;
 
-    // Add click to dismiss
+    // Add event listeners
+    const closeBtn = toast.querySelector('[data-action="dismiss-toast"]');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tid = parseInt(closeBtn.dataset.toastId, 10);
+            dismissToast(tid);
+        });
+    }
+
     toast.addEventListener('click', (e) => {
         if (!e.target.classList.contains('toast-close')) {
             dismissToast(toastId);

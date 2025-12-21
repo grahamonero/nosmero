@@ -106,6 +106,86 @@ function base64ToUint8(base64) {
 }
 
 /**
+ * Sanitize and validate URL
+ * @param {string} url - URL to sanitize
+ * @returns {string|null} Sanitized URL or null if invalid
+ */
+function sanitizeURL(url) {
+    if (typeof url !== 'string' || !url) return null;
+
+    try {
+        // Check for javascript: protocol and other dangerous protocols
+        const lowerUrl = url.toLowerCase().trim();
+        const dangerousProtocols = ['javascript:', 'data:text/html', 'vbscript:', 'file:', 'about:'];
+
+        for (const protocol of dangerousProtocols) {
+            if (lowerUrl.startsWith(protocol)) {
+                // Allow data:image/ for thumbhash placeholders
+                if (lowerUrl.startsWith('data:image/')) {
+                    return url;
+                }
+                console.warn('ThumbHash: Blocked dangerous protocol in URL:', protocol);
+                return null;
+            }
+        }
+
+        // Validate URL format for http(s) URLs
+        if (lowerUrl.startsWith('http://') || lowerUrl.startsWith('https://') || lowerUrl.startsWith('//')) {
+            new URL(url, window.location.origin); // Throws if invalid
+        }
+
+        return url;
+    } catch (e) {
+        console.warn('ThumbHash: Invalid URL format:', e);
+        return null;
+    }
+}
+
+/**
+ * Escape HTML special characters
+ * @param {string} str - String to escape
+ * @returns {string} Escaped string
+ */
+function escapeHTML(str) {
+    if (typeof str !== 'string') return '';
+
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+/**
+ * Sanitize CSS class name
+ * @param {string} className - Class name to sanitize
+ * @returns {string} Sanitized class name
+ */
+function sanitizeClassName(className) {
+    if (typeof className !== 'string') return '';
+
+    // Remove any characters that could break out of the attribute
+    return className.replace(/[<>"']/g, '');
+}
+
+/**
+ * Sanitize inline style
+ * @param {string} style - Style string to sanitize
+ * @returns {string} Sanitized style
+ */
+function sanitizeStyle(style) {
+    if (typeof style !== 'string') return '';
+
+    // Remove dangerous patterns from inline styles
+    const dangerous = /javascript:|expression\s*\(|@import|behavior:/gi;
+    if (dangerous.test(style)) {
+        console.warn('ThumbHash: Blocked dangerous pattern in style');
+        return '';
+    }
+
+    // Remove any characters that could break out of the attribute
+    return style.replace(/[<>"]/g, '');
+}
+
+/**
  * Compute thumbhash from an image element
  * @param {HTMLImageElement} img - Loaded image element
  * @returns {string|null} Base64 encoded thumbhash
@@ -176,8 +256,15 @@ export function getPlaceholder(url) {
 export function applyProgressiveLoading(img, src) {
     if (!src) return;
 
+    // Sanitize and validate URL
+    const sanitizedSrc = sanitizeURL(src);
+    if (!sanitizedSrc) {
+        console.warn('ThumbHash: Invalid URL provided to applyProgressiveLoading');
+        return;
+    }
+
     // Check for cached placeholder
-    const placeholder = getPlaceholder(src);
+    const placeholder = getPlaceholder(sanitizedSrc);
 
     if (placeholder) {
         // Show placeholder immediately
@@ -190,45 +277,63 @@ export function applyProgressiveLoading(img, src) {
     const fullImg = new Image();
     fullImg.crossOrigin = 'anonymous';
 
-    fullImg.onload = () => {
+    // Use addEventListener instead of onload property
+    fullImg.addEventListener('load', () => {
         // Swap to full image
-        img.src = src;
+        img.src = sanitizedSrc;
         img.style.filter = '';
 
         // Compute and cache thumbhash for future use (if not already cached)
         if (!placeholder) {
             const hash = computeThumbHash(fullImg);
             if (hash) {
-                cacheThumbHash(src, hash);
+                cacheThumbHash(sanitizedSrc, hash);
             }
         }
-    };
+    });
 
-    fullImg.onerror = () => {
+    fullImg.addEventListener('error', () => {
         // If placeholder was shown, keep it blurred as error state
         // Otherwise let the normal error handling work
         if (!placeholder) {
-            img.src = src; // Try loading directly
+            img.src = sanitizedSrc; // Try loading directly
         }
-    };
+    });
 
-    fullImg.src = src;
+    fullImg.src = sanitizedSrc;
 }
 
 /**
  * Create an image element with progressive loading
  * @param {string} src - Image source URL
- * @param {object} options - Options (alt, className, style, onError)
+ * @param {object} options - Options (alt, className, style, onError callback function)
  * @returns {HTMLImageElement}
  */
 export function createProgressiveImage(src, options = {}) {
     const img = document.createElement('img');
 
-    if (options.alt) img.alt = options.alt;
-    if (options.className) img.className = options.className;
-    if (options.style) img.style.cssText = options.style;
+    // Sanitize and validate URL
+    const sanitizedSrc = sanitizeURL(src);
+    if (!sanitizedSrc) {
+        console.warn('ThumbHash: Invalid URL provided to createProgressiveImage');
+        return img;
+    }
 
-    const placeholder = getPlaceholder(src);
+    // Sanitize attributes before setting
+    if (options.alt) {
+        img.alt = escapeHTML(options.alt);
+    }
+    if (options.className) {
+        img.className = sanitizeClassName(options.className);
+    }
+    if (options.style && typeof options.style === 'string') {
+        const sanitizedStyle = sanitizeStyle(options.style);
+        if (sanitizedStyle) {
+            img.style.cssText = sanitizedStyle;
+        }
+    }
+
+    const placeholder = getPlaceholder(sanitizedSrc);
 
     if (placeholder) {
         // Show placeholder immediately with blur
@@ -244,8 +349,9 @@ export function createProgressiveImage(src, options = {}) {
     const fullImg = new Image();
     fullImg.crossOrigin = 'anonymous';
 
-    fullImg.onload = () => {
-        img.src = src;
+    // Use addEventListener instead of onload property
+    fullImg.addEventListener('load', () => {
+        img.src = sanitizedSrc;
         img.style.filter = '';
         img.style.backgroundColor = '';
 
@@ -253,20 +359,25 @@ export function createProgressiveImage(src, options = {}) {
         if (!placeholder) {
             const hash = computeThumbHash(fullImg);
             if (hash) {
-                cacheThumbHash(src, hash);
+                cacheThumbHash(sanitizedSrc, hash);
             }
         }
-    };
+    });
 
-    fullImg.onerror = () => {
-        if (options.onError) {
-            options.onError(img);
+    fullImg.addEventListener('error', () => {
+        // Validate that onError is actually a function before calling
+        if (options.onError && typeof options.onError === 'function') {
+            try {
+                options.onError(img);
+            } catch (e) {
+                console.warn('ThumbHash: Error in onError callback:', e);
+            }
         } else if (!placeholder) {
             img.style.display = 'none';
         }
-    };
+    });
 
-    fullImg.src = src;
+    fullImg.src = sanitizedSrc;
 
     return img;
 }
@@ -274,15 +385,24 @@ export function createProgressiveImage(src, options = {}) {
 /**
  * Generate HTML for a progressive image (for use in template strings)
  * @param {string} src - Image source URL
- * @param {object} options - Options (alt, className, style, onError inline handler)
+ * @param {object} options - Options (alt, className, style)
  * @returns {string} HTML string
+ * @deprecated This function generates HTML with inline handlers. Use createProgressiveImage() instead for better security.
  */
 export function progressiveImageHTML(src, options = {}) {
     const placeholder = getPlaceholder(src);
-    const escapedSrc = src.replace(/"/g, '&quot;');
-    const escapedAlt = (options.alt || '').replace(/"/g, '&quot;');
 
-    let style = options.style || '';
+    // Sanitize and validate URL
+    const sanitizedSrc = sanitizeURL(src);
+    if (!sanitizedSrc) {
+        console.warn('ThumbHash: Invalid URL provided to progressiveImageHTML');
+        return '';
+    }
+
+    const escapedSrc = escapeHTML(sanitizedSrc);
+    const escapedAlt = escapeHTML(options.alt || '');
+
+    let style = sanitizeStyle(options.style || '');
     let initialSrc = escapedSrc;
 
     if (placeholder) {
@@ -290,11 +410,15 @@ export function progressiveImageHTML(src, options = {}) {
         style += '; filter: blur(4px); transition: filter 0.3s ease-out';
     }
 
-    const className = options.className || '';
-    const onError = options.onError || '';
+    const className = sanitizeClassName(options.className || '');
     const dataOriginal = `data-thumbhash-src="${escapedSrc}"`;
 
-    return `<img class="${className}" src="${initialSrc}" alt="${escapedAlt}" style="${style}" ${dataOriginal} ${onError ? `onerror="${onError}"` : ''} onload="window.ThumbHashLoader?.onImageLoad(this)">`;
+    // Generate unique ID for event handler attachment
+    const imgId = 'thumbhash-' + Math.random().toString(36).substr(2, 9);
+
+    // Note: This still uses onload but without user-controlled input
+    // For production, migrate to createProgressiveImage() which uses addEventListener
+    return `<img id="${imgId}" class="${className}" src="${initialSrc}" alt="${escapedAlt}" style="${style}" ${dataOriginal} onload="window.ThumbHashLoader?.onImageLoad(this)">`;
 }
 
 /**
@@ -305,8 +429,15 @@ export function onImageLoad(img) {
     const originalSrc = img.dataset.thumbhashSrc;
     if (!originalSrc) return;
 
+    // Sanitize and validate URL from data attribute
+    const sanitizedSrc = sanitizeURL(originalSrc);
+    if (!sanitizedSrc) {
+        console.warn('ThumbHash: Invalid URL in data-thumbhash-src attribute');
+        return;
+    }
+
     // If this is the placeholder loading, load the full image
-    if (img.src !== originalSrc && !img.src.startsWith('data:')) {
+    if (img.src !== sanitizedSrc && !img.src.startsWith('data:')) {
         return;
     }
 
@@ -315,39 +446,41 @@ export function onImageLoad(img) {
         const fullImg = new Image();
         fullImg.crossOrigin = 'anonymous';
 
-        fullImg.onload = () => {
-            img.src = originalSrc;
+        // Use addEventListener instead of onload property
+        fullImg.addEventListener('load', () => {
+            img.src = sanitizedSrc;
             img.style.filter = '';
 
             // Compute hash for future if not cached
-            if (!getCachedThumbHash(originalSrc)) {
+            if (!getCachedThumbHash(sanitizedSrc)) {
                 const hash = computeThumbHash(fullImg);
                 if (hash) {
-                    cacheThumbHash(originalSrc, hash);
+                    cacheThumbHash(sanitizedSrc, hash);
                 }
             }
-        };
+        });
 
-        fullImg.onerror = () => {
+        fullImg.addEventListener('error', () => {
             // Keep placeholder as error state
-        };
+            console.warn('ThumbHash: Failed to load full image, keeping placeholder');
+        });
 
-        fullImg.src = originalSrc;
+        fullImg.src = sanitizedSrc;
     } else {
         // Full image loaded directly, compute and cache hash
         img.style.filter = '';
 
-        if (!getCachedThumbHash(originalSrc)) {
+        if (!getCachedThumbHash(sanitizedSrc)) {
             // Need to reload with crossOrigin to compute hash
             const tempImg = new Image();
             tempImg.crossOrigin = 'anonymous';
-            tempImg.onload = () => {
+            tempImg.addEventListener('load', () => {
                 const hash = computeThumbHash(tempImg);
                 if (hash) {
-                    cacheThumbHash(originalSrc, hash);
+                    cacheThumbHash(sanitizedSrc, hash);
                 }
-            };
-            tempImg.src = originalSrc;
+            });
+            tempImg.src = sanitizedSrc;
         }
     }
 }

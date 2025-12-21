@@ -370,10 +370,10 @@ async function checkExistingSession() {
 // Start the main application
 async function startApplication() {
     console.log('🚦 startApplication() called');
-    console.log('  - State.privateKey:', State.privateKey);
+    console.log('  - State.privateKey:', State.hasPrivateKey() ? '[PRESENT]' : 'null');
     console.log('  - State.publicKey:', State.publicKey ? State.publicKey.substring(0, 16) + '...' : 'null');
 
-    if (State.privateKey && State.publicKey) {
+    if (State.hasPrivateKey() && State.publicKey) {
         console.log('🏠 Starting authenticated session...');
 
         // Update UI for logged in state
@@ -1671,14 +1671,13 @@ async function loadSettings_OLD_DISABLED() {
                     <label style="color: #ccc; display: block; margin-bottom: 8px;">Private Key Storage</label>
                     <div style="background: #333; padding: 15px; border-radius: 8px;">
                         <p style="color: #fff; margin: 0; font-size: 14px;">
-                            ${State.privateKey === 'extension' ?
-                                '🔌 Using browser extension (most secure)' :
-                                State.privateKey === 'nsec-app' ?
-                                '🌐 Using nsec.app OAuth (most secure)' :
-                                State.privateKey === 'amber' ?
-                                '📱 Using Amber signer (most secure)' :
-                                '💾 Stored locally (encrypted recommended)'
-                            }
+                            ${(() => {
+                                const pk = State.getPrivateKeyForSigning();
+                                if (pk === 'extension') return '🔌 Using browser extension (most secure)';
+                                if (pk === 'nsec-app') return '🌐 Using nsec.app OAuth (most secure)';
+                                if (pk === 'amber') return '📱 Using Amber signer (most secure)';
+                                return '💾 Stored locally (encrypted recommended)';
+                            })()}
                         </p>
                     </div>
                 </div>
@@ -2189,40 +2188,42 @@ function resetToDefaultRelays() {
 
 // Export private key
 function exportPrivateKey() {
-    if (State.privateKey === 'extension') {
+    const privateKey = State.getPrivateKeyForSigning();
+
+    if (privateKey === 'extension') {
         alert('Cannot export private key from browser extension. Check your extension settings.');
         return;
     }
 
-    if (State.privateKey === 'nsec-app') {
+    if (privateKey === 'nsec-app') {
         alert('Cannot export private key from nsec.app. Your keys are managed by nsec.app.');
         return;
     }
 
-    if (State.privateKey === 'amber') {
+    if (privateKey === 'amber') {
         alert('Cannot export private key from Amber. Your keys are securely stored on your Android device.');
         return;
     }
 
-    if (!State.privateKey) {
+    if (!privateKey) {
         alert('No private key available to export');
         return;
     }
-    
+
     if (confirm('Are you sure you want to export your private key? Keep it secure!')) {
         try {
             const { nip19, utils } = window.NostrTools;
 
             // Convert hex string to Uint8Array for nsecEncode
             let privateKeyBytes;
-            if (typeof State.privateKey === 'string' && State.privateKey.length === 64) {
+            if (typeof privateKey === 'string' && privateKey.length === 64) {
                 // Convert hex string to Uint8Array
                 privateKeyBytes = utils && utils.hexToBytes ?
-                    utils.hexToBytes(State.privateKey) :
-                    new Uint8Array(State.privateKey.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                    utils.hexToBytes(privateKey) :
+                    new Uint8Array(privateKey.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
             } else {
                 // Already in correct format or handle other cases
-                privateKeyBytes = State.privateKey;
+                privateKeyBytes = privateKey;
             }
 
             const nsec = nip19.nsecEncode(privateKeyBytes);
@@ -2370,7 +2371,7 @@ async function savePostingSettings() {
 
 // Save Lightning address to profile using NIP-01 (profile metadata)
 async function saveLightningAddressToProfile(lightningAddress) {
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.hasPrivateKey()) {
         throw new Error('User not logged in');
     }
     
@@ -2419,13 +2420,13 @@ async function saveLightningAddressToProfile(lightningAddress) {
 
 // Save Monero address to relays using NIP-78 (application-specific data)
 async function saveMoneroAddressToRelays(moneroAddress) {
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.hasPrivateKey()) {
         throw new Error('User not authenticated');
     }
 
     console.log('Saving Monero address to relays using NIP-78...', moneroAddress);
     console.log('Current public key:', State.publicKey);
-    console.log('Current private key type:', typeof State.privateKey);
+    console.log('Current private key type:', State.hasPrivateKey() ? 'available' : 'not available');
 
     // Get current zap amounts from localStorage to preserve them
     const btcZapAmount = localStorage.getItem('default-btc-zap-amount') || '1000';
@@ -2546,7 +2547,7 @@ async function loadMoneroAddressFromRelays(targetPubkey) {
 
 // Save zap settings to relays using NIP-78
 async function saveZapSettingsToRelays(btcAmount, xmrAmount) {
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.hasPrivateKey()) {
         throw new Error('User not authenticated');
     }
 
@@ -3563,8 +3564,8 @@ function closeEditProfileModal() {
 // Save profile data
 async function saveProfile(event) {
     event.preventDefault();
-    
-    if (!State.publicKey || !State.privateKey) {
+
+    if (!State.publicKey || !State.hasPrivateKey()) {
         Utils.showNotification('Please log in to save your profile', 'error');
         return;
     }
@@ -3922,7 +3923,7 @@ async function populateSettingsForm() {
 
 // Save settings from the modal
 async function saveSettings() {
-    if (!State.publicKey || !State.privateKey) {
+    if (!State.publicKey || !State.hasPrivateKey()) {
         Utils.showNotification('Please log in to save settings', 'error');
         return;
     }

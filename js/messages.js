@@ -335,7 +335,7 @@ export async function processMessages(events) {
             // Handle NIP-17 gift-wrapped messages (kind 1059)
             if (event.kind === 1059) {
                 try {
-                    const unwrapped = unwrapGiftMessage(event, State.privateKey);
+                    const unwrapped = unwrapGiftMessage(event, State.getPrivateKeyForSigning());
 
                     if (!unwrapped || !unwrapped.content) {
                         // Not for us, silently skip
@@ -389,7 +389,7 @@ export async function processMessages(events) {
                 }
 
                 // Decrypt the NIP-04 message
-                decryptedContent = await decryptMessage(event.content, otherPubkey, State.privateKey);
+                decryptedContent = await decryptMessage(event.content, otherPubkey, State.getPrivateKeyForSigning());
                 encryptionMethod = 'NIP-04';
                 realTimestamp = event.created_at; // Use event timestamp for NIP-04
 
@@ -469,7 +469,7 @@ export async function processSingleMessage(event) {
         // Handle NIP-17 gift-wrapped messages (kind 1059)
         if (event.kind === 1059) {
             try {
-                const unwrapped = unwrapGiftMessage(event, State.privateKey);
+                const unwrapped = unwrapGiftMessage(event, State.getPrivateKeyForSigning());
 
                 if (!unwrapped || !unwrapped.content) {
                     // Not for us, silently skip
@@ -518,7 +518,7 @@ export async function processSingleMessage(event) {
 
             if (!otherPubkey) return;
 
-            decryptedContent = await decryptMessage(event.content, otherPubkey, State.privateKey);
+            decryptedContent = await decryptMessage(event.content, otherPubkey, State.getPrivateKeyForSigning());
             encryptionMethod = 'NIP-04';
             realTimestamp = event.created_at; // Use event timestamp for NIP-04
 
@@ -725,11 +725,16 @@ export function startNewMessage() {
             conversations[recipientPubkey] = {
                 messages: [],
                 lastMessage: null,
-                profile: profileCache[recipientPubkey] || null,
+                profile: State.profileCache[recipientPubkey] || null,
                 unread: 0
             };
         }
-        
+
+        // Fetch profile if not cached
+        if (!State.profileCache[recipientPubkey]) {
+            fetchConversationProfiles([recipientPubkey]);
+        }
+
         // Select the conversation
         selectConversation(recipientPubkey);
         renderConversations();
@@ -763,38 +768,44 @@ export async function sendMessage() {
         const useNip17 = localStorage.getItem('use-nip17-dms') === 'true';
 
         // Use NIP-17 if enabled and not using extension
-        if (useNip17 && State.privateKey !== 'extension') {
+        const privateKey = State.getPrivateKeyForSigning();
+        if (useNip17 && privateKey !== 'extension') {
             console.log('Sending NIP-17 gift-wrapped message to:', currentConversation);
 
             try {
                 // Create TWO NIP-17 gift-wrapped messages per spec:
                 // 1. Recipient copy (they can decrypt)
-                recipientWrap = wrapGiftMessage(content, State.privateKey, currentConversation);
+                recipientWrap = wrapGiftMessage(content, privateKey, currentConversation);
                 // 2. Sender backup copy (for retrieval after reload)
                 // Use custom function that preserves the conversation partner in the rumor's 'p' tag
-                senderWrap = wrapGiftMessageWithRecipient(content, State.privateKey, State.publicKey, currentConversation);
+                senderWrap = wrapGiftMessageWithRecipient(content, privateKey, State.publicKey, currentConversation);
 
                 encryptionMethod = 'NIP-17';
                 // Use sender wrap ID for local storage (this is what we'll retrieve on reload)
                 signedEvent = senderWrap;
 
                 console.log('Created NIP-17 dual gift-wraps:');
-                console.log('  - Recipient wrap:', recipientWrap.id);
-                console.log('  - Sender wrap (backup):', senderWrap.id);
+                console.log('  - Recipient wrap:', recipientWrap.id, 'created_at:', recipientWrap.created_at, 'Date:', new Date(recipientWrap.created_at * 1000).toISOString());
+                console.log('  - Sender wrap (backup):', senderWrap.id, 'created_at:', senderWrap.created_at, 'Date:', new Date(senderWrap.created_at * 1000).toISOString());
+                console.log('🕐 DEBUG: Current client time:', Math.floor(Date.now() / 1000), 'Date:', new Date().toISOString());
             } catch (error) {
                 console.error('NIP-17 wrapping failed, falling back to NIP-04:', error);
                 // Fallback to NIP-04 if NIP-17 fails
-                const encrypted = await encryptMessage(content, currentConversation, State.privateKey);
+                const encrypted = await encryptMessage(content, currentConversation, privateKey);
                 const { verifyEvent } = window.NostrTools;
+
+                const clientTimestamp = Math.floor(Date.now() / 1000);
+                console.log('🕐 DEBUG: Client timestamp for NIP-04 fallback:', clientTimestamp, 'Date:', new Date(clientTimestamp * 1000).toISOString());
 
                 const eventTemplate = {
                     kind: 4,
-                    created_at: Math.floor(Date.now() / 1000),
+                    created_at: clientTimestamp,
                     tags: [['p', currentConversation]],
                     content: encrypted
                 };
 
                 signedEvent = await signEvent(eventTemplate);
+                console.log('🕐 DEBUG: Signed event created_at:', signedEvent.created_at, 'Date:', new Date(signedEvent.created_at * 1000).toISOString());
                 const isValid = verifyEvent(signedEvent);
 
                 if (!isValid) {
@@ -803,7 +814,7 @@ export async function sendMessage() {
 
                 encryptionMethod = 'NIP-04';
             }
-        } else {
+        } else if (privateKey === 'extension') {
             // Extensions don't support NIP-17 yet, use NIP-04
             console.log('Using extension, sending NIP-04 message');
 
@@ -814,16 +825,49 @@ export async function sendMessage() {
 
             const encrypted = await window.nostr.nip04.encrypt(currentConversation, content);
 
+            const clientTimestamp = Math.floor(Date.now() / 1000);
+            console.log('🕐 DEBUG: Client timestamp for NIP-04:', clientTimestamp, 'Date:', new Date(clientTimestamp * 1000).toISOString());
+
             const eventTemplate = {
                 kind: 4,
-                created_at: Math.floor(Date.now() / 1000),
+                created_at: clientTimestamp,
                 tags: [['p', currentConversation]],
                 content: encrypted,
                 pubkey: State.publicKey
             };
 
             signedEvent = await window.nostr.signEvent(eventTemplate);
+            console.log('🕐 DEBUG: Signed event created_at:', signedEvent.created_at, 'Date:', new Date(signedEvent.created_at * 1000).toISOString());
             encryptionMethod = 'NIP-04';
+        } else if (privateKey && privateKey !== 'amber') {
+            // Local key with NIP-17 disabled - use NIP-04
+            console.log('NIP-17 disabled, sending NIP-04 message with local key');
+
+            const encrypted = await encryptMessage(content, currentConversation, privateKey);
+            const { verifyEvent } = window.NostrTools;
+
+            const clientTimestamp = Math.floor(Date.now() / 1000);
+            console.log('🕐 DEBUG: Client timestamp for local key NIP-04:', clientTimestamp, 'Date:', new Date(clientTimestamp * 1000).toISOString());
+
+            const eventTemplate = {
+                kind: 4,
+                created_at: clientTimestamp,
+                tags: [['p', currentConversation]],
+                content: encrypted
+            };
+
+            signedEvent = await signEvent(eventTemplate);
+            console.log('🕐 DEBUG: Signed event created_at:', signedEvent.created_at, 'Date:', new Date(signedEvent.created_at * 1000).toISOString());
+            const isValid = verifyEvent(signedEvent);
+
+            if (!isValid) {
+                throw new Error('Failed to sign NIP-04 message');
+            }
+
+            encryptionMethod = 'NIP-04';
+        } else {
+            alert('Direct messages are not supported with your current login method.');
+            return;
         }
 
         // Publish to relays (use write relays)
@@ -872,20 +916,24 @@ export async function sendMessage() {
             console.error('Failed to publish event:', publishError);
 
             // If NIP-17 failed to publish, try NIP-04 fallback
-            if (encryptionMethod === 'NIP-17' && State.privateKey !== 'extension') {
+            if (encryptionMethod === 'NIP-17' && privateKey !== 'extension') {
                 console.log('NIP-17 publish failed, falling back to NIP-04');
 
-                const encrypted = await encryptMessage(content, currentConversation, State.privateKey);
+                const encrypted = await encryptMessage(content, currentConversation, privateKey);
                 const { verifyEvent } = window.NostrTools;
+
+                const fallbackTimestamp = Math.floor(Date.now() / 1000);
+                console.log('🕐 DEBUG: NIP-04 fallback timestamp:', fallbackTimestamp, 'Date:', new Date(fallbackTimestamp * 1000).toISOString());
 
                 const eventTemplate = {
                     kind: 4,
-                    created_at: Math.floor(Date.now() / 1000),
+                    created_at: fallbackTimestamp,
                     tags: [['p', currentConversation]],
                     content: encrypted
                 };
 
                 signedEvent = await signEvent(eventTemplate);
+                console.log('🕐 DEBUG: Signed fallback event created_at:', signedEvent.created_at, 'Date:', new Date(signedEvent.created_at * 1000).toISOString());
                 const isValid = verifyEvent(signedEvent);
 
                 if (!isValid) {
@@ -895,6 +943,7 @@ export async function sendMessage() {
                 encryptionMethod = 'NIP-04';
 
                 // Try publishing NIP-04 version
+                console.log('🕐 DEBUG: Publishing NIP-04 fallback to relays:', relaysToUse);
                 await Promise.any(State.pool.publish(relaysToUse, signedEvent));
                 console.log('Successfully sent NIP-04 fallback message');
             } else {
