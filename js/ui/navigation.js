@@ -1,6 +1,25 @@
 // ==================== NAVIGATION & HAMBURGER MENU ====================
 // Handles new minimal header, hamburger menu, feed tabs, and welcome banner
 
+// Security helper: Validate image URLs to prevent XSS
+function sanitizeImageUrl(url) {
+    if (!url || typeof url !== 'string') {
+        return '/default-avatar.png';
+    }
+
+    const trimmedUrl = url.trim();
+
+    // Allow only safe protocols
+    if (trimmedUrl.startsWith('https://') ||
+        trimmedUrl.startsWith('http://') ||
+        trimmedUrl.startsWith('data:image/')) {
+        return trimmedUrl;
+    }
+
+    // Default to safe fallback for invalid protocols
+    return '/default-avatar.png';
+}
+
 // Import modules lazily to avoid circular dependencies
 let State = null;
 let Posts = null;
@@ -34,8 +53,24 @@ export function updateMenuQueueCount() {
     const countEl = document.getElementById('menuQueueCount');
     if (!countEl) return;
 
+    // Don't show queue count if not logged in
+    const pubkey = localStorage.getItem('nostr-public-key');
+    if (!pubkey) {
+        countEl.style.display = 'none';
+        return;
+    }
+
     const StateModule = window.NostrState || {};
-    const queue = StateModule.zapQueue || JSON.parse(localStorage.getItem('zapQueue') || '[]');
+    let queue = StateModule.zapQueue;
+
+    if (!queue) {
+        try {
+            queue = JSON.parse(localStorage.getItem('zapQueue') || '[]');
+        } catch (e) {
+            console.error('Failed to parse zapQueue from localStorage:', e);
+            queue = [];
+        }
+    }
 
     if (queue.length > 0) {
         countEl.textContent = queue.length;
@@ -165,8 +200,22 @@ export function closeWelcomeBanner() {
 export async function showWelcomeBannerIfNeeded() {
     // Only show for anonymous users
     const StateModule = await ensureStateLoaded();
-    const isLoggedIn = StateModule.publicKey !== null || localStorage.getItem('nostr-public-key') !== null;
-    const bannerClosed = localStorage.getItem('welcomeBannerClosed') === 'true';
+
+    let storedPublicKey = null;
+    try {
+        storedPublicKey = localStorage.getItem('nostr-public-key');
+    } catch (e) {
+        console.error('Failed to access localStorage:', e);
+    }
+
+    const isLoggedIn = StateModule.publicKey !== null || storedPublicKey !== null;
+
+    let bannerClosed = false;
+    try {
+        bannerClosed = localStorage.getItem('welcomeBannerClosed') === 'true';
+    } catch (e) {
+        console.error('Failed to access localStorage:', e);
+    }
 
     console.log('🎉 Checking welcome banner - isLoggedIn:', isLoggedIn, 'bannerClosed:', bannerClosed);
 
@@ -200,7 +249,15 @@ export function showWhatIsMonero() {
 
 export async function handleCreateNoteClick() {
     const StateModule = await ensureStateLoaded();
-    const isLoggedIn = StateModule.publicKey !== null || localStorage.getItem('nostr-public-key') !== null;
+
+    let storedPublicKey = null;
+    try {
+        storedPublicKey = localStorage.getItem('nostr-public-key');
+    } catch (e) {
+        console.error('Failed to access localStorage:', e);
+    }
+
+    const isLoggedIn = StateModule.publicKey !== null || storedPublicKey !== null;
 
     if (isLoggedIn) {
         // Logged in: show inline compose
@@ -219,31 +276,96 @@ export function showLoginOptions() {
     modal.id = 'loginOptionsModal';
     modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); display: flex; align-items: center; justify-content: center; z-index: 1000;';
 
-    modal.innerHTML = `
-        <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 2rem; max-width: 400px; width: 90%;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                <h2 style="margin: 0; color: var(--text-primary);">Login to Nosmero</h2>
-                <button onclick="document.getElementById('loginOptionsModal').remove()" style="background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;">×</button>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                <button onclick="showCreateAccount(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: white; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: transform 0.2s;">
-                    🆕 Create New Account
-                </button>
-                <button onclick="showLoginWithNsec(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;">
-                    🔑 Login with nsec
-                </button>
-                <button onclick="loginWithExtension(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;">
-                    🔌 Use Extension (NIP-07)
-                </button>
-                <button onclick="showLoginWithNsecApp(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;">
-                    🌐 Use nsec.app
-                </button>
-                <button onclick="showLoginWithAmber(); document.getElementById('loginOptionsModal').remove();" style="width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;">
-                    📱 Use Amber (Android)
-                </button>
-            </div>
-        </div>
-    `;
+    // Create modal container
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 2rem; max-width: 400px; width: 90%;';
+
+    // Create header
+    const header = document.createElement('div');
+    header.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;';
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin: 0; color: var(--text-primary);';
+    title.textContent = 'Login to Nosmero';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = 'background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;';
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', () => modal.remove());
+
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    // Create buttons container
+    const buttonsContainer = document.createElement('div');
+    buttonsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 0.75rem;';
+
+    // Create New Account button
+    const createAccountBtn = document.createElement('button');
+    createAccountBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: white; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: transform 0.2s;';
+    createAccountBtn.textContent = '🆕 Create New Account';
+    createAccountBtn.addEventListener('click', () => {
+        if (typeof window.showCreateAccount === 'function') {
+            window.showCreateAccount();
+        }
+        modal.remove();
+    });
+
+    // Login with nsec button
+    const loginNsecBtn = document.createElement('button');
+    loginNsecBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;';
+    loginNsecBtn.textContent = '🔑 Login with nsec';
+    loginNsecBtn.addEventListener('click', () => {
+        if (typeof window.showLoginWithNsec === 'function') {
+            window.showLoginWithNsec();
+        }
+        modal.remove();
+    });
+
+    // Use Extension button
+    const extensionBtn = document.createElement('button');
+    extensionBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;';
+    extensionBtn.textContent = '🔌 Use Extension (NIP-07)';
+    extensionBtn.addEventListener('click', () => {
+        if (typeof window.loginWithExtension === 'function') {
+            window.loginWithExtension();
+        }
+        modal.remove();
+    });
+
+    // Use nsec.app button
+    const nsecAppBtn = document.createElement('button');
+    nsecAppBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;';
+    nsecAppBtn.textContent = '🌐 Use nsec.app';
+    nsecAppBtn.addEventListener('click', () => {
+        if (typeof window.showLoginWithNsecApp === 'function') {
+            window.showLoginWithNsecApp();
+        }
+        modal.remove();
+    });
+
+    // Use Amber button
+    const amberBtn = document.createElement('button');
+    amberBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;';
+    amberBtn.textContent = '📱 Use Amber (Android)';
+    amberBtn.addEventListener('click', () => {
+        if (typeof window.showLoginWithAmber === 'function') {
+            window.showLoginWithAmber();
+        }
+        modal.remove();
+    });
+
+    // Append all buttons
+    buttonsContainer.appendChild(createAccountBtn);
+    buttonsContainer.appendChild(loginNsecBtn);
+    buttonsContainer.appendChild(extensionBtn);
+    buttonsContainer.appendChild(nsecAppBtn);
+    buttonsContainer.appendChild(amberBtn);
+
+    // Assemble modal
+    modalContent.appendChild(header);
+    modalContent.appendChild(buttonsContainer);
+    modal.appendChild(modalContent);
 
     // Close on overlay click
     modal.addEventListener('click', (e) => {
@@ -258,7 +380,7 @@ export function showLoginOptions() {
 // Helper function to update menu user info
 export function updateMenuUserInfo(profile, shortNpub) {
     const userName = profile?.name || profile?.display_name || shortNpub || 'Anonymous';
-    const profilePic = profile?.picture || '/default-avatar.png';
+    const profilePic = sanitizeImageUrl(profile?.picture);
 
     const menuUserName = document.getElementById('menuUserName');
     const menuUserNpub = document.getElementById('menuUserNpub');

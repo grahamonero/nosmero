@@ -376,10 +376,17 @@ async function renderUserPosts(posts, fetchMoneroAddresses = false, pubkey = nul
         }
 
         // Add trust badges to all posts
+        // Profile posts are all from the same author, so use async mode for reliable badge display
         try {
             const TrustBadges = await import('../trust-badges.js');
-            // Pass the actual DOM element, not a selector
-            await TrustBadges.addFeedTrustBadges(posts.map(p => ({ id: p.id, pubkey: p.pubkey })), userPostsContainer);
+            // Find all username elements in profile posts and add badges with async fetching
+            const usernameElements = userPostsContainer.querySelectorAll('.username[data-pubkey]');
+            for (const usernameEl of usernameElements) {
+                const pubkey = usernameEl.getAttribute('data-pubkey');
+                if (pubkey && !usernameEl.querySelector('.trust-badge')) {
+                    await TrustBadges.addTrustBadgeToElement(usernameEl, pubkey, true);
+                }
+            }
         } catch (error) {
             console.error('Error adding trust badges to profile posts:', error);
         }

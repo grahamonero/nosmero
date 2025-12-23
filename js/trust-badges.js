@@ -5,6 +5,14 @@ import { getTrustScore, getTrustLevel, getTrustBadge, queueTrustScoreRequest, ge
 
 // ==================== CONFIGURATION ====================
 
+// Helper function to validate pubkey format (64 character hex string)
+function isValidPubkey(pubkey) {
+  if (typeof pubkey !== 'string') {
+    return false;
+  }
+  return /^[0-9a-f]{64}$/i.test(pubkey);
+}
+
 // Check if trust badges are enabled in settings
 function areTrustBadgesEnabled() {
   const setting = localStorage.getItem('showTrustBadges');
@@ -50,6 +58,12 @@ export async function addTrustBadgeToElement(usernameElement, pubkey, async = tr
   }
 
   if (!usernameElement || !pubkey) {
+    return;
+  }
+
+  // Validate pubkey format to prevent XSS
+  if (!isValidPubkey(pubkey)) {
+    console.warn('[TrustBadges] Invalid pubkey format:', pubkey);
     return;
   }
 
@@ -103,9 +117,32 @@ function updateBadgeElement(badgeElement, trustData) {
     return;
   }
 
-  const { score, distance } = trustData;
+  // Validate and sanitize numeric values
+  let { score, distance } = trustData;
+
+  // Validate score is a finite number and clamp to 0-100
+  if (!Number.isFinite(score)) {
+    console.warn('[TrustBadges] Invalid score value:', score);
+    return;
+  }
+  score = Math.max(0, Math.min(100, score));
+
+  // Validate distance is a finite number and clamp to >= -1
+  if (!Number.isFinite(distance)) {
+    console.warn('[TrustBadges] Invalid distance value:', distance);
+    return;
+  }
+  distance = Math.max(-1, distance);
+
   const level = getTrustLevel(score);
   const badge = getTrustBadge(score);
+
+  // Whitelist valid trust levels
+  const validLevels = ['verified', 'trusted', 'neutral', 'low', 'unknown'];
+  if (!validLevels.includes(level)) {
+    console.warn('[TrustBadges] Invalid trust level:', level);
+    return;
+  }
 
   if (!badge) {
     // No badge for neutral/unknown scores
@@ -235,8 +272,15 @@ export async function addNoteTrustBadge(noteId, pubkey) {
     return;
   }
 
-  // Find note author username element
-  const noteElement = document.querySelector(`[data-note-id="${noteId}"]`);
+  // Validate inputs
+  if (!noteId || typeof noteId !== 'string') {
+    console.warn('[TrustBadges] Invalid noteId:', noteId);
+    return;
+  }
+
+  // Find note author username element - use CSS.escape() to prevent XSS
+  const escapedNoteId = CSS.escape(noteId);
+  const noteElement = document.querySelector(`[data-note-id="${escapedNoteId}"]`);
   if (!noteElement) {
     return;
   }

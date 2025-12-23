@@ -108,8 +108,9 @@ async function findMoneroAccounts(limit) {
  */
 async function searchNostrProfiles(query, limit = 50) {
   try {
+    const baseUrl = process.env.RELATR_API_URL || 'http://localhost:3001';
     const response = await fetch(
-      `http://143.198.49.143:3001/search?q=${encodeURIComponent(query)}&limit=${limit}`
+      `${baseUrl}/search?q=${encodeURIComponent(query)}&limit=${limit}`
     );
 
     const data = await response.json();

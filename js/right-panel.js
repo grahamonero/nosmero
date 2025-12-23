@@ -1837,6 +1837,20 @@ const RightPanel = {
                 } catch (embedError) {
                     console.error('Right panel profile: Error processing embedded notes:', embedError);
                 }
+
+                // Add trust badges to profile posts (using async mode for reliable display)
+                try {
+                    const TrustBadges = await import('./trust-badges.js');
+                    const usernameElements = container.querySelectorAll('.username[data-pubkey]');
+                    for (const usernameEl of usernameElements) {
+                        const pk = usernameEl.getAttribute('data-pubkey');
+                        if (pk && !usernameEl.querySelector('.trust-badge')) {
+                            await TrustBadges.addTrustBadgeToElement(usernameEl, pk, true);
+                        }
+                    }
+                } catch (badgeError) {
+                    console.error('Right panel profile: Error adding trust badges:', badgeError);
+                }
             } else {
                 const postsHtml = newPosts.map(post => `
                     <div class="post" style="padding: 12px; border-bottom: 1px solid var(--border-color);">

@@ -61,7 +61,35 @@ async function decryptBaseline(encryptedContent) {
             decrypted = await nip04.decrypt(State.getPrivateKeyForSigning(), State.publicKey, encryptedContent);
         }
 
-        return JSON.parse(decrypted);
+        const parsed = JSON.parse(decrypted);
+
+        // Validate structure after JSON.parse
+        if (!parsed || typeof parsed !== 'object') {
+            console.error('Invalid baseline structure after decryption');
+            return null;
+        }
+
+        // Check version is a number
+        if (typeof parsed.version !== 'number') {
+            console.error('Invalid baseline version type after decryption');
+            return null;
+        }
+
+        // Check followers is an object
+        if (!parsed.followers || typeof parsed.followers !== 'object') {
+            console.error('Invalid baseline followers structure after decryption');
+            return null;
+        }
+
+        // Prototype pollution check - reject if parsed.followers has dangerous properties
+        if (parsed.followers.hasOwnProperty('__proto__') ||
+            parsed.followers.hasOwnProperty('constructor') ||
+            parsed.followers.hasOwnProperty('prototype')) {
+            console.error('Prototype pollution attempt detected in decrypted baseline followers');
+            return null;
+        }
+
+        return parsed;
     } catch (error) {
         console.error('Failed to decrypt follower baseline:', error);
         return null;
@@ -76,9 +104,44 @@ async function decryptBaseline(encryptedContent) {
  */
 function getLocalBaseline() {
     try {
+        // Validate publicKey format before using in localStorage key
+        if (!State.publicKey || !/^[0-9a-fA-F]{64}$/.test(State.publicKey)) {
+            console.error('Invalid publicKey format for localStorage access');
+            return null;
+        }
+
         const cached = localStorage.getItem(`${LOCAL_STORAGE_KEY}-${State.publicKey}`);
         if (!cached) return null;
-        return JSON.parse(cached);
+
+        const parsed = JSON.parse(cached);
+
+        // Validate structure after JSON.parse
+        if (!parsed || typeof parsed !== 'object') {
+            console.error('Invalid baseline structure in cache');
+            return null;
+        }
+
+        // Check version is a number
+        if (typeof parsed.version !== 'number') {
+            console.error('Invalid baseline version type');
+            return null;
+        }
+
+        // Check followers is an object
+        if (!parsed.followers || typeof parsed.followers !== 'object') {
+            console.error('Invalid baseline followers structure');
+            return null;
+        }
+
+        // Prototype pollution check - reject if parsed.followers has dangerous properties
+        if (parsed.followers.hasOwnProperty('__proto__') ||
+            parsed.followers.hasOwnProperty('constructor') ||
+            parsed.followers.hasOwnProperty('prototype')) {
+            console.error('Prototype pollution attempt detected in baseline followers');
+            return null;
+        }
+
+        return parsed;
     } catch (error) {
         console.error('Failed to read local baseline cache:', error);
         return null;
@@ -91,6 +154,12 @@ function getLocalBaseline() {
  */
 function setLocalBaseline(baseline) {
     try {
+        // Validate publicKey format before using in localStorage key
+        if (!State.publicKey || !/^[0-9a-fA-F]{64}$/.test(State.publicKey)) {
+            console.error('Invalid publicKey format for localStorage access');
+            return;
+        }
+
         localStorage.setItem(`${LOCAL_STORAGE_KEY}-${State.publicKey}`, JSON.stringify(baseline));
     } catch (error) {
         console.error('Failed to write local baseline cache:', error);
@@ -454,28 +523,42 @@ export async function isKnownFollower(pubkey) {
     return !!baseline.followers[pubkey];
 }
 
-// Export for debugging in console
-window.followerBaseline = {
-    fetch: fetchFollowerBaseline,
-    save: saveFollowerBaseline,
-    getCount: getFollowerCount,
-    isKnown: isKnownFollower,
-    forceReset: forceResetBaseline,
-    NOSMERO_RELAY,
-    BASELINE_D_TAG,
-    // Debug helpers
-    getState: () => State,
-    getPool: () => State.pool,
-    getPubkey: () => State.publicKey,
-    queryFollowers: async () => {
-        const { getActiveRelays } = await import('./relays.js');
-        const events = await State.pool.querySync(
-            getActiveRelays(),
-            { kinds: [3], '#p': [State.publicKey], limit: 100 }
-        );
-        const pubkeys = [...new Set(events.map(e => e.pubkey))];
-        console.log('Total kind 3 events:', events.length);
-        console.log('Unique followers:', pubkeys.length);
-        return { events, pubkeys };
-    }
-};
+// Export for debugging in console (limited in production)
+if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.includes('dev.')) {
+    // Development mode - expose debug functions
+    window.followerBaseline = {
+        fetch: fetchFollowerBaseline,
+        save: saveFollowerBaseline,
+        getCount: getFollowerCount,
+        isKnown: isKnownFollower,
+        forceReset: forceResetBaseline,
+        NOSMERO_RELAY,
+        BASELINE_D_TAG,
+        // Debug helpers
+        getState: () => State,
+        getPool: () => State.pool,
+        getPubkey: () => State.publicKey,
+        queryFollowers: async () => {
+            const { getActiveRelays } = await import('./relays.js');
+            const events = await State.pool.querySync(
+                getActiveRelays(),
+                { kinds: [3], '#p': [State.publicKey], limit: 100 }
+            );
+            const pubkeys = [...new Set(events.map(e => e.pubkey))];
+            console.log('Total kind 3 events:', events.length);
+            console.log('Unique followers:', pubkeys.length);
+            return { events, pubkeys };
+        }
+    };
+} else {
+    // Production mode - limit exposure of dangerous functions
+    window.followerBaseline = {
+        fetch: fetchFollowerBaseline,
+        save: saveFollowerBaseline,
+        getCount: getFollowerCount,
+        isKnown: isKnownFollower,
+        // forceReset is NOT exposed in production
+        NOSMERO_RELAY,
+        BASELINE_D_TAG
+    };
+}

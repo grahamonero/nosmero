@@ -686,6 +686,12 @@ export async function logout() {
     localStorage.removeItem('nostr-private-key-encrypted');
     localStorage.removeItem('amber-bunker-uri');
 
+    // Clear tip queue - user-specific data shouldn't persist across logout
+    localStorage.removeItem('zapQueue');
+    if (State.setZapQueue) {
+        State.setZapQueue([]);
+    }
+
     // Clear session key (used for same-session page navigation without PIN)
     clearSessionKey();
 

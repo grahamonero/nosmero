@@ -2,7 +2,7 @@
 // NIP-85 Trust Assertion Publisher for Nosmero
 // Publishes kind 30382 events to Nostr relays
 
-import { SimplePool, finalizeEvent, nip19 } from 'nostr-tools';
+import { SimplePool, finalizeEvent, nip19, verifyEvent } from 'nostr-tools';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -34,7 +34,7 @@ try {
   }
   providerPrivkey = decoded.data;
 } catch (error) {
-  console.error('❌ Error decoding provider nsec:', error.message);
+  console.error('❌ Error decoding provider nsec: Invalid format or corrupted key');
   process.exit(1);
 }
 
@@ -47,7 +47,7 @@ try {
   }
   providerPubkey = decoded.data;
 } catch (error) {
-  console.error('❌ Error decoding provider npub:', error.message);
+  console.error('❌ Error decoding provider npub: Invalid format or corrupted key');
   process.exit(1);
 }
 
@@ -60,6 +60,20 @@ const BATCH_DELAY = 2000; // 2 second delay between batches
 const PUBLISH_TIMEOUT = 10000; // 10 second timeout per event
 
 // ==================== HELPER FUNCTIONS ====================
+
+/**
+ * Validate that a pubkey is a valid 64-character hex string
+ */
+function isValidPubkey(pubkey) {
+  return typeof pubkey === 'string' && /^[0-9a-f]{64}$/i.test(pubkey);
+}
+
+/**
+ * Validate that a score is an integer between 0 and 100
+ */
+function isValidScore(score) {
+  return Number.isInteger(score) && score >= 0 && score <= 100;
+}
 
 /**
  * Load accounts with trust scores from JSON file
@@ -111,6 +125,12 @@ function createTrustAssertion(targetPubkey, score, metadata = {}) {
   // Sign the event
   const signedEvent = finalizeEvent(event, providerPrivkey);
 
+  // Verify the signed event before returning
+  const isValid = verifyEvent(signedEvent);
+  if (!isValid) {
+    throw new Error('Event signature verification failed');
+  }
+
   return signedEvent;
 }
 
@@ -128,12 +148,26 @@ async function publishToRelays(pool, relays, event) {
     try {
       const pub = pool.publish([relay], event);
 
-      // Wait for confirmation with timeout
+      // Wait for confirmation with timeout using settled flag pattern
+      let settled = false;
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout')), PUBLISH_TIMEOUT)
+        setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error('Timeout'));
+          }
+        }, PUBLISH_TIMEOUT)
       );
 
-      await Promise.race([pub, timeoutPromise]);
+      await Promise.race([
+        pub.then(result => {
+          if (!settled) {
+            settled = true;
+            return result;
+          }
+        }),
+        timeoutPromise
+      ]);
       results.success.push(relay);
 
     } catch (error) {
@@ -241,6 +275,14 @@ async function publishTrustAssertions(options = {}) {
 
     for (const account of batch) {
       try {
+        // Validate account data
+        if (!isValidPubkey(account.pubkey)) {
+          throw new Error('Invalid pubkey format');
+        }
+        if (!isValidScore(account.score)) {
+          throw new Error('Invalid score value');
+        }
+
         // Create trust assertion event
         const event = createTrustAssertion(
           account.pubkey,

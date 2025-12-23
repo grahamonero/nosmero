@@ -38,11 +38,8 @@ console.log('Public Key (npub):');
 console.log(npub);
 console.log('');
 console.log('⚠️  PRIVATE KEY (KEEP SECRET!)');
-console.log('Private Key (hex):');
-console.log(secretKeyHex);
-console.log('');
-console.log('Private Key (nsec):');
-console.log(nsec);
+console.log('Private keys have been generated and saved to .env file.');
+console.log('Do not share or log private keys in production.');
 console.log('');
 
 // Save to .env file
@@ -69,6 +66,7 @@ if (envContent.includes('NOSMERO_PROVIDER_NSEC')) {
   envContent += `NOSMERO_PROVIDER_NPUB=${npub}\n`;
 
   fs.writeFileSync(envPath, envContent);
+  fs.chmodSync(envPath, 0o600);
 
   console.log('✅ Keys saved to .env file');
   console.log('');

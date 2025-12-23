@@ -24,19 +24,88 @@ if (RESEND_API_KEY) {
 }
 
 /**
+ * Validate email address to prevent header injection
+ * @param {string} email - Email address to validate
+ * @returns {boolean} - True if valid
+ */
+function isValidEmail(email) {
+  if (!email || typeof email !== 'string') {
+    return false;
+  }
+
+  // Check for newlines or carriage returns (header injection)
+  if (/[\r\n]/.test(email)) {
+    return false;
+  }
+
+  // Basic email format validation
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
+
+/**
+ * Validate token format to prevent injection attacks
+ * @param {string} token - Token to validate
+ * @returns {boolean} - True if valid
+ */
+function isValidToken(token) {
+  if (!token || typeof token !== 'string') {
+    return false;
+  }
+
+  // Token should be alphanumeric, dash, or underscore, min 32 chars
+  const tokenRegex = /^[a-zA-Z0-9_-]{32,}$/;
+  return tokenRegex.test(token);
+}
+
+/**
+ * Escape HTML special characters to prevent XSS
+ * @param {string} str - String to escape
+ * @returns {string} - Escaped string
+ */
+function escapeHtml(str) {
+  if (!str || typeof str !== 'string') {
+    return '';
+  }
+
+  const htmlEscapes = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  };
+
+  return str.replace(/[&<>"']/g, (char) => htmlEscapes[char]);
+}
+
+/**
  * Send email verification link
  * @param {string} email - Recipient email
  * @param {string} token - Verification token
  */
 export async function sendVerificationEmail(email, token) {
+  // C1: Validate email address
+  if (!isValidEmail(email)) {
+    throw new Error('Invalid email address');
+  }
+
+  // C2: Validate token
+  if (!isValidToken(token)) {
+    throw new Error('Invalid verification token');
+  }
+
   if (!resend) {
-    console.log(`[Email] Would send verification to ${email} (Resend not configured)`);
+    console.log('[Email] Would send verification (Resend not configured)');
     return;
   }
 
-  const verifyUrl = `${BASE_URL}/verify-email?token=${token}`;
+  // C2: Use encodeURIComponent for token in URL
+  const verifyUrl = `${BASE_URL}/verify-email?token=${encodeURIComponent(token)}`;
 
-  await resend.emails.send({
+  // C4: Wrap in try-catch with error handling
+  try {
+    const { data, error } = await resend.emails.send({
     from: `Nosmero <${FROM_EMAIL}>`,
     to: email,
     subject: 'Verify your Nosmero account',
@@ -91,7 +160,18 @@ https://nosmero.com`,
   </p>
 </body>
 </html>`
-  });
+    });
+
+    // C4: Check for error in response
+    if (error) {
+      throw new Error(`Failed to send verification email: ${error.message}`);
+    }
+
+    return { sent: true, messageId: data?.id };
+  } catch (error) {
+    console.error('[Email] Error sending verification email:', error.message);
+    throw error;
+  }
 }
 
 /**
@@ -100,14 +180,27 @@ https://nosmero.com`,
  * @param {string} token - Reset token
  */
 export async function sendPasswordResetEmail(email, token) {
+  // C1: Validate email address
+  if (!isValidEmail(email)) {
+    throw new Error('Invalid email address');
+  }
+
+  // C2: Validate token
+  if (!isValidToken(token)) {
+    throw new Error('Invalid reset token');
+  }
+
   if (!resend) {
-    console.log(`[Email] Would send password reset to ${email} (Resend not configured)`);
+    console.log('[Email] Would send password reset (Resend not configured)');
     return;
   }
 
-  const resetUrl = `${BASE_URL}/reset-password?token=${token}`;
+  // C2: Use encodeURIComponent for token in URL
+  const resetUrl = `${BASE_URL}/reset-password?token=${encodeURIComponent(token)}`;
 
-  await resend.emails.send({
+  // C4: Wrap in try-catch with error handling
+  try {
+    const { data, error } = await resend.emails.send({
     from: `Nosmero <${FROM_EMAIL}>`,
     to: email,
     subject: 'Reset your Nosmero password',
@@ -172,7 +265,18 @@ https://nosmero.com`,
   </p>
 </body>
 </html>`
-  });
+    });
+
+    // C4: Check for error in response
+    if (error) {
+      throw new Error(`Failed to send password reset email: ${error.message}`);
+    }
+
+    return { sent: true, messageId: data?.id };
+  } catch (error) {
+    console.error('[Email] Error sending password reset email:', error.message);
+    throw error;
+  }
 }
 
 /**
@@ -183,15 +287,23 @@ https://nosmero.com`,
  * @param {string} username - The username for reference
  */
 export async function sendNsecBackupEmail(email, nsec, username) {
+  // C1: Validate email address
+  if (!isValidEmail(email)) {
+    throw new Error('Invalid email address');
+  }
+
   if (!resend) {
-    console.log(`[Email] Would send nsec backup (Resend not configured)`);
+    console.log('[Email] Would send nsec backup (Resend not configured)');
     return { sent: false, reason: 'resend_not_configured' };
   }
 
-  // IMPORTANT: Do NOT log the email address or nsec
+  // C5: Do NOT log the email address or nsec - only safe identifiers
   console.log(`[Email] Sending one-time nsec backup for user: ${username}`);
 
   try {
+    // C3: Escape username for HTML to prevent XSS
+    const escapedUsername = escapeHtml(username);
+
     const { data, error } = await resend.emails.send({
       from: `Nosmero <${FROM_EMAIL}>`,
       to: email,
@@ -234,7 +346,7 @@ This is an automated one-time email. Your email address has been permanently del
 
     <p>Welcome to Nosmero! Your account has been created.</p>
 
-    <p><strong>Username:</strong> <code style="background: #333; padding: 2px 8px; border-radius: 4px;">${username}</code></p>
+    <p><strong>Username:</strong> <code style="background: #333; padding: 2px 8px; border-radius: 4px;">${escapedUsername}</code></p>
 
     <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.2), rgba(139, 92, 246, 0.2)); border: 2px solid #FF6600; border-radius: 8px; padding: 20px; margin: 20px 0;">
       <p style="margin: 0 0 10px 0; color: #FF6600; font-weight: bold;">YOUR PRIVATE KEY (nsec) - SAVE THIS!</p>

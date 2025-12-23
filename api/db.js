@@ -66,6 +66,56 @@ try {
 
 console.log('[DB] SQLite database initialized at', DB_PATH);
 
+/**
+ * Input validation helper function
+ * @param {Object} params - Parameters to validate
+ * @throws {Error} If validation fails
+ */
+function validateInput(params) {
+  const { npub, email, username, password_hash, token_type } = params;
+
+  // Validate npub format (bech32 format)
+  if (npub !== undefined && npub !== null) {
+    if (typeof npub !== 'string' || !/^npub1[a-z0-9]{58}$/.test(npub)) {
+      throw new Error('Invalid npub format');
+    }
+  }
+
+  // Validate email format and length
+  if (email !== undefined && email !== null) {
+    if (typeof email !== 'string' || email.length > 255) {
+      throw new Error('Email must be a string with max 255 characters');
+    }
+    // Basic email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      throw new Error('Invalid email format');
+    }
+  }
+
+  // Validate username format and length (3-50 chars, alphanumeric/underscore/hyphen)
+  if (username !== undefined && username !== null) {
+    if (typeof username !== 'string' || !/^[a-zA-Z0-9_-]{3,50}$/.test(username)) {
+      throw new Error('Username must be 3-50 alphanumeric characters, underscores, or hyphens');
+    }
+  }
+
+  // Validate password_hash is hex string
+  if (password_hash !== undefined && password_hash !== null) {
+    if (typeof password_hash !== 'string' || !/^[a-f0-9]+$/i.test(password_hash)) {
+      throw new Error('Password hash must be a valid hex string');
+    }
+  }
+
+  // Validate token type whitelist
+  if (token_type !== undefined && token_type !== null) {
+    const validTokenTypes = ['verify', 'reset'];
+    if (!validTokenTypes.includes(token_type)) {
+      throw new Error('Invalid token type. Must be "verify" or "reset"');
+    }
+  }
+}
+
 // Prepared statements for performance
 const statements = {
   // User queries
@@ -165,6 +215,9 @@ const statements = {
  * @returns {Object} Created user with id
  */
 export function createUser({ npub, email, username, ncryptsec, password_hash, password_salt }) {
+  // Validate all inputs
+  validateInput({ npub, email, username, password_hash });
+
   try {
     const result = statements.createUser.run({
       npub,
@@ -238,9 +291,14 @@ export function getUserByNpub(npub) {
 
 /**
  * Update last login timestamp
- * @param {number} userId
+ * @param {number} userId - User ID to update
+ * @param {number} authenticatedUserId - ID of the authenticated user making the request
  */
-export function updateLastLogin(userId) {
+export function updateLastLogin(userId, authenticatedUserId) {
+  // Authorization check: user can only update their own login timestamp
+  if (userId !== authenticatedUserId) {
+    throw new Error('Unauthorized: Cannot update login timestamp for another user');
+  }
   statements.updateLastLogin.run(userId);
 }
 
@@ -255,6 +313,9 @@ export function updateLastLogin(userId) {
  * @param {string} data.password_salt
  */
 export function updateUserRecovery({ npub, email, username, ncryptsec, password_hash, password_salt }) {
+  // Validate all inputs
+  validateInput({ npub, email, username, password_hash });
+
   statements.updateUserRecovery.run({
     npub,
     email: email || null,
@@ -267,18 +328,28 @@ export function updateUserRecovery({ npub, email, username, ncryptsec, password_
 
 /**
  * Update user's ncryptsec (for password reset)
- * @param {number} userId
- * @param {string} ncryptsec
+ * @param {number} userId - User ID to update
+ * @param {string} ncryptsec - New encrypted private key
+ * @param {number} authenticatedUserId - ID of the authenticated user making the request
  */
-export function updateNcryptsec(userId, ncryptsec) {
+export function updateNcryptsec(userId, ncryptsec, authenticatedUserId) {
+  // Authorization check: user can only update their own ncryptsec
+  if (userId !== authenticatedUserId) {
+    throw new Error('Unauthorized: Cannot update ncryptsec for another user');
+  }
   statements.updateNcryptsec.run(ncryptsec, userId);
 }
 
 /**
  * Mark user's email as verified
- * @param {number} userId
+ * @param {number} userId - User ID to verify
+ * @param {number} authenticatedUserId - ID of the authenticated user making the request
  */
-export function verifyUserEmail(userId) {
+export function verifyUserEmail(userId, authenticatedUserId) {
+  // Authorization check: user can only verify their own email
+  if (userId !== authenticatedUserId) {
+    throw new Error('Unauthorized: Cannot verify email for another user');
+  }
   statements.verifyEmail.run(userId);
 }
 
@@ -317,6 +388,9 @@ export function npubExists(npub) {
  * @returns {string} Generated token
  */
 export function createToken(userId, type, expiresInSeconds) {
+  // Validate token type against whitelist
+  validateInput({ token_type: type });
+
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = Math.floor(Date.now() / 1000) + expiresInSeconds;
   statements.createToken.run(userId, token, type, expiresAt);
@@ -353,6 +427,3 @@ export function cleanupExpiredTokens() {
 
 // Clean up expired tokens every hour
 setInterval(cleanupExpiredTokens, 60 * 60 * 1000);
-
-// Export database for advanced queries if needed
-export { db };

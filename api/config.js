@@ -35,7 +35,13 @@ export const config = {
   verification: {
     minConfirmations: 0, // Accept unconfirmed transactions
     timeout: 30000, // 30 seconds timeout for RPC calls
-    saltSecret: process.env.HASH_SALT || 'nosmero-verification-salt-change-in-production'
+    saltSecret: (() => {
+      const salt = process.env.HASH_SALT;
+      if (!salt || salt.length < 32) {
+        throw new Error('HASH_SALT environment variable must be set with at least 32 characters');
+      }
+      return salt;
+    })()
   },
 
   // Paywall encryption key for encrypting decryption keys at rest

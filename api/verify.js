@@ -6,6 +6,27 @@ import { config } from './config.js';
 
 const { MoneroDaemonRpc } = moneroTs;
 
+/**
+ * Validate Monero address format
+ * Standard addresses: 95 chars starting with 4 or 8
+ * Integrated addresses: 106 chars starting with 4
+ */
+function isValidMoneroAddress(address) {
+  if (typeof address !== 'string') return false;
+
+  // Standard address: 95 characters, starts with 4 or 8
+  if (address.length === 95 && (address[0] === '4' || address[0] === '8')) {
+    return /^[0-9A-Za-z]+$/.test(address);
+  }
+
+  // Integrated address: 106 characters, starts with 4
+  if (address.length === 106 && address[0] === '4') {
+    return /^[0-9A-Za-z]+$/.test(address);
+  }
+
+  return false;
+}
+
 // Retry configuration for transient failures
 const RETRY_CONFIG = {
   maxAttempts: 5,              // More attempts for tx propagation
@@ -50,15 +71,17 @@ export async function verifyTransactionProof({ txid, txKey, recipientAddress, ex
   console.log(`[Verify:${requestId}] Expected amount: ${expectedAmount} XMR`);
 
   // Input validation
-  if (!txid || typeof txid !== 'string' || txid.length !== 64) {
+  const hexRegex = /^[0-9a-fA-F]{64}$/;
+
+  if (!txid || typeof txid !== 'string' || !hexRegex.test(txid)) {
     throw new Error('Invalid transaction ID format');
   }
 
-  if (!txKey || typeof txKey !== 'string' || txKey.length !== 64) {
+  if (!txKey || typeof txKey !== 'string' || !hexRegex.test(txKey)) {
     throw new Error('Invalid transaction key format');
   }
 
-  if (!recipientAddress || typeof recipientAddress !== 'string') {
+  if (!isValidMoneroAddress(recipientAddress)) {
     throw new Error('Invalid recipient address');
   }
 
@@ -94,14 +117,15 @@ export async function verifyTransactionProof({ txid, txKey, recipientAddress, ex
 
   const totalTime = Date.now() - startTime;
   console.error(`[Verify:${requestId}] === Verification FAILED after ${totalTime}ms ===`);
+  console.error(`[Verify:${requestId}] Last error: ${lastError?.message || 'Unknown error'}`);
 
   // Provide user-friendly error message
   if (lastError && isTxNotFoundError(lastError.message)) {
     throw new Error('Transaction not yet confirmed on the network. Please wait a few seconds and try again.');
   }
 
-  // All nodes failed
-  throw new Error(`All RPC nodes failed. Last error: ${lastError?.message || 'Unknown error'}`);
+  // All nodes failed - generic error message to prevent information leakage
+  throw new Error('Transaction verification failed. Please check your transaction details and try again.');
 }
 
 /**
@@ -160,10 +184,13 @@ async function verifyWithRpcNodeRetry(rpcUrl, { txid, txKey, recipientAddress, e
 
   // If all failures were "tx not found", provide specific error
   if (txNotFoundCount === RETRY_CONFIG.maxAttempts) {
+    console.error(`[Verify:${requestId}] Transaction not found after ${RETRY_CONFIG.maxAttempts} attempts`);
     throw new Error('Transaction not found after multiple attempts. It may still be propagating - please wait 30 seconds and try again.');
   }
 
-  throw lastError;
+  // Log detailed error internally
+  console.error(`[Verify:${requestId}] Verification failed: ${lastError?.message}`);
+  throw new Error('Transaction verification failed. Please check your transaction details and try again.');
 }
 
 /**

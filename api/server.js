@@ -45,6 +45,17 @@ app.use(cors({
 // Body parser
 app.use(express.json({ limit: '10kb' }));
 
+// Block access to test and trigger files (defense in depth)
+app.use((req, res, next) => {
+  if (/^\/api\/(test-|trigger-).*\.js$/.test(req.path)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Not found'
+    });
+  }
+  next();
+});
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: config.rateLimit.windowMs,
@@ -1056,7 +1067,7 @@ const paywallReadLimiter = rateLimit({
 });
 
 // Create a paywall for content (creator)
-app.post('/api/paywall/create', paywallLimiter, (req, res) => {
+app.post('/api/paywall/create', paywallLimiter, async (req, res) => {
   try {
     const {
       note_id: noteId,
@@ -1076,7 +1087,7 @@ app.post('/api/paywall/create', paywallLimiter, (req, res) => {
       });
     }
 
-    const result = Paywall.createPaywall({
+    const result = await Paywall.createPaywall({
       noteId,
       creatorPubkey,
       paymentAddress,
@@ -1101,10 +1112,10 @@ app.post('/api/paywall/create', paywallLimiter, (req, res) => {
 });
 
 // Get paywall info (public)
-app.get('/api/paywall/info/:noteId', paywallReadLimiter, (req, res) => {
+app.get('/api/paywall/info/:noteId', paywallReadLimiter, async (req, res) => {
   try {
     const { noteId } = req.params;
-    const info = Paywall.getPaywallInfo(noteId);
+    const info = await Paywall.getPaywallInfo(noteId);
 
     if (!info) {
       return res.status(404).json({
@@ -1128,7 +1139,7 @@ app.get('/api/paywall/info/:noteId', paywallReadLimiter, (req, res) => {
 });
 
 // Get multiple paywall infos (batch)
-app.post('/api/paywall/info-batch', paywallReadLimiter, (req, res) => {
+app.post('/api/paywall/info-batch', paywallReadLimiter, async (req, res) => {
   try {
     const { note_ids: noteIds } = req.body;
 
@@ -1146,7 +1157,7 @@ app.post('/api/paywall/info-batch', paywallReadLimiter, (req, res) => {
       });
     }
 
-    const results = Paywall.getPaywallInfoBatch(noteIds);
+    const results = await Paywall.getPaywallInfoBatch(noteIds);
 
     res.json({
       success: true,
@@ -1163,12 +1174,12 @@ app.post('/api/paywall/info-batch', paywallReadLimiter, (req, res) => {
 });
 
 // Check if user has unlocked content
-app.get('/api/paywall/check-unlock/:noteId/:buyerPubkey', paywallReadLimiter, (req, res) => {
+app.get('/api/paywall/check-unlock/:noteId/:buyerPubkey', paywallReadLimiter, async (req, res) => {
   try {
     const { noteId, buyerPubkey } = req.params;
 
     // First check if user is the creator (author can always view their own content)
-    const creatorKey = Paywall.getCreatorKey(noteId, buyerPubkey);
+    const creatorKey = await Paywall.getCreatorKey(noteId, buyerPubkey);
     if (creatorKey) {
       return res.json({
         success: true,
@@ -1179,11 +1190,11 @@ app.get('/api/paywall/check-unlock/:noteId/:buyerPubkey', paywallReadLimiter, (r
     }
 
     // Check if user has purchased/unlocked
-    const unlocked = Paywall.hasUnlocked(noteId, buyerPubkey);
+    const unlocked = await Paywall.hasUnlocked(noteId, buyerPubkey);
 
     if (unlocked) {
       // Return the decryption key if already unlocked
-      const decryptionKey = Paywall.getUnlockedKey(noteId, buyerPubkey);
+      const decryptionKey = await Paywall.getUnlockedKey(noteId, buyerPubkey);
       return res.json({
         success: true,
         unlocked: true,
@@ -1206,7 +1217,7 @@ app.get('/api/paywall/check-unlock/:noteId/:buyerPubkey', paywallReadLimiter, (r
 });
 
 // Initiate a purchase (returns payment details)
-app.post('/api/paywall/purchase', paywallLimiter, (req, res) => {
+app.post('/api/paywall/purchase', paywallLimiter, async (req, res) => {
   try {
     const { note_id: noteId, buyer_pubkey: buyerPubkey } = req.body;
 
@@ -1217,7 +1228,7 @@ app.post('/api/paywall/purchase', paywallLimiter, (req, res) => {
       });
     }
 
-    const result = Paywall.initiatePurchase(noteId, buyerPubkey);
+    const result = await Paywall.initiatePurchase(noteId, buyerPubkey);
 
     res.json({
       success: true,
@@ -1229,7 +1240,7 @@ app.post('/api/paywall/purchase', paywallLimiter, (req, res) => {
 
     if (error.message === 'Already unlocked') {
       // Return the key if already unlocked
-      const decryptionKey = Paywall.getUnlockedKey(req.body.note_id, req.body.buyer_pubkey);
+      const decryptionKey = await Paywall.getUnlockedKey(req.body.note_id, req.body.buyer_pubkey);
       return res.json({
         success: true,
         already_unlocked: true,
@@ -1298,7 +1309,7 @@ app.post('/api/paywall/verify', paywallLimiter, async (req, res) => {
 });
 
 // Get user's unlocked content
-app.get('/api/paywall/my-unlocks/:buyerPubkey', paywallReadLimiter, (req, res) => {
+app.get('/api/paywall/my-unlocks/:buyerPubkey', paywallReadLimiter, async (req, res) => {
   try {
     const { buyerPubkey } = req.params;
 
@@ -1309,7 +1320,7 @@ app.get('/api/paywall/my-unlocks/:buyerPubkey', paywallReadLimiter, (req, res) =
       });
     }
 
-    const unlocks = Paywall.getUserUnlocks(buyerPubkey);
+    const unlocks = await Paywall.getUserUnlocks(buyerPubkey);
 
     res.json({
       success: true,
@@ -1362,7 +1373,7 @@ app.get('/api/paywall/creator-key/:noteId/:creatorPubkey', paywallReadLimiter, a
 });
 
 // Get creator stats
-app.get('/api/paywall/creator-stats/:creatorPubkey', paywallReadLimiter, (req, res) => {
+app.get('/api/paywall/creator-stats/:creatorPubkey', paywallReadLimiter, async (req, res) => {
   try {
     const { creatorPubkey } = req.params;
 
@@ -1373,7 +1384,7 @@ app.get('/api/paywall/creator-stats/:creatorPubkey', paywallReadLimiter, (req, r
       });
     }
 
-    const stats = Paywall.getCreatorStats(creatorPubkey);
+    const stats = await Paywall.getCreatorStats(creatorPubkey);
 
     res.json({
       success: true,
@@ -1390,7 +1401,7 @@ app.get('/api/paywall/creator-stats/:creatorPubkey', paywallReadLimiter, (req, r
 });
 
 // Delete a paywall (creator only)
-app.delete('/api/paywall/:noteId', paywallLimiter, (req, res) => {
+app.delete('/api/paywall/:noteId', paywallLimiter, async (req, res) => {
   try {
     const { noteId } = req.params;
     const { creator_pubkey: creatorPubkey } = req.body;
@@ -1402,7 +1413,7 @@ app.delete('/api/paywall/:noteId', paywallLimiter, (req, res) => {
       });
     }
 
-    Paywall.deletePaywall(noteId, creatorPubkey);
+    await Paywall.deletePaywall(noteId, creatorPubkey);
 
     res.json({
       success: true,

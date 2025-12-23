@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const CACHE_FILE = path.join(__dirname, 'data', 'new-voices-cache.json');
-const RELATR_BASE_URL = 'http://143.198.49.143:3001';
+const RELATR_BASE_URL = process.env.RELATR_API_URL || 'http://localhost:3001';
 
 // Relays to query for new profiles
 const SEARCH_RELAYS = [

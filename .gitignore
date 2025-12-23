@@ -44,10 +44,16 @@ logo_nosmero.svg
 nosmero-logo-orange.svg
 nosmeroav.png
 
+# Test and trigger files
+api/test-*.js
+api/trigger-*.js
+
 # System files
 .DS_Store
 Thumbs.db
 
-# Test and trigger scripts (development only)
-api/test-*.js
-api/trigger-*.js
+# Data files (runtime generated)
+api/data/*.json
+api/data/*.db-shm
+api/data/*.db-wal
+trending-cache.json
