@@ -7,6 +7,14 @@ import { escapeHtml } from '../utils.js';
 let toastIdCounter = 0;
 const activeToasts = new Map();
 
+// Icon mapping (moved to module-level constant to avoid recreation)
+const TOAST_ICONS = {
+    success: '✅',
+    error: '❌',
+    info: 'ℹ️',
+    warning: '⚠️'
+};
+
 /**
  * Show a toast notification
  * @param {string} message - Main message to display
@@ -16,6 +24,9 @@ const activeToasts = new Map();
  * @returns {number} Toast ID that can be used to manually dismiss
  */
 export function showToast(message, type = 'info', duration = 3000, title = '') {
+    // Validate message parameter
+    const sanitizedMessage = typeof message === 'string' ? message : '';
+
     const container = document.getElementById('toastContainer');
     if (!container) {
         console.warn('Toast container not found');
@@ -37,53 +48,67 @@ export function showToast(message, type = 'info', duration = 3000, title = '') {
         sanitizedDuration = Math.max(0, Math.min(3600000, duration));
     }
 
-    // Icon mapping
-    const icons = {
-        success: '✅',
-        error: '❌',
-        info: 'ℹ️',
-        warning: '⚠️'
-    };
-
     // Create toast element
     const toast = document.createElement('div');
     toast.className = `toast ${sanitizedType}`;
     toast.setAttribute('data-toast-id', toastId);
 
     toast.innerHTML = `
-        <div class="toast-icon">${icons[sanitizedType]}</div>
+        <div class="toast-icon">${TOAST_ICONS[sanitizedType]}</div>
         <div class="toast-content">
             ${title ? `<div class="toast-title">${escapeHtml(title)}</div>` : ''}
-            <div class="toast-message">${escapeHtml(message)}</div>
+            <div class="toast-message">${escapeHtml(sanitizedMessage)}</div>
         </div>
         <button class="toast-close" data-action="dismiss-toast" data-toast-id="${toastId}">×</button>
         ${sanitizedDuration > 0 ? `<div class="toast-progress" style="animation-duration: ${sanitizedDuration}ms;"></div>` : ''}
     `;
+
+    // Track timeout ID and dismissed flag to prevent double-firing
+    let timeoutId = null;
+    let isDismissed = false;
 
     // Add event listener for dismiss button
     const closeButton = toast.querySelector('[data-action="dismiss-toast"]');
     if (closeButton) {
         closeButton.addEventListener('click', (e) => {
             e.stopPropagation();
-            dismissToast(toastId);
+            if (!isDismissed) {
+                isDismissed = true;
+                if (timeoutId !== null) {
+                    clearTimeout(timeoutId);
+                }
+                dismissToast(toastId);
+            }
         });
     }
 
     // Add click to dismiss
     toast.addEventListener('click', (e) => {
-        if (!e.target.classList.contains('toast-close')) {
+        if (!e.target.classList.contains('toast-close') && !isDismissed) {
+            isDismissed = true;
+            if (timeoutId !== null) {
+                clearTimeout(timeoutId);
+            }
             dismissToast(toastId);
         }
     });
 
     container.appendChild(toast);
-    activeToasts.set(toastId, toast);
+    activeToasts.set(toastId, { element: toast, timeoutId, isDismissed });
 
     // Auto-dismiss after duration
     if (sanitizedDuration > 0) {
-        setTimeout(() => {
-            dismissToast(toastId);
+        timeoutId = setTimeout(() => {
+            if (!isDismissed) {
+                isDismissed = true;
+                dismissToast(toastId);
+            }
         }, sanitizedDuration);
+        // Update stored timeout ID
+        const toastData = activeToasts.get(toastId);
+        if (toastData) {
+            toastData.timeoutId = timeoutId;
+        }
     }
 
     return toastId;
@@ -94,15 +119,35 @@ export function showToast(message, type = 'info', duration = 3000, title = '') {
  * @param {number} toastId - ID of the toast to dismiss
  */
 export function dismissToast(toastId) {
-    const toast = activeToasts.get(toastId);
-    if (!toast) return;
+    const toastData = activeToasts.get(toastId);
+    if (!toastData) return;
+
+    const toast = toastData.element;
+
+    // Clear timeout if it exists
+    if (toastData.timeoutId !== null) {
+        clearTimeout(toastData.timeoutId);
+    }
 
     // Add exit animation
     toast.style.animation = 'slideOut 0.3s ease';
 
-    setTimeout(() => {
+    // Cleanup handler for animation end
+    const handleAnimationEnd = () => {
+        toast.removeEventListener('animationend', handleAnimationEnd);
         toast.remove();
         activeToasts.delete(toastId);
+    };
+
+    toast.addEventListener('animationend', handleAnimationEnd);
+
+    // Fallback timeout in case animationend doesn't fire
+    setTimeout(() => {
+        if (activeToasts.has(toastId)) {
+            toast.removeEventListener('animationend', handleAnimationEnd);
+            toast.remove();
+            activeToasts.delete(toastId);
+        }
     }, 300);
 }
 

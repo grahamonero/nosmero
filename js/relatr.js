@@ -9,13 +9,15 @@ export let trustScoreCache = {};
 
 // Cache configuration
 const CACHE_TTL = 2 * 60 * 60 * 1000; // 2 hours (matches backend cache)
+const MAX_CACHE_SIZE = 1000; // Maximum number of cached entries (LRU eviction)
 const BATCH_SIZE = 50; // Maximum pubkeys per batch request
 const REQUEST_DEBOUNCE = 100; // ms to wait before sending batch request
+const FETCH_TIMEOUT = 10000; // 10 second timeout for fetch requests
 
-// Pending batch requests
+// Pending batch requests (grouped by sourcePubkey)
 let pendingBatchRequest = null;
-let pendingPubkeys = new Set();
-let batchTimeout = null;
+let pendingBatches = new Map(); // sourcePubkey -> Set of pubkeys
+let batchTimeouts = new Map(); // sourcePubkey -> timeout ID
 
 // API endpoints
 const API_BASE = '/api/relatr';
@@ -47,6 +49,28 @@ function isValidPubkey(pubkey) {
 }
 
 /**
+ * Evict oldest cache entries when cache exceeds MAX_CACHE_SIZE (LRU)
+ * @private
+ */
+function evictOldestCacheEntries() {
+  const cacheSize = Object.keys(trustScoreCache).length;
+
+  if (cacheSize >= MAX_CACHE_SIZE) {
+    // Sort entries by timestamp (oldest first)
+    const entries = Object.entries(trustScoreCache)
+      .sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+    // Remove oldest 10% to avoid frequent evictions
+    const entriesToRemove = Math.floor(MAX_CACHE_SIZE * 0.1);
+    for (let i = 0; i < entriesToRemove && i < entries.length; i++) {
+      delete trustScoreCache[entries[i][0]];
+    }
+
+    console.log(`[Relatr] Cache eviction: removed ${entriesToRemove} oldest entries`);
+  }
+}
+
+/**
  * Get trust score for a single pubkey
  * @param {string} pubkey - Nostr public key (hex)
  * @param {string} sourcePubkey - Optional: perspective pubkey (defaults to current user)
@@ -63,7 +87,7 @@ export async function getTrustScore(pubkey, sourcePubkey = null) {
   // Validate pubkey format
   if (!isValidPubkey(pubkey)) {
     console.warn('[Relatr] Invalid pubkey format:', pubkey);
-    return { score: 0, distance: -1, cached: false, error: 'Invalid pubkey' };
+    return { error: true, message: 'Invalid pubkey', score: 0, distance: -1, cached: false };
   }
 
   // Validate sourcePubkey if provided
@@ -94,29 +118,46 @@ export async function getTrustScore(pubkey, sourcePubkey = null) {
     const shareData = localStorage.getItem('shareDataWithRelatr') === 'true'; // Default: false
     const headers = shareData ? {} : { 'X-Relatr-Opt-Out': 'true' };
 
-    const response = await fetch(url, { headers });
+    // Add timeout to fetch request
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+
+    const response = await fetch(url, {
+      headers,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(`HTTP error: ${response.status}`);
     }
 
     const data = await response.json();
 
+    // Validate response structure
+    if (typeof data !== 'object' || data === null) {
+      throw new Error('Invalid response structure: expected object');
+    }
+
     // Cache result
     const result = {
-      score: data.score || 0,
-      distance: data.distance || -1,
+      score: typeof data.score === 'number' ? data.score : 0,
+      distance: typeof data.distance === 'number' ? data.distance : -1,
       timestamp: Date.now(),
       cached: false
     };
+
+    // Evict old entries if cache is full
+    evictOldestCacheEntries();
 
     trustScoreCache[cacheKey] = result;
 
     return result;
 
   } catch (error) {
-    console.error('[Relatr] Failed to fetch trust score:', error);
-    return { score: 0, distance: -1, cached: false, error: error.message };
+    const message = error.name === 'AbortError' ? 'Request timeout' : error.message;
+    console.error('[Relatr] Failed to fetch trust score:', message);
+    return { error: true, message, score: 0, distance: -1, cached: false };
   }
 }
 
@@ -219,14 +260,20 @@ async function fetchBatch(pubkeys, sourcePubkey = null) {
       ...(shareData ? {} : { 'X-Relatr-Opt-Out': 'true' })
     };
 
+    // Add timeout to fetch request
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+
     const response = await fetch(`${API_BASE}/trust-scores`, {
       method: 'POST',
       headers,
+      signal: controller.signal,
       body: JSON.stringify({
         pubkeys,
         source: sourcePubkey
       })
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -234,14 +281,28 @@ async function fetchBatch(pubkeys, sourcePubkey = null) {
 
     const data = await response.json();
 
-    if (!data.success || !data.results) {
-      throw new Error('Invalid batch response');
+    // Validate response structure
+    if (typeof data !== 'object' || data === null) {
+      throw new Error('Invalid batch response: expected object');
+    }
+
+    if (!data.success || !Array.isArray(data.results)) {
+      throw new Error('Invalid batch response: missing success flag or results array');
     }
 
     // Process results and cache
     const results = {};
 
+    // Evict old entries before adding batch results
+    evictOldestCacheEntries();
+
     data.results.forEach(item => {
+      // Validate item structure
+      if (typeof item !== 'object' || item === null || !item.pubkey) {
+        console.warn('[Relatr] Invalid item in batch response:', item);
+        return;
+      }
+
       if (item.error) {
         console.warn(`[Relatr] Error for ${item.pubkey}:`, item.error);
         return;
@@ -250,8 +311,8 @@ async function fetchBatch(pubkeys, sourcePubkey = null) {
       // Use the sourcePubkey parameter passed to fetchBatch (already personalization-aware)
       const cacheKey = `${item.pubkey}:${sourcePubkey || 'default'}`;
       const result = {
-        score: item.score || 0,
-        distance: item.distance || -1,
+        score: typeof item.score === 'number' ? item.score : 0,
+        distance: typeof item.distance === 'number' ? item.distance : -1,
         timestamp: Date.now(),
         cached: false
       };
@@ -286,24 +347,35 @@ export function queueTrustScoreRequest(pubkey, sourcePubkey = null) {
     return; // Already cached
   }
 
-  // Add to pending set
-  pendingPubkeys.add(pubkey);
+  // Group by sourcePubkey to avoid race conditions
+  const batchKey = sourcePubkey || 'default';
 
-  // Clear existing timeout
-  if (batchTimeout) {
-    clearTimeout(batchTimeout);
+  // Initialize batch set if needed
+  if (!pendingBatches.has(batchKey)) {
+    pendingBatches.set(batchKey, new Set());
   }
 
-  // Set new timeout to send batch request
-  batchTimeout = setTimeout(async () => {
-    const pubkeysToFetch = Array.from(pendingPubkeys);
-    pendingPubkeys.clear();
+  // Add to pending set for this sourcePubkey
+  pendingBatches.get(batchKey).add(pubkey);
+
+  // Clear existing timeout for this sourcePubkey
+  if (batchTimeouts.has(batchKey)) {
+    clearTimeout(batchTimeouts.get(batchKey));
+  }
+
+  // Set new timeout to send batch request for this sourcePubkey
+  const timeout = setTimeout(async () => {
+    const pubkeysToFetch = Array.from(pendingBatches.get(batchKey) || []);
+    pendingBatches.delete(batchKey);
+    batchTimeouts.delete(batchKey);
 
     if (pubkeysToFetch.length > 0) {
-      console.log(`[Relatr] Sending batch request for ${pubkeysToFetch.length} pubkeys`);
+      console.log(`[Relatr] Sending batch request for ${pubkeysToFetch.length} pubkeys (source: ${batchKey})`);
       await getTrustScores(pubkeysToFetch, sourcePubkey);
     }
   }, REQUEST_DEBOUNCE);
+
+  batchTimeouts.set(batchKey, timeout);
 }
 
 /**
@@ -365,11 +437,12 @@ export function getTrustBadge(score) {
 export function clearTrustScoreCache() {
   // Clear cache by deleting keys (avoid mutation issues)
   Object.keys(trustScoreCache).forEach(key => delete trustScoreCache[key]);
-  pendingPubkeys.clear();
-  if (batchTimeout) {
-    clearTimeout(batchTimeout);
-    batchTimeout = null;
-  }
+
+  // Clear all pending batches and timeouts
+  pendingBatches.clear();
+  batchTimeouts.forEach(timeout => clearTimeout(timeout));
+  batchTimeouts.clear();
+
   console.log('[Relatr] Trust score cache cleared');
 }
 
@@ -401,13 +474,21 @@ export function getTrustCacheStats() {
  */
 export function prefetchTrustScores(pubkeys, sourcePubkey = null) {
   if (!Array.isArray(pubkeys) || pubkeys.length === 0) {
+    console.debug('[Relatr] Prefetch skipped: empty or invalid pubkey array');
     return;
   }
 
   // Fire and forget - don't await
-  getTrustScores(pubkeys, sourcePubkey).catch(error => {
-    console.warn('[Relatr] Prefetch failed:', error);
-  });
+  getTrustScores(pubkeys, sourcePubkey)
+    .then(results => {
+      const successCount = Object.keys(results).length;
+      if (successCount > 0) {
+        console.log(`[Relatr] Prefetch successful: ${successCount}/${pubkeys.length} scores fetched`);
+      }
+    })
+    .catch(error => {
+      console.warn('[Relatr] Prefetch failed:', error.message || error);
+    });
 }
 
 // ==================== UTILITY FUNCTIONS ====================
@@ -437,7 +518,7 @@ export async function filterByTrustScore(pubkeys, minScore, sourcePubkey = null)
 export async function sortByTrustScore(pubkeys, sourcePubkey = null) {
   const scores = await getTrustScores(pubkeys, sourcePubkey);
 
-  return pubkeys.sort((a, b) => {
+  return [...pubkeys].sort((a, b) => {
     const scoreA = scores[a]?.score || 0;
     const scoreB = scores[b]?.score || 0;
     return scoreB - scoreA; // Descending order

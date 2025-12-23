@@ -2,7 +2,7 @@
 // NIP-85 Trust Assertion Publisher for Nosmero
 // Publishes kind 30382 events to Nostr relays
 
-import { SimplePool, finalizeEvent, nip19, verifyEvent } from 'nostr-tools';
+import { SimplePool, finalizeEvent, nip19, verifyEvent, getPublicKey } from 'nostr-tools';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -48,6 +48,19 @@ try {
   providerPubkey = decoded.data;
 } catch (error) {
   console.error('❌ Error decoding provider npub: Invalid format or corrupted key');
+  process.exit(1);
+}
+
+// Verify that nsec and npub form a valid keypair
+try {
+  const derivedPubkey = getPublicKey(providerPrivkey);
+  if (derivedPubkey !== providerPubkey) {
+    console.error('❌ Error: Private key (nsec) and public key (npub) do not form a valid keypair');
+    console.error('   The npub does not match the public key derived from the nsec');
+    process.exit(1);
+  }
+} catch (error) {
+  console.error('❌ Error verifying keypair:', error.message);
   process.exit(1);
 }
 
@@ -122,6 +135,23 @@ function createTrustAssertion(targetPubkey, score, metadata = {}) {
     event.tags.push(['followers', metadata.followers.toString()]);
   }
 
+  // Validate event structure before signing
+  if (typeof event.kind !== 'number') {
+    throw new Error('Event validation failed: kind must be a number');
+  }
+  if (typeof event.created_at !== 'number' || event.created_at <= 0) {
+    throw new Error('Event validation failed: created_at must be a positive number');
+  }
+  if (!Array.isArray(event.tags)) {
+    throw new Error('Event validation failed: tags must be an array');
+  }
+  if (typeof event.content !== 'string') {
+    throw new Error('Event validation failed: content must be a string');
+  }
+  if (typeof event.pubkey !== 'string' || event.pubkey.length !== 64) {
+    throw new Error('Event validation failed: pubkey must be a 64-character hex string');
+  }
+
   // Sign the event
   const signedEvent = finalizeEvent(event, providerPrivkey);
 
@@ -135,7 +165,7 @@ function createTrustAssertion(targetPubkey, score, metadata = {}) {
 }
 
 /**
- * Publish event to multiple relays with timeout
+ * Publish event to multiple relays with timeout and rate limiting
  */
 async function publishToRelays(pool, relays, event) {
   const results = {
@@ -144,7 +174,9 @@ async function publishToRelays(pool, relays, event) {
     timeout: []
   };
 
-  const publishPromises = relays.map(async (relay) => {
+  const RELAY_DELAY = 100; // 100ms delay between each relay to avoid rate limiting
+
+  for (const relay of relays) {
     try {
       const pub = pool.publish([relay], event);
 
@@ -177,9 +209,12 @@ async function publishToRelays(pool, relays, event) {
         results.failed.push(relay);
       }
     }
-  });
 
-  await Promise.allSettled(publishPromises);
+    // Add delay between relays to prevent rate limiting (except for last relay)
+    if (relay !== relays[relays.length - 1]) {
+      await sleep(RELAY_DELAY);
+    }
+  }
 
   return results;
 }
@@ -196,7 +231,7 @@ function sleep(ms) {
  */
 function formatRelayResults(results) {
   const total = results.success.length + results.failed.length + results.timeout.length;
-  const successRate = ((results.success.length / total) * 100).toFixed(1);
+  const successRate = total > 0 ? ((results.success.length / total) * 100).toFixed(1) : '0.0';
 
   return `✓ ${results.success.length} | ✗ ${results.failed.length} | ⏱ ${results.timeout.length} (${successRate}% success)`;
 }
@@ -266,76 +301,89 @@ async function publishTrustAssertions(options = {}) {
 
   console.log(`📦 Processing ${batches.length} batches...\n`);
 
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
-    const batchNum = i + 1;
+  try {
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      const batchNum = i + 1;
 
-    console.log(`\n📦 Batch ${batchNum}/${batches.length} (${batch.length} events):`);
-    console.log('─────────────────────────────────────────────────');
+      console.log(`\n📦 Batch ${batchNum}/${batches.length} (${batch.length} events):`);
+      console.log('─────────────────────────────────────────────────');
 
-    for (const account of batch) {
-      try {
-        // Validate account data
-        if (!isValidPubkey(account.pubkey)) {
-          throw new Error('Invalid pubkey format');
-        }
-        if (!isValidScore(account.score)) {
-          throw new Error('Invalid score value');
-        }
-
-        // Create trust assertion event
-        const event = createTrustAssertion(
-          account.pubkey,
-          account.score,
-          {
-            distance: account.distance,
-            followers: account.followers,
-            explanation: `Trust score from Nosmero Web of Trust (${account.score}/100)`
+      for (const account of batch) {
+        try {
+          // Validate account data
+          if (!isValidPubkey(account.pubkey)) {
+            throw new Error('Invalid pubkey format');
           }
-        );
+          if (!isValidScore(account.score)) {
+            throw new Error('Invalid score value');
+          }
 
-        // Log event details
-        const shortPubkey = `${account.pubkey.slice(0, 8)}...${account.pubkey.slice(-8)}`;
-        process.stdout.write(`  ${shortPubkey} | Score: ${account.score.toString().padStart(3)} | `);
+          // Create trust assertion event
+          const event = createTrustAssertion(
+            account.pubkey,
+            account.score,
+            {
+              distance: account.distance,
+              followers: account.followers,
+              explanation: `Trust score from Nosmero Web of Trust (${account.score}/100)`
+            }
+          );
 
-        if (dryRun) {
-          console.log('DRY RUN - Event created ✓');
-          stats.published++;
-          continue;
-        }
+          // Log event details
+          const shortPubkey = `${account.pubkey.slice(0, 8)}...${account.pubkey.slice(-8)}`;
+          process.stdout.write(`  ${shortPubkey} | Score: ${account.score.toString().padStart(3)} | `);
 
-        // Publish to relays
-        const results = await publishToRelays(pool, PUBLISHING_RELAYS, event);
+          if (dryRun) {
+            console.log('DRY RUN - Event created ✓');
+            stats.published++;
+            continue;
+          }
 
-        // Update statistics
-        stats.relayStats.totalAttempts += PUBLISHING_RELAYS.length;
-        stats.relayStats.totalSuccess += results.success.length;
-        stats.relayStats.totalFailed += results.failed.length;
-        stats.relayStats.totalTimeout += results.timeout.length;
+          // Publish to relays
+          const results = await publishToRelays(pool, PUBLISHING_RELAYS, event);
 
-        if (results.success.length > 0) {
-          console.log(formatRelayResults(results));
-          stats.published++;
-        } else {
-          console.log('❌ Failed on all relays');
+          // Update statistics
+          stats.relayStats.totalAttempts += PUBLISHING_RELAYS.length;
+          stats.relayStats.totalSuccess += results.success.length;
+          stats.relayStats.totalFailed += results.failed.length;
+          stats.relayStats.totalTimeout += results.timeout.length;
+
+          if (results.success.length > 0) {
+            console.log(formatRelayResults(results));
+            stats.published++;
+          } else {
+            console.log('❌ Failed on all relays');
+            stats.failed++;
+          }
+
+        } catch (error) {
+          // Specific error handling based on error type
+          if (error.message.includes('validation')) {
+            console.log(`❌ Validation Error: ${error.message}`);
+          } else if (error.message.includes('Invalid pubkey')) {
+            console.log(`❌ Invalid Pubkey: ${error.message}`);
+          } else if (error.message.includes('Invalid score')) {
+            console.log(`❌ Invalid Score: ${error.message}`);
+          } else if (error.message.includes('signature verification')) {
+            console.log(`❌ Signature Error: ${error.message}`);
+          } else {
+            console.log(`❌ Error: ${error.message}`);
+          }
           stats.failed++;
         }
+      }
 
-      } catch (error) {
-        console.log(`❌ Error: ${error.message}`);
-        stats.failed++;
+      // Delay between batches (except last batch)
+      if (i < batches.length - 1) {
+        console.log(`\n⏳ Waiting ${BATCH_DELAY / 1000}s before next batch...`);
+        await sleep(BATCH_DELAY);
       }
     }
-
-    // Delay between batches (except last batch)
-    if (i < batches.length - 1) {
-      console.log(`\n⏳ Waiting ${BATCH_DELAY / 1000}s before next batch...`);
-      await sleep(BATCH_DELAY);
-    }
+  } finally {
+    // Close relay connections - always runs even if there's an error
+    pool.close(PUBLISHING_RELAYS);
   }
-
-  // Close relay connections
-  pool.close(PUBLISHING_RELAYS);
 
   // Final statistics
   const duration = ((Date.now() - stats.startTime) / 1000).toFixed(1);
@@ -351,10 +399,16 @@ async function publishTrustAssertions(options = {}) {
   if (!dryRun) {
     console.log('Relay Statistics:');
     console.log(`  - Total publish attempts: ${stats.relayStats.totalAttempts}`);
-    console.log(`  - Successful: ${stats.relayStats.totalSuccess} (${((stats.relayStats.totalSuccess / stats.relayStats.totalAttempts) * 100).toFixed(1)}%)`);
+    const relaySuccessRate = stats.relayStats.totalAttempts > 0
+      ? ((stats.relayStats.totalSuccess / stats.relayStats.totalAttempts) * 100).toFixed(1)
+      : '0.0';
+    console.log(`  - Successful: ${stats.relayStats.totalSuccess} (${relaySuccessRate}%)`);
     console.log(`  - Failed: ${stats.relayStats.totalFailed}`);
     console.log(`  - Timeout: ${stats.relayStats.totalTimeout}`);
-    console.log(`  - Average success per event: ${(stats.relayStats.totalSuccess / stats.published).toFixed(1)} relays\n`);
+    const avgSuccess = stats.published > 0
+      ? (stats.relayStats.totalSuccess / stats.published).toFixed(1)
+      : '0.0';
+    console.log(`  - Average success per event: ${avgSuccess} relays\n`);
   }
 
   console.log('═══════════════════════════════════════════════════\n');

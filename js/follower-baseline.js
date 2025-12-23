@@ -197,7 +197,8 @@ export async function fetchFollowerBaseline() {
         const localBaseline = getLocalBaseline();
 
         // Query Nosmero relay for kind 30078 with our d-tag
-        const events = await State.pool.querySync(
+        // Use Promise.race to implement timeout (10 seconds)
+        const queryPromise = State.pool.querySync(
             [NOSMERO_RELAY],
             {
                 kinds: [30078],
@@ -206,6 +207,12 @@ export async function fetchFollowerBaseline() {
                 limit: 1
             }
         );
+
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Query timeout after 10 seconds')), 10000);
+        });
+
+        const events = await Promise.race([queryPromise, timeoutPromise]);
 
         if (events && events.length > 0) {
             // Found baseline on relay
@@ -281,8 +288,13 @@ export async function saveFollowerBaseline(baseline) {
         }
 
         // Publish to Nosmero relay
-        await State.pool.publish([NOSMERO_RELAY], signedEvent);
-        console.log('Follower baseline saved successfully');
+        try {
+            await State.pool.publish([NOSMERO_RELAY], signedEvent);
+            console.log('Follower baseline saved successfully');
+        } catch (publishError) {
+            console.error('Failed to publish follower baseline to relay:', publishError);
+            throw publishError;
+        }
 
         return true;
 
@@ -302,14 +314,21 @@ export async function saveFollowerBaseline(baseline) {
  * @returns {object} - New baseline object
  */
 export function createInitialBaseline(currentFollowerPubkeys) {
+    // Validate currentFollowerPubkeys is an array
+    if (!Array.isArray(currentFollowerPubkeys)) {
+        console.error('createInitialBaseline: currentFollowerPubkeys must be an array');
+        currentFollowerPubkeys = [];
+    }
+
     const now = Math.floor(Date.now() / 1000);
     // Set initial followers to 30 days ago so they're outside the notification window
     const oldTimestamp = now - (30 * 24 * 60 * 60);
-    const followers = {};
 
-    currentFollowerPubkeys.forEach(pubkey => {
-        followers[pubkey] = oldTimestamp;  // Old timestamp = won't show as notification
-    });
+    // Optimize by using reduce instead of forEach with push
+    const followers = currentFollowerPubkeys.reduce((acc, pubkey) => {
+        acc[pubkey] = oldTimestamp;  // Old timestamp = won't show as notification
+        return acc;
+    }, {});
 
     return {
         version: 1,
@@ -372,6 +391,12 @@ export function compareFollowersToBaseline(currentFollowerPubkeys, baseline) {
  * @returns {object} - Updated baseline object
  */
 export function updateBaselineWithNewFollowers(baseline, newFollowers) {
+    // Validate newFollowers is an array with expected structure
+    if (!Array.isArray(newFollowers)) {
+        console.error('updateBaselineWithNewFollowers: newFollowers must be an array');
+        newFollowers = [];
+    }
+
     const updated = { ...baseline };
     updated.followers = { ...baseline.followers };
     updated.lastUpdated = Math.floor(Date.now() / 1000);
@@ -396,8 +421,13 @@ function isBaselineCorrupted(baseline) {
     if (timestamps.length < 2) return false;
 
     const now = Math.floor(Date.now() / 1000);
-    const minTs = Math.min(...timestamps);
-    const maxTs = Math.max(...timestamps);
+    // Use loop to find min/max to avoid stack overflow on large arrays
+    let minTs = timestamps[0];
+    let maxTs = timestamps[0];
+    for (let i = 1; i < timestamps.length; i++) {
+        if (timestamps[i] < minTs) minTs = timestamps[i];
+        if (timestamps[i] > maxTs) maxTs = timestamps[i];
+    }
     const spread = maxTs - minTs;
 
     // Only flag as corrupted if:
@@ -444,6 +474,12 @@ async function forceResetBaseline(currentFollowerPubkeys = []) {
  * @returns {Promise<object>} - { newFollowers: [...], recentFollowers: [...], baseline: {...}, isFirstTime: boolean }
  */
 export async function processFollowersWithBaseline(followerEvents) {
+    // Validate followerEvents is an array
+    if (!Array.isArray(followerEvents)) {
+        console.error('processFollowersWithBaseline: followerEvents must be an array');
+        followerEvents = [];
+    }
+
     // Clear legacy storage on first run
     clearLegacyStorage();
 

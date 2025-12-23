@@ -75,12 +75,18 @@ async function getTrustScore(pubkey) {
  * Count replies from user (shows engagement)
  */
 async function countReplies(pool, pubkey, sinceTimestamp) {
-  const replies = await pool.querySync(SEARCH_RELAYS, {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Query timeout')), 30000)
+  );
+
+  const query = pool.querySync(SEARCH_RELAYS, {
     kinds: [1],
     authors: [pubkey],
     since: sinceTimestamp,
     limit: 100
   });
+
+  const replies = await Promise.race([query, timeout]);
 
   // Count unique users they replied to (from 'p' tags)
   const repliedToPubkeys = new Set();
@@ -96,12 +102,18 @@ async function countReplies(pool, pubkey, sinceTimestamp) {
  * Count zaps/tips received by user
  */
 async function countZapsReceived(pool, pubkey, sinceTimestamp) {
-  const zaps = await pool.querySync(SEARCH_RELAYS, {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Query timeout')), 30000)
+  );
+
+  const query = pool.querySync(SEARCH_RELAYS, {
     kinds: [9735, 9736], // Lightning zaps and Monero tips
     '#p': [pubkey],
     since: sinceTimestamp,
     limit: 100
   });
+
+  const zaps = await Promise.race([query, timeout]);
 
   return zaps.length;
 }
@@ -123,11 +135,38 @@ async function discoverNewVoices() {
 
     // Strategy: Find users who posted recently (kind 1) in last 30 days
     // Then check their profiles and engagement
-    const recentNotes = await pool.querySync(SEARCH_RELAYS, {
-      kinds: [1],
-      since: thirtyDaysAgo,
-      limit: 1000
-    });
+    // Fetch in batches to avoid memory exhaustion
+    const BATCH_SIZE = 100;
+    const MAX_BATCHES = 10;
+    const recentNotes = [];
+
+    for (let batch = 0; batch < MAX_BATCHES; batch++) {
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Query timeout')), 30000)
+      );
+
+      const query = pool.querySync(SEARCH_RELAYS, {
+        kinds: [1],
+        since: thirtyDaysAgo,
+        limit: BATCH_SIZE,
+        until: batch === 0 ? undefined : recentNotes[recentNotes.length - 1]?.created_at
+      });
+
+      const batchNotes = await Promise.race([query, timeout]);
+
+      if (batchNotes.length === 0) {
+        console.log(`[NewVoices] No more notes found after ${batch} batches`);
+        break;
+      }
+
+      recentNotes.push(...batchNotes);
+      console.log(`[NewVoices] Fetched batch ${batch + 1}/${MAX_BATCHES}: ${batchNotes.length} notes (total: ${recentNotes.length})`);
+
+      // If we got fewer than requested, we've reached the end
+      if (batchNotes.length < BATCH_SIZE) {
+        break;
+      }
+    }
 
     console.log(`[NewVoices] Found ${recentNotes.length} recent notes, extracting unique authors...`);
 
@@ -138,10 +177,16 @@ async function discoverNewVoices() {
     console.log(`[NewVoices] Found ${recentAuthors.size} active authors, fetching profiles...`);
 
     // Fetch profiles for these authors
-    const profiles = await pool.querySync(SEARCH_RELAYS, {
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Query timeout')), 30000)
+    );
+
+    const query = pool.querySync(SEARCH_RELAYS, {
       kinds: [0],
       authors: Array.from(recentAuthors).slice(0, 500) // Limit to first 500 authors
     });
+
+    const profiles = await Promise.race([query, timeout]);
 
     console.log(`[NewVoices] Found ${profiles.length} profiles, filtering for complete profiles...`);
 
@@ -157,12 +202,30 @@ async function discoverNewVoices() {
     console.log(`[NewVoices] Deduplicated to ${profilesByPubkey.size} unique profiles`);
 
     // Filter and score each profile
+    // Add limits to prevent unbounded execution
+    const MAX_PROFILES_TO_PROCESS = 200;
+    const MAX_PROCESSING_TIME_MS = 2 * 60 * 60 * 1000; // 2 hours
+    const startTime = Date.now();
+
     let processed = 0;
     for (const [pubkey, event] of profilesByPubkey) {
+      // Check iteration limit
+      if (processed >= MAX_PROFILES_TO_PROCESS) {
+        console.log(`[NewVoices] Reached maximum profile limit (${MAX_PROFILES_TO_PROCESS}), stopping processing`);
+        break;
+      }
+
+      // Check time limit
+      if (Date.now() - startTime > MAX_PROCESSING_TIME_MS) {
+        console.log(`[NewVoices] Reached maximum processing time (${MAX_PROCESSING_TIME_MS / 1000 / 60} minutes), stopping processing`);
+        break;
+      }
+
       processed++;
 
       if (processed % 10 === 0) {
-        console.log(`[NewVoices] Processing profile ${processed}/${profilesByPubkey.size}...`);
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        console.log(`[NewVoices] Processing profile ${processed}/${Math.min(profilesByPubkey.size, MAX_PROFILES_TO_PROCESS)} (elapsed: ${elapsed}s, found: ${newVoices.length})...`);
       }
 
       // Check if profile is complete
@@ -199,7 +262,7 @@ async function discoverNewVoices() {
 
           console.log(`[NewVoices] ✓ Found new voice: ${metadata.name} (score: ${trustScore}, replies: ${replies}, zaps: ${zapsReceived})`);
         } catch (error) {
-          console.error(`[NewVoices] Error parsing profile metadata: ${error.message}`);
+          console.error(`[NewVoices] Error parsing profile metadata for pubkey ${pubkey.substring(0, 8)}: ${error.message}`);
         }
       }
     }

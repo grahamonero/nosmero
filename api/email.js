@@ -9,18 +9,62 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Initialize Resend
+// Validate required environment variables at startup
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@nosmero.com';
-const BASE_URL = process.env.BASE_URL || 'https://nosmero.com';
+const FROM_EMAIL = process.env.FROM_EMAIL;
+const BASE_URL = process.env.BASE_URL;
 
-let resend = null;
+if (!RESEND_API_KEY) {
+  throw new Error('[Email] RESEND_API_KEY environment variable is required but not set');
+}
+if (!FROM_EMAIL) {
+  throw new Error('[Email] FROM_EMAIL environment variable is required but not set');
+}
+if (!BASE_URL) {
+  throw new Error('[Email] BASE_URL environment variable is required but not set');
+}
 
-if (RESEND_API_KEY) {
-  resend = new Resend(RESEND_API_KEY);
-  console.log('[Email] Resend initialized');
-} else {
-  console.warn('[Email] RESEND_API_KEY not set - email sending disabled');
+// Initialize Resend
+const resend = new Resend(RESEND_API_KEY);
+console.log('[Email] Resend initialized');
+
+// Rate limiting: Track email sends by email address
+// Format: { 'email@example.com': [timestamp1, timestamp2, ...] }
+const emailRateLimitMap = new Map();
+const RATE_LIMIT_MAX_EMAILS = 3;
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour in milliseconds
+
+/**
+ * Check if an email address has exceeded the rate limit
+ * @param {string} email - Email address to check
+ * @returns {boolean} - True if rate limit exceeded
+ */
+function isRateLimited(email) {
+  const now = Date.now();
+  const emailHistory = emailRateLimitMap.get(email) || [];
+
+  // Remove timestamps older than the rate limit window
+  const recentSends = emailHistory.filter(timestamp => now - timestamp < RATE_LIMIT_WINDOW_MS);
+
+  // Update the map with filtered timestamps
+  if (recentSends.length > 0) {
+    emailRateLimitMap.set(email, recentSends);
+  } else {
+    emailRateLimitMap.delete(email);
+  }
+
+  return recentSends.length >= RATE_LIMIT_MAX_EMAILS;
+}
+
+/**
+ * Record an email send for rate limiting
+ * @param {string} email - Email address that was sent to
+ */
+function recordEmailSend(email) {
+  const now = Date.now();
+  const emailHistory = emailRateLimitMap.get(email) || [];
+  emailHistory.push(now);
+  emailRateLimitMap.set(email, emailHistory);
 }
 
 /**
@@ -95,12 +139,19 @@ export async function sendVerificationEmail(email, token) {
     throw new Error('Invalid verification token');
   }
 
-  if (!resend) {
-    console.log('[Email] Would send verification (Resend not configured)');
-    return;
+  // Check rate limit
+  if (isRateLimited(email)) {
+    throw new Error('Rate limit exceeded: Too many emails sent to this address. Please try again later.');
   }
 
   // C2: Use encodeURIComponent for token in URL
+  // SECURITY NOTE: Token is exposed in URL which has inherent risks:
+  // - Browser history will store the full URL with token
+  // - HTTP referrer headers may leak the token to third-party sites if user clicks external links
+  // - Server logs may capture the full URL
+  // Mitigation: Tokens are short-lived (24 hours) and single-use only.
+  // Best practice would be POST-based token submission, but GET is used for email link compatibility.
+  // DO NOT log this URL to console or any logging system.
   const verifyUrl = `${BASE_URL}/verify-email?token=${encodeURIComponent(token)}`;
 
   // C4: Wrap in try-catch with error handling
@@ -167,6 +218,9 @@ https://nosmero.com`,
       throw new Error(`Failed to send verification email: ${error.message}`);
     }
 
+    // Record successful send for rate limiting
+    recordEmailSend(email);
+
     return { sent: true, messageId: data?.id };
   } catch (error) {
     console.error('[Email] Error sending verification email:', error.message);
@@ -190,12 +244,19 @@ export async function sendPasswordResetEmail(email, token) {
     throw new Error('Invalid reset token');
   }
 
-  if (!resend) {
-    console.log('[Email] Would send password reset (Resend not configured)');
-    return;
+  // Check rate limit
+  if (isRateLimited(email)) {
+    throw new Error('Rate limit exceeded: Too many emails sent to this address. Please try again later.');
   }
 
   // C2: Use encodeURIComponent for token in URL
+  // SECURITY NOTE: Token is exposed in URL which has inherent risks:
+  // - Browser history will store the full URL with token
+  // - HTTP referrer headers may leak the token to third-party sites if user clicks external links
+  // - Server logs may capture the full URL
+  // Mitigation: Tokens are short-lived (1 hour) and single-use only.
+  // Best practice would be POST-based token submission, but GET is used for email link compatibility.
+  // DO NOT log this URL to console or any logging system.
   const resetUrl = `${BASE_URL}/reset-password?token=${encodeURIComponent(token)}`;
 
   // C4: Wrap in try-catch with error handling
@@ -272,6 +333,9 @@ https://nosmero.com`,
       throw new Error(`Failed to send password reset email: ${error.message}`);
     }
 
+    // Record successful send for rate limiting
+    recordEmailSend(email);
+
     return { sent: true, messageId: data?.id };
   } catch (error) {
     console.error('[Email] Error sending password reset email:', error.message);
@@ -292,9 +356,9 @@ export async function sendNsecBackupEmail(email, nsec, username) {
     throw new Error('Invalid email address');
   }
 
-  if (!resend) {
-    console.log('[Email] Would send nsec backup (Resend not configured)');
-    return { sent: false, reason: 'resend_not_configured' };
+  // Check rate limit
+  if (isRateLimited(email)) {
+    throw new Error('Rate limit exceeded: Too many emails sent to this address. Please try again later.');
   }
 
   // C5: Do NOT log the email address or nsec - only safe identifiers
@@ -381,6 +445,9 @@ This is an automated one-time email. Your email address has been permanently del
       console.error('[Email] Failed to send nsec backup:', error.message);
       return { sent: false, reason: error.message };
     }
+
+    // Record successful send for rate limiting
+    recordEmailSend(email);
 
     return { sent: true, messageId: data?.id };
   } catch (error) {

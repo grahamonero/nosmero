@@ -7,6 +7,7 @@ import * as State from '../state.js';
 import { zapQueue, getPrivateKeyForSigning } from '../state.js';
 import { showSuccessToast, showErrorToast, showWarningToast } from './toasts.js';
 import * as Wallet from '../wallet/index.js';
+import { fetchXMRPrice, formatUSD } from '../wallet-modal.js';
 
 // Nosmerotips Bot npub (for receiving disclosure notifications)
 const NOSMEROTIPS_BOT_NPUB = 'npub1fxyuwwup7hh3x4up5tgg9hmflhfzskvkryh236cau4ujkj7wramqzmy9f2';
@@ -568,6 +569,7 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                        step="0.00001"
                        min="0.00001"
                        style="width: 100%; padding: 10px; border: 2px solid #FF6600; border-radius: 8px; font-size: 16px; text-align: center; background: #1a1a1a; color: #fff;">
+                <div id="zapAmountUSD" style="text-align: center; margin-top: 8px; font-size: 14px; color: #888;"></div>
             </div>
             <div style="margin-bottom: 20px; font-size: 12px; color: #666; word-break: break-all; text-align: center;">
                 ${escapeHtml(moneroAddress)}
@@ -610,6 +612,31 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
             const addToQueueBtn = document.getElementById('addToQueueBtn');
             const walletTipBtn = document.getElementById('walletTipBtn');
             const presetBtns = document.querySelectorAll('.preset-amount-btn');
+            const amountInput = document.getElementById('moneroZapAmount');
+
+            // Update USD equivalent display
+            async function updateZapAmountUSD() {
+                const usdEl = document.getElementById('zapAmountUSD');
+                if (!usdEl) return;
+
+                const xmrAmount = parseFloat(amountInput?.value);
+                if (!xmrAmount || xmrAmount <= 0 || isNaN(xmrAmount)) {
+                    usdEl.textContent = '';
+                    return;
+                }
+
+                const price = await fetchXMRPrice();
+                if (price) {
+                    const usdAmount = xmrAmount * price;
+                    usdEl.textContent = '≈ ' + formatUSD(usdAmount);
+                }
+            }
+
+            // Update USD on load and when amount changes
+            updateZapAmountUSD();
+            if (amountInput) {
+                amountInput.addEventListener('input', updateZapAmountUSD);
+            }
 
             // Preset amount buttons
             presetBtns.forEach(btn => {
@@ -617,6 +644,7 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                     const amt = btn.dataset.amount;
                     if (amt !== 'custom') {
                         document.getElementById('moneroZapAmount').value = amt;
+                        updateZapAmountUSD();
                     }
                     // Highlight selected
                     presetBtns.forEach(b => {
@@ -905,6 +933,20 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
         const feeXMR = Wallet.formatXMR(txDetails.fee);
         const totalXMR = Wallet.formatXMR(txDetails.amount + txDetails.fee);
 
+        // Fetch XMR price for USD equivalents
+        const price = await fetchXMRPrice();
+        let amountUSD = '';
+        let feeUSD = '';
+        let totalUSD = '';
+        if (price) {
+            const amountInXMR = Number(txDetails.amount) / 1e12;
+            const feeInXMR = Number(txDetails.fee) / 1e12;
+            const totalInXMR = Number(txDetails.amount + txDetails.fee) / 1e12;
+            amountUSD = '<br><span style="font-size: 12px; color: #666;">≈ ' + formatUSD(amountInXMR * price) + '</span>';
+            feeUSD = '<br><span style="font-size: 12px; color: #666;">≈ ' + formatUSD(feeInXMR * price) + '</span>';
+            totalUSD = '<br><span style="font-size: 12px; color: #666;">≈ ' + formatUSD(totalInXMR * price) + '</span>';
+        }
+
         section.innerHTML = `
             <div style="text-align: center; margin-bottom: 12px;">
                 <span style="color: #FF6600; font-weight: 600;">💳 Confirm Tip</span>
@@ -912,15 +954,15 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
             <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <span style="color: #888;">Amount:</span>
-                    <span style="color: #fff;">${amount} XMR</span>
+                    <span style="color: #fff;">${amount} XMR${amountUSD}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <span style="color: #888;">Fee:</span>
-                    <span style="color: #ffc107;">${feeXMR} XMR</span>
+                    <span style="color: #ffc107;">${feeXMR} XMR${feeUSD}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 8px;">
                     <span style="color: #888; font-weight: 600;">Total:</span>
-                    <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR</span>
+                    <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR${totalUSD}</span>
                 </div>
             </div>
             <div style="margin-bottom: 12px;">
@@ -1220,6 +1262,15 @@ async function showQueueBatchConfirm(queue) {
         const feeXMR = Wallet.formatXMR(txDetails.fee);
         const totalXMR = Wallet.formatXMR(txDetails.totalAmount + txDetails.fee);
 
+        // Fetch XMR price for USD equivalents
+        const xmrPrice = await fetchXMRPrice();
+        const tipsXMRFloat = parseFloat(Wallet.formatXMR(txDetails.totalAmount));
+        const feeXMRFloat = parseFloat(feeXMR);
+        const totalXMRFloat = parseFloat(totalXMR);
+        const tipsUSD = xmrPrice ? formatUSD(tipsXMRFloat * xmrPrice) : null;
+        const feeUSD = xmrPrice ? formatUSD(feeXMRFloat * xmrPrice) : null;
+        const totalUSD = xmrPrice ? formatUSD(totalXMRFloat * xmrPrice) : null;
+
         section.innerHTML = `
             <div style="text-align: center; margin-bottom: 12px;">
                 <span style="color: #FF6600; font-weight: 600;">💳 Confirm Batch Send</span>
@@ -1227,15 +1278,24 @@ async function showQueueBatchConfirm(queue) {
             <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <span style="color: #888;">Tips (${queue.length}):</span>
-                    <span style="color: #fff;">${Wallet.formatXMR(txDetails.totalAmount)} XMR</span>
+                    <div style="text-align: right;">
+                        <span style="color: #fff;">${Wallet.formatXMR(txDetails.totalAmount)} XMR</span>
+                        ${tipsUSD ? `<div style="color: #888; font-size: 11px;">≈ ${tipsUSD}</div>` : ''}
+                    </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <span style="color: #888;">Fee (one!):</span>
-                    <span style="color: #ffc107;">${feeXMR} XMR</span>
+                    <div style="text-align: right;">
+                        <span style="color: #ffc107;">${feeXMR} XMR</span>
+                        ${feeUSD ? `<div style="color: #888; font-size: 11px;">≈ ${feeUSD}</div>` : ''}
+                    </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 8px;">
                     <span style="color: #888; font-weight: 600;">Total:</span>
-                    <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR</span>
+                    <div style="text-align: right;">
+                        <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR</span>
+                        ${totalUSD ? `<div style="color: #888; font-size: 11px;">≈ ${totalUSD}</div>` : ''}
+                    </div>
                 </div>
             </div>
 
@@ -2170,6 +2230,10 @@ export async function showZapQueue() {
         return sum + parseFloat(item.amount || '0.00018');
     }, 0);
 
+    // Fetch XMR price for USD equivalents
+    const xmrPrice = await fetchXMRPrice();
+    const totalUSD = xmrPrice ? formatUSD(totalAmount * xmrPrice) : null;
+
     if (queue.length === 0) {
         content.innerHTML = `
             <div style="text-align: center; padding: 40px; color: #666;">
@@ -2182,7 +2246,10 @@ export async function showZapQueue() {
         content.innerHTML = `
             <div style="margin-bottom: 16px; padding: 12px; background: #1a1a1a; border-radius: 8px;">
                 <strong>${queue.length} note${queue.length === 1 ? '' : 's'} in queue</strong>
-                <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">Total: ${totalAmount.toFixed(5)} XMR</div>
+                <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">
+                    Total: ${totalAmount.toFixed(5)} XMR
+                    ${totalUSD ? `<span style="color: #888; font-size: 12px; margin-left: 8px;">≈ ${totalUSD}</span>` : ''}
+                </div>
             </div>
 
             <!-- Wallet Batch Send Option -->
@@ -2210,18 +2277,25 @@ export async function showZapQueue() {
             </div>
 
             <div style="max-height: 300px; overflow-y: auto;" id="queueItemsList">
-                ${queue.map((item, index) => `
+                ${queue.map((item, index) => {
+                    const itemAmount = parseFloat(item.amount || '0.00018');
+                    const itemUSD = xmrPrice ? formatUSD(itemAmount * xmrPrice) : null;
+                    return `
                     <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1;">
                             <div style="font-weight: bold; color: #FF6600;">${escapeHtml(item.authorName)}</div>
-                            <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">${escapeHtml(item.amount || '0.00018')} XMR</div>
+                            <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">
+                                ${escapeHtml(item.amount || '0.00018')} XMR
+                                ${itemUSD ? `<span style="color: #888; font-size: 11px; margin-left: 6px;">≈ ${itemUSD}</span>` : ''}
+                            </div>
                             <div style="font-size: 12px; color: #666; margin-top: 4px; word-break: break-all;">${escapeHtml(item.moneroAddress.substring(0, 20))}...${escapeHtml(item.moneroAddress.substring(item.moneroAddress.length - 10))}</div>
                         </div>
                         <button data-action="remove-queue-item" data-index="${index}" style="background: #ff6b6b; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px;">
                             Remove
                         </button>
                     </div>
-                `).join('')}
+                `;
+                }).join('')}
             </div>
         `;
 

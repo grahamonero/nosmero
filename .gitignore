@@ -52,8 +52,5 @@ api/trigger-*.js
 .DS_Store
 Thumbs.db
 
-# Data files (runtime generated)
-api/data/*.json
-api/data/*.db-shm
-api/data/*.db-wal
-trending-cache.json
+# Dependencies
+node_modules/

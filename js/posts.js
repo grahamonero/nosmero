@@ -545,6 +545,10 @@ export async function loadTrendingFeed(forceRefresh = false) {
         const firstPageNotes = topNotes.slice(0, TRENDING_POSTS_PER_PAGE);
         displayedTrendingPostCount = firstPageNotes.length;
 
+        // Fetch disclosed tips for first page posts (for verified tip badges)
+        const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+        Object.assign(disclosedTipsCache, disclosedTipsData);
+
         const renderedPosts = await Promise.all(
             firstPageNotes.map(({ note, engagement }) => renderSinglePost(note, 'feed', { [note.id]: engagement }, null))
         );
@@ -789,6 +793,10 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
         const firstPageNotes = topNotes.slice(0, TRENDING_POSTS_PER_PAGE);
         displayedTrendingPostCount = firstPageNotes.length;
 
+        // Fetch disclosed tips for first page posts (for verified tip badges)
+        const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+        Object.assign(disclosedTipsCache, disclosedTipsData);
+
         const renderedPosts = await Promise.all(
             firstPageNotes.map(({ note, engagement }) => renderSinglePost(note, 'feed', { [note.id]: engagement }, null))
         );
@@ -923,6 +931,10 @@ async function renderCachedTrendingFeed(cache) {
     const firstPageNotes = cachedTrendingPosts.slice(0, TRENDING_POSTS_PER_PAGE);
     displayedTrendingPostCount = firstPageNotes.length;
 
+    // Fetch disclosed tips for first page posts (for verified tip badges)
+    const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+    Object.assign(disclosedTipsCache, disclosedTipsData);
+
     const renderedPosts = await Promise.all(
         firstPageNotes.map(async ({ note, engagement }) => {
             try {
@@ -1041,6 +1053,10 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
     // Render first page
     const firstPageNotes = cachedTrendingPosts.slice(0, TRENDING_POSTS_PER_PAGE);
     displayedTrendingPostCount = firstPageNotes.length;
+
+    // Fetch disclosed tips for first page posts (for verified tip badges)
+    const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+    Object.assign(disclosedTipsCache, disclosedTipsData);
 
     const renderedPosts = await Promise.all(
         firstPageNotes.map(async ({ note, engagement }) => {
@@ -1289,6 +1305,10 @@ async function loadTrendingFeedForNewUser() {
         const firstPageNotes = cachedTrendingPosts.slice(0, TRENDING_POSTS_PER_PAGE);
         displayedTrendingPostCount = firstPageNotes.length;
 
+        // Fetch disclosed tips for first page posts (for verified tip badges)
+        const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+        Object.assign(disclosedTipsCache, disclosedTipsData);
+
         const renderedPosts = await Promise.all(
             firstPageNotes.map(({ note, engagement }) => renderSinglePost(note, 'feed', { [note.id]: engagement }, null))
         );
@@ -1434,6 +1454,10 @@ async function loadMoreTrendingPosts() {
     if (postsToRender.length === 0) return;
 
     try {
+        // Fetch disclosed tips for new posts (for verified tip badges)
+        const disclosedTipsData = await fetchDisclosedTips(postsToRender.map(({ note }) => note));
+        Object.assign(disclosedTipsCache, disclosedTipsData);
+
         // Render new posts
         const renderedPosts = await Promise.all(
             postsToRender.map(async ({ note, engagement }) => {

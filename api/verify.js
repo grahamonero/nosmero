@@ -89,6 +89,12 @@ export async function verifyTransactionProof({ txid, txKey, recipientAddress, ex
     throw new Error('Invalid expected amount');
   }
 
+  // Validate upper bound on expectedAmount (max 1 billion XMR)
+  const MAX_XMR = 1_000_000_000;
+  if (!isFinite(expectedAmount) || isNaN(expectedAmount) || expectedAmount > MAX_XMR) {
+    throw new Error('Invalid expected amount: must be finite and not exceed 1 billion XMR');
+  }
+
   // Try multiple RPC nodes for reliability
   let lastError = null;
 
@@ -257,33 +263,52 @@ async function verifyWithRpcNode(rpcUrl, { txid, txKey, recipientAddress, expect
   const checkTime = Date.now() - checkStart;
   console.log(`[Verify:${requestId}] check_tx_key completed in ${checkTime}ms`);
 
-  // check_tx_key returns: {received, confirmations, in_pool}
+  // Validate RPC response has expected fields
+  if (!result || typeof result !== 'object') {
+    throw new Error('Invalid RPC response: result is not an object');
+  }
+
   if (typeof result.received === 'undefined') {
     throw new Error('Transaction key verification failed - no received field');
   }
 
+  if (typeof result.confirmations === 'undefined') {
+    throw new Error('Transaction key verification failed - no confirmations field');
+  }
+
+  if (typeof result.in_pool === 'undefined') {
+    throw new Error('Transaction key verification failed - no in_pool field');
+  }
+
   // Get the amount received (in atomic units)
-  const receivedAtomic = result.received || 0;
+  const receivedAtomic = result.received;
 
+  // Use string-based conversion to avoid floating point precision issues
   // Convert atomic units to XMR (1 XMR = 1e12 atomic units)
-  const receivedXmr = receivedAtomic / 1e12;
+  // Convert to string with proper decimal places, then to number for comparison
+  const receivedXmrString = (BigInt(receivedAtomic) * BigInt(1e9) / BigInt(1e12)).toString();
+  const receivedXmr = Number(receivedXmrString) / 1e9;
 
-  console.log(`[Verify:${requestId}] Expected: ${expectedAmount} XMR, Received: ${receivedXmr} XMR, Confirmations: ${result.confirmations || 0}`);
+  // Convert expected amount to atomic units for precise comparison
+  const expectedAtomic = Math.round(expectedAmount * 1e12);
 
-  // Verify amount matches (with small tolerance for floating point)
-  const tolerance = 0.000000001; // 1e-9 XMR
-  if (Math.abs(receivedXmr - expectedAmount) > tolerance) {
+  console.log(`[Verify:${requestId}] Expected: ${expectedAmount} XMR, Received: ${receivedXmr} XMR, Confirmations: ${result.confirmations}`);
+
+  // Compare at atomic unit level to avoid floating point errors
+  // Allow small tolerance for rounding (1e-12 XMR = 1 atomic unit)
+  const atomicTolerance = 1;
+  if (Math.abs(receivedAtomic - expectedAtomic) > atomicTolerance) {
     throw new Error(`Amount mismatch: expected ${expectedAmount} XMR, received ${receivedXmr} XMR`);
   }
 
   // Get confirmations
-  const confirmations = result.confirmations || 0;
+  const confirmations = result.confirmations;
 
   return {
     verified: true,
     receivedAmount: receivedXmr,
     confirmations: confirmations,
-    inTxPool: result.in_pool || false
+    inTxPool: result.in_pool
   };
 }
 
@@ -292,6 +317,23 @@ async function verifyWithRpcNode(rpcUrl, { txid, txKey, recipientAddress, expect
  */
 function makeRpcCall(rpcUrl, requestData) {
   return new Promise((resolve, reject) => {
+    // Use settled flag to prevent race condition between timeout and response
+    let isSettled = false;
+
+    const safeResolve = (value) => {
+      if (!isSettled) {
+        isSettled = true;
+        resolve(value);
+      }
+    };
+
+    const safeReject = (error) => {
+      if (!isSettled) {
+        isSettled = true;
+        reject(error);
+      }
+    };
+
     const url = new URL(rpcUrl);
     const isHttps = url.protocol === 'https:';
     const client = isHttps ? https : http;
@@ -317,44 +359,55 @@ function makeRpcCall(rpcUrl, requestData) {
 
     const req = client.request(options, (res) => {
       let data = '';
+      const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB limit
+      let totalSize = 0;
 
       res.on('data', (chunk) => {
+        totalSize += chunk.length;
+
+        // Check response size limit before accumulating
+        if (totalSize > MAX_RESPONSE_SIZE) {
+          req.destroy();
+          safeReject(new Error('RPC response too large (exceeds 10MB limit)'));
+          return;
+        }
+
         data += chunk;
       });
 
       res.on('end', () => {
         try {
           if (!data || data.trim() === '') {
-            reject(new Error('Empty RPC response'));
+            safeReject(new Error('Empty RPC response'));
             return;
           }
 
           const response = JSON.parse(data);
 
           if (response.error) {
-            reject(new Error(response.error.message || 'RPC error'));
+            safeReject(new Error(response.error.message || 'RPC error'));
             return;
           }
 
           if (!response.result) {
-            reject(new Error('No result in RPC response'));
+            safeReject(new Error('No result in RPC response'));
             return;
           }
 
-          resolve(response.result);
+          safeResolve(response.result);
         } catch (error) {
-          reject(new Error(`Failed to parse RPC response: ${error.message}`));
+          safeReject(new Error(`Failed to parse RPC response: ${error.message}`));
         }
       });
     });
 
     req.on('error', (error) => {
-      reject(new Error(`RPC request failed: ${error.message}`));
+      safeReject(new Error(`RPC request failed: ${error.message}`));
     });
 
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error('RPC request timed out'));
+      safeReject(new Error('RPC request timed out'));
     });
 
     req.write(postData);

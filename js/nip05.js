@@ -8,6 +8,9 @@ const CACHE_DURATION = 3600000; // 1 hour in milliseconds
 const MAX_CACHE_SIZE = 1000; // Maximum number of cache entries
 const MAX_RESPONSE_SIZE = 100 * 1024; // 100KB maximum response size
 
+// Track in-flight requests to prevent duplicate concurrent requests
+const inFlightRequests = new Map();
+
 // Sanitize HTML to prevent XSS attacks
 function sanitizeForHTML(str) {
     if (typeof str !== 'string') return '';
@@ -23,6 +26,7 @@ function sanitizeForHTML(str) {
 // Check if domain is allowed (SSRF protection)
 function isAllowedDomain(domain) {
     if (!domain || typeof domain !== 'string') {
+        console.warn('Domain validation failed: invalid input');
         return false;
     }
 
@@ -70,6 +74,7 @@ function isAllowedDomain(domain) {
 // Validate name format to prevent path traversal and injection
 function isValidNameFormat(name) {
     if (!name || typeof name !== 'string') {
+        console.warn('Name validation failed: invalid input');
         return false;
     }
 
@@ -87,6 +92,27 @@ function isValidNameFormat(name) {
     return true;
 }
 
+// Validate public key format (64-character hex string)
+function isValidPubkeyFormat(pubkey) {
+    if (!pubkey || typeof pubkey !== 'string') {
+        console.warn('Public key validation failed: invalid input');
+        return false;
+    }
+
+    // Must be exactly 64 characters
+    if (pubkey.length !== 64) {
+        return false;
+    }
+
+    // Must be valid hexadecimal
+    const hexPattern = /^[0-9a-f]{64}$/i;
+    if (!hexPattern.test(pubkey)) {
+        return false;
+    }
+
+    return true;
+}
+
 // Verify NIP-05 identifier against a public key
 export async function verifyNip05(nip05, pubkey) {
     try {
@@ -94,7 +120,12 @@ export async function verifyNip05(nip05, pubkey) {
         if (!nip05 || !nip05.includes('@')) {
             return { valid: false, error: 'Invalid NIP-05 format' };
         }
-        
+
+        // Validate public key format
+        if (!isValidPubkeyFormat(pubkey)) {
+            return { valid: false, error: 'Invalid public key format' };
+        }
+
         // Parse the NIP-05 identifier
         const [name, domain] = nip05.split('@');
         if (!name || !domain) {
@@ -113,9 +144,9 @@ export async function verifyNip05(nip05, pubkey) {
 
         // Construct the well-known URL for verification
         const url = `https://${domain}/.well-known/nostr.json?name=${encodeURIComponent(name)}`;
-        
-        console.log('Verifying NIP-05:', nip05, 'URL:', url);
-        
+
+        console.log('Verifying NIP-05 identifier');
+
         // Fetch the verification data
         const response = await fetch(url, {
             method: 'GET',
@@ -125,11 +156,11 @@ export async function verifyNip05(nip05, pubkey) {
             // Add timeout to prevent hanging
             signal: AbortSignal.timeout(10000) // 10 second timeout
         });
-        
+
         if (!response.ok) {
             return {
                 valid: false,
-                error: `Failed to fetch verification (${response.status})`
+                error: `Verification request failed`
             };
         }
 
@@ -139,6 +170,15 @@ export async function verifyNip05(nip05, pubkey) {
             return {
                 valid: false,
                 error: 'Response too large'
+            };
+        }
+
+        // Validate Content-Type before parsing
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            return {
+                valid: false,
+                error: 'Invalid response format'
             };
         }
 
@@ -169,19 +209,19 @@ export async function verifyNip05(nip05, pubkey) {
             };
         }
         
-        console.log('NIP-05 verification successful for', nip05);
+        console.log('NIP-05 verification successful');
         return {
             valid: true,
             verified: true,
             domain: sanitizeForHTML(domain),
             name: sanitizeForHTML(name)
         };
-        
+
     } catch (error) {
-        console.error('NIP-05 verification failed:', error);
-        return { 
-            valid: false, 
-            error: error.message || 'Verification failed' 
+        console.error('NIP-05 verification failed');
+        return {
+            valid: false,
+            error: 'Verification failed'
         };
     }
 }
@@ -191,18 +231,33 @@ export async function getNip05Verification(nip05, pubkey) {
     if (!nip05 || !pubkey) {
         return { valid: false, error: 'Missing NIP-05 or pubkey' };
     }
-    
+
     const cacheKey = `${nip05}:${pubkey}`;
-    
+
     // Check cache first
-    if (nip05Cache[cacheKey] && 
+    if (nip05Cache[cacheKey] &&
         Date.now() - nip05Cache[cacheKey].timestamp < CACHE_DURATION) {
-        console.log('NIP-05 cache hit for', nip05);
+        console.log('NIP-05 cache hit');
         return nip05Cache[cacheKey].result;
     }
-    
+
+    // Check if there's an in-flight request for the same identifier
+    if (inFlightRequests.has(cacheKey)) {
+        console.log('Returning existing in-flight request');
+        return inFlightRequests.get(cacheKey);
+    }
+
+    // Create a new request promise
+    const requestPromise = verifyNip05(nip05, pubkey).finally(() => {
+        // Clean up in-flight request when done
+        inFlightRequests.delete(cacheKey);
+    });
+
+    // Store the in-flight request
+    inFlightRequests.set(cacheKey, requestPromise);
+
     // Perform verification and cache result
-    const result = await verifyNip05(nip05, pubkey);
+    const result = await requestPromise;
 
     // Implement LRU eviction if cache is full
     const cacheKeys = Object.keys(nip05Cache);
@@ -321,31 +376,33 @@ export function cleanupNip05Cache() {
 // Batch verify multiple NIP-05 identifiers
 export async function batchVerifyNip05(identifiers) {
     const results = [];
-    
+
     // Process in parallel with concurrency limit
     const BATCH_SIZE = 5;
     for (let i = 0; i < identifiers.length; i += BATCH_SIZE) {
         const batch = identifiers.slice(i, i + BATCH_SIZE);
-        const batchPromises = batch.map(async ({ nip05, pubkey }) => {
+        const batchPromises = batch.map(async ({ nip05, pubkey }, index) => {
             const result = await getNip05Verification(nip05, pubkey);
-            return { nip05, pubkey, ...result };
+            return { nip05, pubkey, ...result, _originalIndex: i + index };
         });
-        
+
         const batchResults = await Promise.allSettled(batchPromises);
-        batchResults.forEach(result => {
+        batchResults.forEach((result, index) => {
             if (result.status === 'fulfilled') {
                 results.push(result.value);
             } else {
+                // Preserve original data from the batch when errors occur
+                const originalData = batch[index];
                 results.push({
-                    nip05: 'unknown',
-                    pubkey: 'unknown',
+                    nip05: originalData?.nip05 || 'unknown',
+                    pubkey: originalData?.pubkey || 'unknown',
                     valid: false,
-                    error: result.reason?.message || 'Batch verification failed'
+                    error: 'Batch verification failed'
                 });
             }
         });
     }
-    
+
     return results;
 }
 

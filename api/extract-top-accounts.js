@@ -53,6 +53,11 @@ async function fetchTopNostrAccounts(limit) {
   try {
     // nostr.band trending profiles API
     const response = await fetch('https://api.nostr.band/v0/trending/profiles');
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
     const data = await response.json();
 
     if (!data.profiles || !Array.isArray(data.profiles)) {
