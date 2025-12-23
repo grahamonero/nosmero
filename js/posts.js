@@ -534,6 +534,10 @@ export async function loadTrendingFeed(forceRefresh = false) {
         const firstPageNotes = topNotes.slice(0, TRENDING_POSTS_PER_PAGE);
         displayedTrendingPostCount = firstPageNotes.length;
 
+        // Fetch disclosed tips for first page posts (for verified tip badges)
+        const disclosedTipsData = await fetchDisclosedTips(firstPageNotes.map(({ note }) => note));
+        Object.assign(disclosedTipsCache, disclosedTipsData);
+
         const renderedPosts = await Promise.all(
             firstPageNotes.map(({ note, engagement }) => renderSinglePost(note, 'feed', { [note.id]: engagement }, null))
         );

@@ -62,6 +62,12 @@ export async function addTrustBadgeToElement(usernameElement, pubkey, async = tr
     return;
   }
 
+  // Validate usernameElement is a DOM element (Warning #2)
+  if (!(usernameElement instanceof Element)) {
+    console.warn('[TrustBadges] Invalid DOM element provided:', usernameElement);
+    return;
+  }
+
   // Validate pubkey format to prevent XSS
   if (!isValidPubkey(pubkey)) {
     console.warn('[TrustBadges] Invalid pubkey format:', pubkey);
@@ -102,10 +108,17 @@ export async function addTrustBadgeToElement(usernameElement, pubkey, async = tr
       console.log(`[TrustBadges] Using cached score for ${pubkey.substring(0, 8)}: ${trustData.score}`);
     }
 
-    // Update badge with actual score
-    updateBadgeElement(badgeSpan, trustData);
+    // Update badge with actual score (Warning #8 - add null check before destructuring)
+    if (trustData && typeof trustData === 'object') {
+      updateBadgeElement(badgeSpan, trustData);
+    } else {
+      console.warn('[TrustBadges] Invalid trust data received');
+      badgeSpan.remove();
+    }
 
   } catch (error) {
+    // Warning #7 - Error logged but no user feedback
+    // Silent handling is appropriate here - badges are non-critical UI enhancement
     console.error('[TrustBadges] Error fetching score:', error);
     badgeSpan.remove(); // Remove on error
   }
@@ -118,6 +131,12 @@ export async function addTrustBadgeToElement(usernameElement, pubkey, async = tr
  */
 function updateBadgeElement(badgeElement, trustData) {
   if (!badgeElement || !trustData) {
+    return;
+  }
+
+  // Warning #8 - Validate trustData before destructuring
+  if (!trustData || typeof trustData !== 'object') {
+    console.warn('[TrustBadges] Invalid trustData provided to updateBadgeElement');
     return;
   }
 
@@ -189,6 +208,12 @@ export function addTrustBadgesToContainer(container) {
     return;
   }
 
+  // Warning #3 - Validate container before querySelectorAll
+  if (!(container instanceof Element)) {
+    console.warn('[TrustBadges] Invalid container provided:', container);
+    return;
+  }
+
   // Find all username elements with pubkey data
   const usernameElements = container.querySelectorAll('.username[data-pubkey], .author-name[data-pubkey]');
 
@@ -230,6 +255,9 @@ export function refreshAllTrustBadges() {
  * @param {string} pubkey - Profile pubkey
  * @param {number} retries - Number of retries if element not found
  */
+// Warning #1 - Track retry attempts to prevent race condition
+const retryingProfiles = new Set();
+
 export async function addProfileTrustBadge(pubkey, retries = 5) {
   if (!areTrustBadgesEnabled()) {
     console.log('[TrustBadges] Trust badges disabled');
@@ -241,15 +269,26 @@ export async function addProfileTrustBadge(pubkey, retries = 5) {
     return;
   }
 
+  // Warning #1 - Prevent duplicate retry attempts
+  const retryKey = `${pubkey}-${retries}`;
+  if (retryingProfiles.has(retryKey)) {
+    return; // Already retrying for this pubkey/retry level
+  }
+
   // Find profile name element - try multiple selectors
   let profileNameElement = document.querySelector('.profile-name[data-pubkey]');
 
   // If not found and we have retries left, wait and try again
   if (!profileNameElement && retries > 0) {
     console.log(`[TrustBadges] Profile name not found, retrying... (${retries} attempts left)`);
+    retryingProfiles.add(retryKey);
     await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
+    retryingProfiles.delete(retryKey);
     return addProfileTrustBadge(pubkey, retries - 1);
   }
+
+  // Clean up retry tracking
+  retryingProfiles.delete(retryKey);
 
   if (!profileNameElement) {
     console.warn('[TrustBadges] Profile name element not found after retries');
@@ -330,8 +369,15 @@ export async function addFeedTrustBadges(notes, containerSelector = null) {
   }
 
   try {
-    // Import getTrustScores to fetch all scores at once
-    const { getTrustScores } = await import('./relatr.js?v=2.9.41');
+    // Warning #4 - Wrap dynamic import in try-catch
+    let getTrustScores;
+    try {
+      const relatrModule = await import('./relatr.js?v=2.9.41');
+      getTrustScores = relatrModule.getTrustScores;
+    } catch (importError) {
+      console.error('[TrustBadges] Failed to import relatr.js:', importError);
+      return;
+    }
 
     // Fetch all trust scores in batch
     console.log(`[TrustBadges] Fetching scores for ${pubkeys.length} users...`);
@@ -350,17 +396,11 @@ export async function addFeedTrustBadges(notes, containerSelector = null) {
       feedContainer = document.querySelector('#feed, #userPostsContainer, #threadContent, .feed-container, #profilePage');
     }
 
+    // Warning #6 - Remove dead code (unused variables)
     if (feedContainer) {
       console.log(`[TrustBadges] Found container:`, feedContainer.id || feedContainer.className);
       console.log(`[TrustBadges] Container innerHTML length:`, feedContainer.innerHTML.length);
       console.log(`[TrustBadges] Container has children:`, feedContainer.children.length);
-      const usernames = feedContainer.querySelectorAll('.username[data-pubkey], .author-name[data-pubkey]');
-      console.log(`[TrustBadges] Found ${usernames.length} username elements in container`);
-      const allUsernames = feedContainer.querySelectorAll('.username');
-      console.log(`[TrustBadges] Found ${allUsernames.length} total .username elements (with or without data-pubkey)`);
-      if (allUsernames.length > 0) {
-        console.log(`[TrustBadges] First username element:`, allUsernames[0], 'has data-pubkey:', allUsernames[0].hasAttribute('data-pubkey'));
-      }
       addTrustBadgesToContainer(feedContainer);
       console.log(`[TrustBadges] Added badges to container:`, feedContainer.id || feedContainer.className);
     } else {
@@ -394,9 +434,12 @@ export function getTrustBadgesEnabled() {
 
 // ==================== AUTO-INITIALIZATION ====================
 
+// Warning #5 - Store observer reference and provide cleanup
+let trustBadgeObserver = null;
+
 // Add badges to dynamically loaded content
 if (typeof MutationObserver !== 'undefined') {
-  const observer = new MutationObserver((mutations) => {
+  trustBadgeObserver = new MutationObserver((mutations) => {
     if (!areTrustBadgesEnabled()) {
       return;
     }
@@ -434,12 +477,31 @@ if (typeof MutationObserver !== 'undefined') {
   document.addEventListener('DOMContentLoaded', () => {
     const feedContainer = document.querySelector('#feed, .feed-container, main');
     if (feedContainer) {
-      observer.observe(feedContainer, {
+      trustBadgeObserver.observe(feedContainer, {
         childList: true,
         subtree: true
       });
     }
   });
+
+  // Warning #5 - Cleanup observer on page unload to prevent memory leak
+  window.addEventListener('beforeunload', () => {
+    if (trustBadgeObserver) {
+      trustBadgeObserver.disconnect();
+      trustBadgeObserver = null;
+    }
+  });
+}
+
+/**
+ * Cleanup function to disconnect observer
+ * Warning #5 - Provide cleanup function for manual cleanup if needed
+ */
+export function cleanup() {
+  if (trustBadgeObserver) {
+    trustBadgeObserver.disconnect();
+    trustBadgeObserver = null;
+  }
 }
 
 // Export functions
@@ -451,5 +513,6 @@ export default {
   addFeedTrustBadges,
   refreshAllTrustBadges,
   setTrustBadgesEnabled,
-  getTrustBadgesEnabled
+  getTrustBadgesEnabled,
+  cleanup
 };

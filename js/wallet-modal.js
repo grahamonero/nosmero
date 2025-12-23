@@ -70,7 +70,7 @@ async function loadWalletLibrary() {
 /**
  * Fetch XMR price from CoinGecko
  */
-async function fetchXMRPrice() {
+export async function fetchXMRPrice() {
     const now = Date.now();
     if (xmrPriceUSD && (now - priceLastFetched) < PRICE_CACHE_MS) {
         return xmrPriceUSD;
@@ -103,7 +103,7 @@ function formatXMRWithMinDecimals(atomicUnits, minDecimals = 5) {
 /**
  * Format USD amount
  */
-function formatUSD(usd) {
+export function formatUSD(usd) {
     if (usd === null || usd === undefined) return null;
     return '$' + usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -744,6 +744,11 @@ export async function showBatchSendView() {
 
     const availableXMR = formatXMRWithMinDecimals(balance.unlockedBalance);
 
+    // Fetch XMR price for USD equivalents
+    const xmrPrice = await fetchXMRPrice();
+    const totalUSD = xmrPrice ? formatUSD(totalAmount * xmrPrice) : null;
+    const availableUSD = xmrPrice ? formatUSD(parseFloat(availableXMR) * xmrPrice) : null;
+
     getContentEl().innerHTML = `
         <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; border: 1px solid var(--border-color);">
             <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px;">
@@ -753,11 +758,17 @@ export async function showBatchSendView() {
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <span style="color: #888;">Total Tips:</span>
-                    <span style="color: #FF6600; font-weight: 600;">${totalAmount.toFixed(5)} XMR</span>
+                    <div style="text-align: right;">
+                        <span style="color: #FF6600; font-weight: 600;">${totalAmount.toFixed(5)} XMR</span>
+                        ${totalUSD ? `<div style="color: #888; font-size: 11px;">≈ ${totalUSD}</div>` : ''}
+                    </div>
                 </div>
                 <div style="display: flex; justify-content: space-between;">
                     <span style="color: #888;">Available:</span>
-                    <span style="color: #10B981;">${availableXMR} XMR</span>
+                    <div style="text-align: right;">
+                        <span style="color: #10B981;">${availableXMR} XMR</span>
+                        ${availableUSD ? `<div style="color: #888; font-size: 11px;">≈ ${availableUSD}</div>` : ''}
+                    </div>
                 </div>
             </div>
 
@@ -815,7 +826,7 @@ export async function reviewBatchTransaction() {
         pendingTxDetails = txDetails;
 
         // Show confirmation view
-        showBatchConfirmView(txDetails);
+        await showBatchConfirmView(txDetails);
 
     } catch (err) {
         console.error('[WalletModal] Create batch tx failed:', err);
@@ -832,7 +843,7 @@ export async function reviewBatchTransaction() {
 /**
  * Show batch confirmation view - Step 3: Show fees, disclosure options
  */
-function showBatchConfirmView(txDetails) {
+async function showBatchConfirmView(txDetails) {
     currentView = 'batchConfirm';
     setTitle(`💳 Confirm ${queueItems.length} Tips`);
 
@@ -840,30 +851,52 @@ function showBatchConfirmView(txDetails) {
     const totalXMR = Wallet.formatXMR(txDetails.totalAmount + txDetails.fee);
     const tipsXMR = Wallet.formatXMR(txDetails.totalAmount);
 
+    // Fetch XMR price for USD equivalents
+    const xmrPrice = await fetchXMRPrice();
+    const tipsUSD = xmrPrice ? formatUSD(parseFloat(tipsXMR) * xmrPrice) : null;
+    const feeUSD = xmrPrice ? formatUSD(parseFloat(feeXMR) * xmrPrice) : null;
+    const totalUSD = xmrPrice ? formatUSD(parseFloat(totalXMR) * xmrPrice) : null;
+
     getContentEl().innerHTML = `
         <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; border: 1px solid var(--border-color);">
             <div style="margin-bottom: 16px; padding: 12px; background: #0a0a0a; border-radius: 8px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <span style="color: #888;">Tips (${queueItems.length}):</span>
-                    <span style="color: #fff;">${tipsXMR} XMR</span>
+                    <div style="text-align: right;">
+                        <span style="color: #fff;">${tipsXMR} XMR</span>
+                        ${tipsUSD ? `<div style="color: #888; font-size: 11px;">≈ ${tipsUSD}</div>` : ''}
+                    </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <span style="color: #888;">Fee (one!):</span>
-                    <span style="color: #ffc107;">${feeXMR} XMR</span>
+                    <div style="text-align: right;">
+                        <span style="color: #ffc107;">${feeXMR} XMR</span>
+                        ${feeUSD ? `<div style="color: #888; font-size: 11px;">≈ ${feeUSD}</div>` : ''}
+                    </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 8px;">
                     <span style="color: #888; font-weight: 600;">Total:</span>
-                    <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR</span>
+                    <div style="text-align: right;">
+                        <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR</span>
+                        ${totalUSD ? `<div style="color: #888; font-size: 11px;">≈ ${totalUSD}</div>` : ''}
+                    </div>
                 </div>
             </div>
 
             <div style="max-height: 150px; overflow-y: auto; margin-bottom: 16px;">
-                ${queueItems.map((item, i) => `
+                ${queueItems.map((item, i) => {
+                    const itemAmount = parseFloat(item.amount || '0.00018');
+                    const itemUSD = xmrPrice ? formatUSD(itemAmount * xmrPrice) : null;
+                    return `
                     <div style="padding: 8px; background: #0a0a0a; border-radius: 6px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
                         <span style="color: #FF6600; font-size: 13px;">${escapeHtml(item.authorName)}</span>
-                        <span style="color: #fff; font-size: 13px;">${item.amount || '0.00018'} XMR</span>
+                        <div style="text-align: right;">
+                            <span style="color: #fff; font-size: 13px;">${item.amount || '0.00018'} XMR</span>
+                            ${itemUSD ? `<div style="color: #888; font-size: 10px;">≈ ${itemUSD}</div>` : ''}
+                        </div>
                     </div>
-                `).join('')}
+                `;
+                }).join('')}
             </div>
 
             <!-- Disclosure Options -->
@@ -1203,13 +1236,27 @@ export async function reviewTransaction() {
 /**
  * Show confirm transaction view
  */
-function showConfirmView(txDetails) {
+async function showConfirmView(txDetails) {
     currentView = 'confirm';
     setTitle('✓ Confirm Send');
 
     const amountXMR = Wallet.formatXMR(txDetails.amount);
     const feeXMR = Wallet.formatXMR(txDetails.fee);
     const totalXMR = Wallet.formatXMR(txDetails.amount + txDetails.fee);
+
+    // Fetch XMR price for USD equivalents
+    const price = await fetchXMRPrice();
+    let amountUSD = '';
+    let feeUSD = '';
+    let totalUSD = '';
+    if (price) {
+        const amountInXMR = Number(txDetails.amount) / 1e12;
+        const feeInXMR = Number(txDetails.fee) / 1e12;
+        const totalInXMR = Number(txDetails.amount + txDetails.fee) / 1e12;
+        amountUSD = '<br><span style="font-size: 12px; color: #666;">≈ ' + formatUSD(amountInXMR * price) + '</span>';
+        feeUSD = '<br><span style="font-size: 12px; color: #666;">≈ ' + formatUSD(feeInXMR * price) + '</span>';
+        totalUSD = '<br><span style="font-size: 12px; color: #666;">≈ ' + formatUSD(totalInXMR * price) + '</span>';
+    }
 
     // Check if verified disclosure is available (local key only)
     // User has a local key if privateKey is a valid hex string (not 'extension', 'amber', 'nsec-app')
@@ -1228,15 +1275,15 @@ function showConfirmView(txDetails) {
         <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; border: 1px solid var(--border-color);">
             <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #333;">
                 <span style="color: #999;">Amount</span>
-                <span style="color: #FF6600; font-weight: 600;">${amountXMR} XMR</span>
+                <span style="color: #FF6600; font-weight: 600;">${amountXMR} XMR${amountUSD}</span>
             </div>
             <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #333;">
                 <span style="color: #999;">Fee</span>
-                <span style="color: #ffc107;">${feeXMR} XMR</span>
+                <span style="color: #ffc107;">${feeXMR} XMR${feeUSD}</span>
             </div>
             <div style="display: flex; justify-content: space-between; padding: 12px 0; background: rgba(255, 102, 0, 0.1); margin: 0 -20px; padding-left: 20px; padding-right: 20px;">
                 <span style="color: #ccc; font-weight: 600;">Total</span>
-                <span style="color: #FF6600; font-weight: 700; font-size: 16px;">${totalXMR} XMR</span>
+                <span style="color: #FF6600; font-weight: 700; font-size: 16px;">${totalXMR} XMR${totalUSD}</span>
             </div>
             <div style="margin-top: 16px;">
                 <div style="color: #666; font-size: 12px; margin-bottom: 8px;">Sending to</div>

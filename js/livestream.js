@@ -17,21 +17,99 @@ const LIVESTREAM_RELAYS = [
     'wss://nostr-pub.wellorder.net'
 ];
 
-// Cache for live streams
-let liveStreamsCache = [];
-let lastFetchTime = 0;
+// NIP-78 relay configuration
+const NIP78_RELAY = window.location.protocol === 'https:'
+    ? 'wss://nosmero.com/nip78-relay'
+    : 'ws://nosmero.com:8080/nip78-relay';
+
+// State management with controlled access
+const livestreamState = {
+    _cache: [],
+    _lastFetchTime: 0,
+    _isFetching: false,
+    _fetchPromise: null,
+    _liveStreamSubscription: null,
+    _chatSubscription: null,
+    _currentStream: null,
+    _chatEventListeners: [],
+
+    get cache() { return this._cache; },
+    set cache(value) { this._cache = value; },
+
+    get lastFetchTime() { return this._lastFetchTime; },
+    set lastFetchTime(value) { this._lastFetchTime = value; },
+
+    get isFetching() { return this._isFetching; },
+    set isFetching(value) { this._isFetching = value; },
+
+    get fetchPromise() { return this._fetchPromise; },
+    set fetchPromise(value) { this._fetchPromise = value; },
+
+    get liveStreamSubscription() { return this._liveStreamSubscription; },
+    set liveStreamSubscription(value) { this._liveStreamSubscription = value; },
+
+    get chatSubscription() { return this._chatSubscription; },
+    set chatSubscription(value) { this._chatSubscription = value; },
+
+    get currentStream() { return this._currentStream; },
+    set currentStream(value) { this._currentStream = value; },
+
+    addChatEventListener(element, type, listener) {
+        element.addEventListener(type, listener);
+        this._chatEventListeners.push({ element, type, listener });
+    },
+
+    cleanupChatEventListeners() {
+        this._chatEventListeners.forEach(({ element, type, listener }) => {
+            element.removeEventListener(type, listener);
+        });
+        this._chatEventListeners = [];
+    }
+};
+
 const CACHE_DURATION = 30 * 1000; // 30 seconds
 
-// Prevent concurrent fetches (reset on module load)
-let isFetching = false;
-let fetchPromise = null;
+// XMR price cache for USD conversion
+let xmrPriceUSD = null;
+let priceLastFetched = 0;
+const PRICE_CACHE_MS = 5 * 60 * 1000;
 
-// Active subscriptions
-let liveStreamSubscription = null;
-let chatSubscription = null;
+/**
+ * Fetch XMR price from CoinGecko
+ */
+async function fetchXMRPrice() {
+    const now = Date.now();
+    if (xmrPriceUSD && (now - priceLastFetched) < PRICE_CACHE_MS) {
+        return xmrPriceUSD;
+    }
+    try {
+        const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd');
+        const data = await res.json();
+        xmrPriceUSD = data.monero?.usd || null;
+        priceLastFetched = now;
+        return xmrPriceUSD;
+    } catch (err) {
+        console.warn('Failed to fetch XMR price:', err);
+        return xmrPriceUSD;
+    }
+}
 
-// Currently viewing stream
-let currentStream = null;
+/**
+ * Format USD amount
+ */
+function formatUSD(usd) {
+    if (usd === null || usd === undefined) return null;
+    return '$' + usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Backwards compatibility aliases
+let liveStreamsCache = livestreamState.cache;
+let lastFetchTime = livestreamState.lastFetchTime;
+let isFetching = livestreamState.isFetching;
+let fetchPromise = livestreamState.fetchPromise;
+let liveStreamSubscription = livestreamState.liveStreamSubscription;
+let chatSubscription = livestreamState.chatSubscription;
+let currentStream = livestreamState.currentStream;
 
 // ==================== STREAM DISCOVERY ====================
 
@@ -81,29 +159,29 @@ export async function fetchLiveStreams(forceRefresh = false) {
     const now = Date.now();
 
     // Return cached results if still fresh
-    if (!forceRefresh && liveStreamsCache.length > 0 && (now - lastFetchTime) < CACHE_DURATION) {
-        console.log('📺 Using cached live streams:', liveStreamsCache.length);
-        return liveStreamsCache;
+    if (!forceRefresh && livestreamState.cache.length > 0 && (now - livestreamState.lastFetchTime) < CACHE_DURATION) {
+        console.log('📺 Using cached live streams:', livestreamState.cache.length);
+        return livestreamState.cache;
     }
 
     // If already fetching, wait for that fetch to complete
-    if (isFetching && fetchPromise) {
+    if (livestreamState.isFetching && livestreamState.fetchPromise) {
         console.log('📺 Fetch already in progress, waiting for it...');
-        return fetchPromise;
+        return livestreamState.fetchPromise;
     }
-    isFetching = true;
+    livestreamState.isFetching = true;
 
     console.log('📺 Fetching live streams from relays...');
 
     // Check if pool is ready (removed verbose debug logging)
     if (!State.pool) {
         console.error('📺 State.pool not initialized yet');
-        isFetching = false;
+        livestreamState.isFetching = false;
         return [];
     }
 
     // Create and store the fetch promise so concurrent callers can wait
-    fetchPromise = (async () => {
+    livestreamState.fetchPromise = (async () => {
     try {
         // Query for live stream events (kind 30311)
         const events = await State.pool.querySync(
@@ -144,8 +222,8 @@ export async function fetchLiveStreams(forceRefresh = false) {
             }
         }
 
-        liveStreamsCache = uniqueStreams;
-        lastFetchTime = now;
+        livestreamState.cache = uniqueStreams;
+        livestreamState.lastFetchTime = now;
 
         console.log('📺 Found', uniqueStreams.filter(s => s.status === 'live').length, 'live streams');
         return uniqueStreams;
@@ -153,59 +231,71 @@ export async function fetchLiveStreams(forceRefresh = false) {
     } catch (error) {
         console.error('❌ Error fetching live streams:', error);
         console.error('❌ Error stack:', error.stack);
-        return liveStreamsCache; // Return cached data on error
+        return livestreamState.cache; // Return cached data on error
     } finally {
-        isFetching = false;
-        fetchPromise = null;
+        livestreamState.isFetching = false;
+        livestreamState.fetchPromise = null;
     }
     })();
 
-    return fetchPromise;
+    return livestreamState.fetchPromise;
 }
 
 /**
  * Subscribe to live stream updates in real-time
  */
 export function subscribeToLiveStreams(onUpdate) {
-    if (liveStreamSubscription) {
-        liveStreamSubscription.close();
+    if (livestreamState.liveStreamSubscription) {
+        livestreamState.liveStreamSubscription.close();
     }
 
     console.log('📺 Subscribing to live stream updates...');
 
-    liveStreamSubscription = State.pool.subscribeMany(
-        LIVESTREAM_RELAYS,
-        [{
-            kinds: [30311],
-            since: Math.floor(Date.now() / 1000) - 3600 // Last hour
-        }],
-        {
-            onevent(event) {
-                const stream = parseLiveStreamEvent(event);
+    try {
+        livestreamState.liveStreamSubscription = State.pool.subscribeMany(
+            LIVESTREAM_RELAYS,
+            [{
+                kinds: [30311],
+                since: Math.floor(Date.now() / 1000) - 3600 // Last hour
+            }],
+            {
+                onevent(event) {
+                    const stream = parseLiveStreamEvent(event);
 
-                // Update cache
-                const existingIndex = liveStreamsCache.findIndex(
-                    s => s.pubkey === stream.pubkey && s.streamId === stream.streamId
-                );
+                    // Update cache
+                    const existingIndex = livestreamState.cache.findIndex(
+                        s => s.pubkey === stream.pubkey && s.streamId === stream.streamId
+                    );
 
-                if (existingIndex >= 0) {
-                    // Update existing stream if newer
-                    if (stream.createdAt > liveStreamsCache[existingIndex].createdAt) {
-                        liveStreamsCache[existingIndex] = stream;
+                    if (existingIndex >= 0) {
+                        // Update existing stream if newer
+                        if (stream.createdAt > livestreamState.cache[existingIndex].createdAt) {
+                            livestreamState.cache[existingIndex] = stream;
+                        }
+                    } else if (stream.status === 'live') {
+                        // Add new live stream
+                        livestreamState.cache.unshift(stream);
                     }
-                } else if (stream.status === 'live') {
-                    // Add new live stream
-                    liveStreamsCache.unshift(stream);
-                }
 
-                if (onUpdate) {
-                    onUpdate(liveStreamsCache);
+                    if (typeof onUpdate === 'function') {
+                        onUpdate(livestreamState.cache);
+                    }
+                },
+                oneose() {
+                    console.log('📺 Live stream subscription established');
                 }
             }
+        );
+    } catch (error) {
+        console.error('❌ Error subscribing to live streams:', error);
+        if (livestreamState.liveStreamSubscription) {
+            livestreamState.liveStreamSubscription.close();
+            livestreamState.liveStreamSubscription = null;
         }
-    );
+        throw error;
+    }
 
-    return liveStreamSubscription;
+    return livestreamState.liveStreamSubscription;
 }
 
 // ==================== LIVE CHAT ====================
@@ -214,8 +304,8 @@ export function subscribeToLiveStreams(onUpdate) {
  * Subscribe to live chat for a specific stream
  */
 export function subscribeToChat(stream, onMessage) {
-    if (chatSubscription) {
-        chatSubscription.close();
+    if (livestreamState.chatSubscription) {
+        livestreamState.chatSubscription.close();
     }
 
     const aTag = stream.eventRef;
@@ -223,36 +313,48 @@ export function subscribeToChat(stream, onMessage) {
 
     const messages = [];
 
-    chatSubscription = State.pool.subscribeMany(
-        LIVESTREAM_RELAYS,
-        [{
-            kinds: [1311],
-            '#a': [aTag],
-            since: Math.floor(Date.now() / 1000) - 3600 // Last hour
-        }],
-        {
-            onevent(event) {
-                const message = {
-                    id: event.id,
-                    pubkey: event.pubkey,
-                    content: event.content,
-                    createdAt: event.created_at
-                };
+    try {
+        livestreamState.chatSubscription = State.pool.subscribeMany(
+            LIVESTREAM_RELAYS,
+            [{
+                kinds: [1311],
+                '#a': [aTag],
+                since: Math.floor(Date.now() / 1000) - 3600 // Last hour
+            }],
+            {
+                onevent(event) {
+                    const message = {
+                        id: event.id,
+                        pubkey: event.pubkey,
+                        content: event.content,
+                        createdAt: event.created_at
+                    };
 
-                // Avoid duplicates
-                if (!messages.find(m => m.id === event.id)) {
-                    messages.push(message);
-                    messages.sort((a, b) => a.createdAt - b.createdAt);
+                    // Avoid duplicates
+                    if (!messages.find(m => m.id === event.id)) {
+                        messages.push(message);
+                        messages.sort((a, b) => a.createdAt - b.createdAt);
 
-                    if (onMessage) {
-                        onMessage(message, messages);
+                        if (typeof onMessage === 'function') {
+                            onMessage(message, messages);
+                        }
                     }
+                },
+                oneose() {
+                    console.log('💬 Chat subscription established');
                 }
             }
+        );
+    } catch (error) {
+        console.error('❌ Error subscribing to chat:', error);
+        if (livestreamState.chatSubscription) {
+            livestreamState.chatSubscription.close();
+            livestreamState.chatSubscription = null;
         }
-    );
+        throw error;
+    }
 
-    return chatSubscription;
+    return livestreamState.chatSubscription;
 }
 
 /**
@@ -273,7 +375,13 @@ export async function postChatMessage(stream, content) {
     };
 
     const signedEvent = await Utils.signEvent(event);
-    await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+
+    try {
+        await State.pool.publish(Relays.getWriteRelays(), signedEvent);
+    } catch (error) {
+        console.error('Failed to publish chat message:', error);
+        throw new Error('Failed to publish message to relays');
+    }
 
     console.log('💬 Chat message posted:', content);
     return signedEvent;
@@ -447,13 +555,13 @@ export async function renderLivestreamFeed() {
  * Open a stream in the right panel or fullscreen
  */
 export async function openStream(streamId) {
-    const stream = liveStreamsCache.find(s => s.id === streamId);
+    const stream = livestreamState.cache.find(s => s.id === streamId);
     if (!stream) {
         console.error('Stream not found:', streamId);
         return;
     }
 
-    currentStream = stream;
+    livestreamState.currentStream = stream;
 
     // Get streamer profile
     const Posts = await import('./posts.js');
@@ -555,7 +663,12 @@ function renderStreamInRightPanel(stream, profile) {
 
     // Initialize HLS player if stream is live
     if (stream.streamUrl && isLive) {
-        initializePlayer(stream.streamUrl);
+        const video = document.getElementById('streamPlayer');
+        if (video) {
+            initializePlayer(stream.streamUrl);
+        } else {
+            console.error('Video element not found for player initialization');
+        }
     }
 
     // Subscribe to chat
@@ -563,14 +676,15 @@ function renderStreamInRightPanel(stream, profile) {
         renderChatMessages(allMessages);
     });
 
-    // Set up chat input enter key
+    // Set up chat input enter key with named function for cleanup
     const chatInput = document.getElementById('chatInput');
     if (chatInput) {
-        chatInput.addEventListener('keypress', (e) => {
+        const handleChatKeyPress = (e) => {
             if (e.key === 'Enter') {
                 sendChatMessage();
             }
-        });
+        };
+        livestreamState.addChatEventListener(chatInput, 'keypress', handleChatKeyPress);
     }
 }
 
@@ -637,7 +751,12 @@ function renderStreamModal(stream, profile) {
 
     // Initialize player
     if (stream.streamUrl && isLive) {
-        initializePlayer(stream.streamUrl);
+        const video = document.getElementById('streamPlayer');
+        if (video) {
+            initializePlayer(stream.streamUrl);
+        } else {
+            console.error('Video element not found for player initialization');
+        }
     }
 
     // Subscribe to chat
@@ -645,14 +764,15 @@ function renderStreamModal(stream, profile) {
         renderChatMessages(allMessages);
     });
 
-    // Chat input enter key
+    // Chat input enter key with named function for cleanup
     const chatInput = document.getElementById('chatInput');
     if (chatInput) {
-        chatInput.addEventListener('keypress', (e) => {
+        const handleChatKeyPress = (e) => {
             if (e.key === 'Enter') {
                 sendChatMessage();
             }
-        });
+        };
+        livestreamState.addChatEventListener(chatInput, 'keypress', handleChatKeyPress);
     }
 }
 
@@ -750,13 +870,14 @@ function showPlayButtonOverlay(video) {
     overlay.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); cursor: pointer;';
     overlay.querySelector('.play-btn').style.cssText = 'background: rgba(255, 102, 0, 0.9); border: none; color: white; padding: 16px 32px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer;';
 
-    overlay.addEventListener('click', () => {
+    const handlePlayClick = () => {
         video.play().then(() => {
             overlay.remove();
         }).catch(e => {
             console.error('📺 Play failed:', e);
         });
-    });
+    };
+    livestreamState.addChatEventListener(overlay, 'click', handlePlayClick);
 
     container.style.position = 'relative';
     container.appendChild(overlay);
@@ -795,7 +916,7 @@ async function renderChatMessages(messages) {
  * Send a chat message
  */
 export async function sendChatMessage() {
-    if (!currentStream) return;
+    if (!livestreamState.currentStream) return;
 
     const input = document.getElementById('chatInput');
     if (!input || !input.value.trim()) return;
@@ -805,7 +926,7 @@ export async function sendChatMessage() {
     input.disabled = true;
 
     try {
-        await postChatMessage(currentStream, content);
+        await postChatMessage(livestreamState.currentStream, content);
     } catch (error) {
         console.error('Failed to send message:', error);
         Utils.showNotification('Failed to send message', 'error');
@@ -821,12 +942,15 @@ export async function sendChatMessage() {
  */
 export function closeStreamView() {
     // Close chat subscription
-    if (chatSubscription) {
-        chatSubscription.close();
-        chatSubscription = null;
+    if (livestreamState.chatSubscription) {
+        livestreamState.chatSubscription.close();
+        livestreamState.chatSubscription = null;
     }
 
-    currentStream = null;
+    // Cleanup event listeners
+    livestreamState.cleanupChatEventListeners();
+
+    livestreamState.currentStream = null;
 
     // Remove modal if exists
     const modal = document.getElementById('streamModal');
@@ -845,10 +969,33 @@ export function closeStreamView() {
 }
 
 /**
+ * Update tip amount USD display
+ */
+async function updateTipAmountUSD() {
+    const amountInput = document.getElementById('tipAmount');
+    const usdEl = document.getElementById('tipAmountUSD');
+
+    const amountStr = amountInput?.value.trim();
+    if (!amountStr || isNaN(parseFloat(amountStr)) || parseFloat(amountStr) <= 0) {
+        if (usdEl) usdEl.style.display = 'none';
+        return;
+    }
+
+    const xmrAmount = parseFloat(amountStr);
+    const price = await fetchXMRPrice();
+
+    if (price && usdEl) {
+        const usdAmount = xmrAmount * price;
+        usdEl.textContent = '≈ ' + formatUSD(usdAmount) + ' USD';
+        usdEl.style.display = 'block';
+    }
+}
+
+/**
  * Show XMR tip modal for livestream
  */
 export async function showTipModal() {
-    if (!currentStream) {
+    if (!livestreamState.currentStream) {
         Utils.showNotification('No stream selected', 'error');
         return;
     }
@@ -862,7 +1009,7 @@ export async function showTipModal() {
     let streamerAddress = null;
     try {
         if (window.getUserMoneroAddress) {
-            streamerAddress = await window.getUserMoneroAddress(currentStream.pubkey);
+            streamerAddress = await window.getUserMoneroAddress(livestreamState.currentStream.pubkey);
         }
     } catch (error) {
         console.error('Error fetching streamer XMR address:', error);
@@ -874,8 +1021,8 @@ export async function showTipModal() {
     }
 
     // Get streamer profile
-    const profile = State.profileCache[currentStream.pubkey];
-    const streamerName = profile?.name || profile?.display_name || currentStream.pubkey.slice(0, 8) + '...';
+    const profile = State.profileCache[livestreamState.currentStream.pubkey];
+    const streamerName = profile?.name || profile?.display_name || livestreamState.currentStream.pubkey.slice(0, 8) + '...';
 
     // Check if wallet is available
     const MoneroClient = window.MoneroClient;
@@ -886,7 +1033,9 @@ export async function showTipModal() {
         if (MoneroClient && await MoneroClient.isUnlocked()) {
             hasWallet = true;
             const balance = await MoneroClient.getBalance();
-            walletBalance = parseFloat(balance.unlocked) / 1e12; // Convert from atomic units
+            const unlocked = parseFloat(balance.unlocked);
+            // Prevent division by zero - 1e12 is always non-zero, but validate balance
+            walletBalance = (unlocked && isFinite(unlocked)) ? unlocked / 1e12 : 0;
         }
     } catch (e) {
         console.log('Wallet not available:', e.message);
@@ -907,12 +1056,14 @@ export async function showTipModal() {
                 <div class="tip-amount-section">
                     <label>Amount (XMR)</label>
                     <input type="number" id="tipAmount" class="tip-amount-input"
-                           placeholder="0.01" step="0.001" min="0.001" value="0.01">
+                           placeholder="0.01" step="0.001" min="0.001" value="0.01"
+                           oninput="window.NostrLivestream.updateTipAmountUSD()">
+                    <div id="tipAmountUSD" style="color: #888; font-size: 13px; margin-top: 6px; display: none;">≈ $0.00 USD</div>
                     <div class="quick-amounts">
-                        <button onclick="document.getElementById('tipAmount').value='0.01'">0.01</button>
-                        <button onclick="document.getElementById('tipAmount').value='0.05'">0.05</button>
-                        <button onclick="document.getElementById('tipAmount').value='0.1'">0.1</button>
-                        <button onclick="document.getElementById('tipAmount').value='0.5'">0.5</button>
+                        <button onclick="document.getElementById('tipAmount').value='0.01'; window.NostrLivestream.updateTipAmountUSD()">0.01</button>
+                        <button onclick="document.getElementById('tipAmount').value='0.05'; window.NostrLivestream.updateTipAmountUSD()">0.05</button>
+                        <button onclick="document.getElementById('tipAmount').value='0.1'; window.NostrLivestream.updateTipAmountUSD()">0.1</button>
+                        <button onclick="document.getElementById('tipAmount').value='0.5'; window.NostrLivestream.updateTipAmountUSD()">0.5</button>
                     </div>
                 </div>
 
@@ -957,14 +1108,18 @@ export async function showTipModal() {
 
     const msgInput = document.getElementById('tipMessage');
     const msgCount = document.getElementById('tipMsgCount');
-    msgInput.addEventListener('input', () => {
+    const handleMsgInput = () => {
         msgCount.textContent = msgInput.value.length;
-    });
+    };
+    livestreamState.addChatEventListener(msgInput, 'input', handleMsgInput);
 
     // Store address for later use
     modal.dataset.streamerAddress = streamerAddress;
-    modal.dataset.streamerPubkey = currentStream.pubkey;
-    modal.dataset.streamEventRef = currentStream.eventRef;
+    modal.dataset.streamerPubkey = livestreamState.currentStream.pubkey;
+    modal.dataset.streamEventRef = livestreamState.currentStream.eventRef;
+
+    // Update USD display for the default amount
+    updateTipAmountUSD();
 }
 
 /**
@@ -991,6 +1146,13 @@ export async function sendTip() {
     const amount = parseFloat(amountInput.value);
     const message = messageInput.value.trim();
     const isAnonymous = anonymousCheckbox.checked;
+
+    // Validate dataset properties exist before using them
+    if (!modal.dataset || !modal.dataset.streamerAddress || !modal.dataset.streamerPubkey || !modal.dataset.streamEventRef) {
+        Utils.showNotification('Missing stream information', 'error');
+        return;
+    }
+
     const streamerAddress = modal.dataset.streamerAddress;
     const streamerPubkey = modal.dataset.streamerPubkey;
     const streamEventRef = modal.dataset.streamEventRef;
@@ -1089,13 +1251,15 @@ async function publishStreamTip({ streamerPubkey, streamEventRef, amount, messag
 
     // Publish to write relays + Nosmero relay
     const writeRelays = Relays.getWriteRelays();
-    const NIP78_RELAY = window.location.protocol === 'https:'
-        ? 'wss://nosmero.com/nip78-relay'
-        : 'ws://nosmero.com:8080/nip78-relay';
-
     const allRelays = [...new Set([...writeRelays, NIP78_RELAY, ...LIVESTREAM_RELAYS])];
 
-    await State.pool.publish(allRelays, signedEvent);
+    try {
+        await State.pool.publish(allRelays, signedEvent);
+    } catch (error) {
+        console.error('Failed to publish stream tip event:', error);
+        throw new Error('Failed to publish tip event to relays');
+    }
+
     console.log('📢 Published stream tip event:', signedEvent.id);
 
     return signedEvent;
@@ -1129,15 +1293,16 @@ function stringToColor(str) {
  * Clean up subscriptions
  */
 export function cleanup() {
-    if (liveStreamSubscription) {
-        liveStreamSubscription.close();
-        liveStreamSubscription = null;
+    if (livestreamState.liveStreamSubscription) {
+        livestreamState.liveStreamSubscription.close();
+        livestreamState.liveStreamSubscription = null;
     }
-    if (chatSubscription) {
-        chatSubscription.close();
-        chatSubscription = null;
+    if (livestreamState.chatSubscription) {
+        livestreamState.chatSubscription.close();
+        livestreamState.chatSubscription = null;
     }
-    currentStream = null;
+    livestreamState.cleanupChatEventListeners();
+    livestreamState.currentStream = null;
 }
 
 // ==================== EXPORTS FOR GLOBAL ACCESS ====================
@@ -1152,6 +1317,7 @@ window.NostrLivestream = {
     showTipModal,
     closeTipModal,
     sendTip,
+    updateTipAmountUSD,
     cleanup,
     updateLiveTabIndicator,
     initialize

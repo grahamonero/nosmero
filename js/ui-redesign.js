@@ -46,19 +46,37 @@ async function ensurePostsLoaded() {
 // ===================
 
 function openHamburgerMenu() {
-    document.getElementById('slideMenu').classList.add('active');
-    document.getElementById('menuOverlay').classList.add('active');
+    const slideMenu = document.getElementById('slideMenu');
+    const menuOverlay = document.getElementById('menuOverlay');
+
+    if (!slideMenu || !menuOverlay) {
+        console.warn('Hamburger menu elements not found');
+        return;
+    }
+
+    slideMenu.classList.add('active');
+    menuOverlay.classList.add('active');
 }
 
 function closeHamburgerMenu() {
-    document.getElementById('slideMenu').classList.remove('active');
-    document.getElementById('menuOverlay').classList.remove('active');
+    const slideMenu = document.getElementById('slideMenu');
+    const menuOverlay = document.getElementById('menuOverlay');
+
+    if (!slideMenu || !menuOverlay) {
+        console.warn('Hamburger menu elements not found');
+        return;
+    }
+
+    slideMenu.classList.remove('active');
+    menuOverlay.classList.remove('active');
 }
 
 function handleMenuItemClick(tab) {
     closeHamburgerMenu();
     // Reuse existing navigation handler
-    handleNavItemClick(tab);
+    if (typeof handleNavItemClick === 'function') {
+        handleNavItemClick(tab);
+    }
 }
 
 // ===================
@@ -178,7 +196,13 @@ async function handleFeedTabClick(feedType, event) {
 // ===================
 
 function closeWelcomeBanner() {
-    document.getElementById('welcomeBanner').classList.add('hidden');
+    const banner = document.getElementById('welcomeBanner');
+    if (!banner) {
+        console.warn('Welcome banner element not found');
+        return;
+    }
+
+    banner.classList.add('hidden');
     localStorage.setItem('welcomeBannerClosed', 'true');
 }
 
@@ -215,15 +239,25 @@ async function showWelcomeBannerIfNeeded() {
 
 function handleCreateKeysAndPost() {
     // Show create account modal
-    showCreateAccount();
+    if (typeof showCreateAccount === 'function') {
+        showCreateAccount();
+    }
 }
 
 function showWhatIsNostr() {
-    alert('Nostr is a decentralized social protocol. Your identity is a cryptographic key pair, giving you true ownership of your data. No company can ban you or censor your posts.');
+    if (typeof window.showToast === 'function') {
+        window.showToast('Nostr is a decentralized social protocol. Your identity is a cryptographic key pair, giving you true ownership of your data. No company can ban you or censor your posts.', 'info', 8000);
+    } else {
+        console.log('Nostr is a decentralized social protocol. Your identity is a cryptographic key pair, giving you true ownership of your data. No company can ban you or censor your posts.');
+    }
 }
 
 function showWhatIsMonero() {
-    alert('Monero (XMR) is a privacy-focused cryptocurrency. Transactions are completely private and untraceable, making it ideal for confidential payments and tips.');
+    if (typeof window.showToast === 'function') {
+        window.showToast('Monero (XMR) is a privacy-focused cryptocurrency. Transactions are completely private and untraceable, making it ideal for confidential payments and tips.', 'info', 8000);
+    } else {
+        console.log('Monero (XMR) is a privacy-focused cryptocurrency. Transactions are completely private and untraceable, making it ideal for confidential payments and tips.');
+    }
 }
 
 // ===================
@@ -244,7 +278,9 @@ async function handleCreateNoteClick() {
 
     if (isLoggedIn) {
         // Logged in: show inline compose
-        toggleCompose();
+        if (typeof toggleCompose === 'function') {
+            toggleCompose();
+        }
     } else {
         // Anonymous: show modal to create keys
         handleCreateKeysAndPost();
@@ -269,10 +305,15 @@ function showLoginOptions() {
     title.style.cssText = 'margin: 0; color: var(--text-primary);';
     title.textContent = 'Login to Nosmero';
 
+    // Store event listeners for cleanup
+    const cleanupModal = () => {
+        modal.remove();
+    };
+
     const closeBtn = document.createElement('button');
     closeBtn.style.cssText = 'background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;';
     closeBtn.textContent = '×';
-    closeBtn.addEventListener('click', () => modal.remove());
+    closeBtn.addEventListener('click', cleanupModal);
 
     header.appendChild(title);
     header.appendChild(closeBtn);
@@ -285,56 +326,61 @@ function showLoginOptions() {
     const createAccountBtn = document.createElement('button');
     createAccountBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: white; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: transform 0.2s;';
     createAccountBtn.textContent = '🆕 Create New Account';
-    createAccountBtn.addEventListener('click', () => {
+    const handleCreateAccount = () => {
         if (typeof showCreateAccount === 'function') {
             showCreateAccount();
         }
-        modal.remove();
-    });
+        cleanupModal();
+    };
+    createAccountBtn.addEventListener('click', handleCreateAccount);
 
     // Login with nsec button
     const loginNsecBtn = document.createElement('button');
     loginNsecBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;';
     loginNsecBtn.textContent = '🔑 Login with nsec';
-    loginNsecBtn.addEventListener('click', () => {
+    const handleLoginNsec = () => {
         if (typeof showLoginWithNsec === 'function') {
             showLoginWithNsec();
         }
-        modal.remove();
-    });
+        cleanupModal();
+    };
+    loginNsecBtn.addEventListener('click', handleLoginNsec);
 
     // Use Extension button
     const extensionBtn = document.createElement('button');
     extensionBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;';
     extensionBtn.textContent = '🔌 Use Extension (NIP-07)';
-    extensionBtn.addEventListener('click', () => {
+    const handleExtension = () => {
         if (typeof loginWithExtension === 'function') {
             loginWithExtension();
         }
-        modal.remove();
-    });
+        cleanupModal();
+    };
+    extensionBtn.addEventListener('click', handleExtension);
 
     // Use nsec.app button
     const nsecAppBtn = document.createElement('button');
     nsecAppBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;';
     nsecAppBtn.textContent = '🌐 Use nsec.app';
-    nsecAppBtn.addEventListener('click', () => {
+    const handleNsecApp = () => {
         if (typeof showLoginWithNsecApp === 'function') {
             showLoginWithNsecApp();
         }
-        modal.remove();
-    });
+        cleanupModal();
+    };
+    nsecAppBtn.addEventListener('click', handleNsecApp);
 
     // Use Amber button
     const amberBtn = document.createElement('button');
     amberBtn.style.cssText = 'width: 100%; padding: 0.75rem 1rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.2s;';
     amberBtn.textContent = '📱 Use Amber (Android)';
-    amberBtn.addEventListener('click', () => {
+    const handleAmber = () => {
         if (typeof showLoginWithAmber === 'function') {
             showLoginWithAmber();
         }
-        modal.remove();
-    });
+        cleanupModal();
+    };
+    amberBtn.addEventListener('click', handleAmber);
 
     // Append all buttons
     buttonsContainer.appendChild(createAccountBtn);
@@ -349,11 +395,12 @@ function showLoginOptions() {
     modal.appendChild(modalContent);
 
     // Close on overlay click
-    modal.addEventListener('click', (e) => {
+    const handleOverlayClick = (e) => {
         if (e.target === modal) {
-            modal.remove();
+            cleanupModal();
         }
-    });
+    };
+    modal.addEventListener('click', handleOverlayClick);
 
     document.body.appendChild(modal);
 }
@@ -558,7 +605,9 @@ async function handleBottomNavClick(navItem) {
     if (navItem !== 'compose') {
         const compose = document.getElementById('compose');
         if (compose && compose.style.display === 'block') {
-            toggleCompose(); // Close it first
+            if (typeof toggleCompose === 'function') {
+                toggleCompose(); // Close it first
+            }
         }
     }
 
