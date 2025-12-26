@@ -1963,6 +1963,16 @@ const RightPanel = {
                 Replying to: <span id="replyToPreview">Loading...</span>
             </div>` : ''}
             <textarea class="compose-textarea" id="panelComposeText" placeholder="${replyTo ? 'Write your reply...' : 'What\'s happening?'}" maxlength="4000"></textarea>
+            <div id="panelComposePreview" class="compose-preview" style="display: none;"></div>
+            <div class="compose-toolbar">
+                <button type="button" data-format="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
+                <button type="button" data-format="italic" title="Italic (Ctrl+I)"><em>I</em></button>
+                <button type="button" data-format="link" title="Link (Ctrl+K)">🔗</button>
+                <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
+                <button type="button" data-format="quote" title="Quote">"</button>
+                <button type="button" data-format="list" title="Bullet list">•</button>
+                <button type="button" data-format="preview" title="Preview" class="preview-btn">Preview</button>
+            </div>
             <div style="text-align: right; color: var(--text-muted); font-size: 12px; margin-top: 4px;">
                 <span id="panelCharCount">0/4000</span>
             </div>

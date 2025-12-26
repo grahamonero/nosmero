@@ -5027,13 +5027,13 @@ export async function sendPost() {
 // Update character count display
 export function updateCharacterCount(textarea, countElementId) {
     if (!textarea) return;
-    
+
     const count = textarea.value.length;
     const countElement = document.getElementById(countElementId);
-    
+
     if (countElement) {
         countElement.textContent = `${count}/${MAX_CONTENT_LENGTH}`;
-        
+
         // Change color based on character usage
         if (count > MAX_CONTENT_LENGTH * 0.9) {
             countElement.style.color = '#ff6666';
@@ -5045,6 +5045,228 @@ export function updateCharacterCount(textarea, countElementId) {
     }
 }
 
+// ============================================
+// Markdown Formatting Toolbar
+// ============================================
+
+/**
+ * Apply markdown formatting to selected text in a textarea
+ * @param {HTMLTextAreaElement} textarea - The textarea element
+ * @param {string} format - The format type (bold, italic, link, code, quote, list)
+ */
+export function formatText(textarea, format) {
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+    const beforeText = textarea.value.substring(0, start);
+    const afterText = textarea.value.substring(end);
+
+    let replacement = '';
+    let cursorOffset = 0;
+
+    switch (format) {
+        case 'bold':
+            replacement = `**${selectedText || 'bold text'}**`;
+            cursorOffset = selectedText ? replacement.length : 2;
+            break;
+        case 'italic':
+            replacement = `*${selectedText || 'italic text'}*`;
+            cursorOffset = selectedText ? replacement.length : 1;
+            break;
+        case 'link':
+            if (selectedText) {
+                // Check if selected text is a URL
+                if (selectedText.match(/^https?:\/\//)) {
+                    replacement = `[link](${selectedText})`;
+                    cursorOffset = 1; // Position after [
+                } else {
+                    replacement = `[${selectedText}](url)`;
+                    cursorOffset = replacement.length - 4; // Position before url
+                }
+            } else {
+                replacement = '[link text](url)';
+                cursorOffset = 1; // Position after [
+            }
+            break;
+        case 'code':
+            if (selectedText.includes('\n')) {
+                // Multi-line: use code block
+                replacement = `\`\`\`\n${selectedText || 'code'}\n\`\`\``;
+                cursorOffset = selectedText ? replacement.length : 4;
+            } else {
+                // Single line: use inline code
+                replacement = `\`${selectedText || 'code'}\``;
+                cursorOffset = selectedText ? replacement.length : 1;
+            }
+            break;
+        case 'quote':
+            if (selectedText) {
+                // Prefix each line with >
+                replacement = selectedText.split('\n').map(line => `> ${line}`).join('\n');
+            } else {
+                replacement = '> ';
+            }
+            cursorOffset = replacement.length;
+            break;
+        case 'list':
+            if (selectedText) {
+                // Convert each line to a list item
+                replacement = selectedText.split('\n').map(line => `- ${line}`).join('\n');
+            } else {
+                replacement = '- ';
+            }
+            cursorOffset = replacement.length;
+            break;
+        default:
+            return;
+    }
+
+    textarea.value = beforeText + replacement + afterText;
+
+    // Update character count
+    const countId = textarea.closest('#compose') ? 'mainCharCount' : 'panelCharCount';
+    updateCharacterCount(textarea, countId);
+
+    // Set cursor position
+    const newPosition = start + cursorOffset;
+    textarea.focus();
+    textarea.setSelectionRange(newPosition, newPosition);
+}
+
+/**
+ * Toggle preview mode for compose area
+ * @param {HTMLElement} composeArea - The compose area container
+ */
+export function toggleComposePreview(composeArea) {
+    if (!composeArea) return;
+
+    const textarea = composeArea.querySelector('.compose-textarea');
+    const preview = composeArea.querySelector('.compose-preview');
+    const previewBtn = composeArea.querySelector('.preview-btn');
+
+    if (!textarea || !preview || !previewBtn) return;
+
+    const isPreviewActive = preview.style.display !== 'none';
+
+    if (isPreviewActive) {
+        // Switch to edit mode
+        preview.style.display = 'none';
+        textarea.style.display = '';
+        previewBtn.textContent = 'Preview';
+        previewBtn.classList.remove('active');
+        textarea.focus();
+    } else {
+        // Switch to preview mode
+        const content = textarea.value;
+
+        // Parse markdown with marked.js and sanitize with DOMPurify
+        if (window.marked && window.DOMPurify) {
+            const html = window.marked.parse(content);
+            preview.innerHTML = window.DOMPurify.sanitize(html);
+        } else {
+            // Fallback: escape HTML and show as plain text
+            preview.textContent = content;
+        }
+
+        textarea.style.display = 'none';
+        preview.style.display = '';
+        previewBtn.textContent = 'Edit';
+        previewBtn.classList.add('active');
+    }
+}
+
+/**
+ * Initialize compose toolbar event listeners
+ */
+export function initComposeToolbar() {
+    // Prevent duplicate initialization using DOM marker
+    if (document.body.dataset.composeToolbarInit) return;
+    document.body.dataset.composeToolbarInit = 'true';
+
+    // Directly attach handlers to toolbar buttons
+    document.querySelectorAll('.compose-toolbar button[data-format]').forEach(button => {
+        button.dataset.toolbarBound = 'true';
+        button.addEventListener('click', handleToolbarClick);
+    });
+
+    // Also use MutationObserver for dynamically added toolbars
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach(mutation => {
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType === 1) {
+                    node.querySelectorAll?.('.compose-toolbar button[data-format]')?.forEach(btn => {
+                        if (!btn.dataset.toolbarBound) {
+                            btn.dataset.toolbarBound = 'true';
+                            btn.addEventListener('click', handleToolbarClick);
+                        }
+                    });
+                }
+            });
+        });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Keyboard shortcuts for compose textareas
+    document.addEventListener('keydown', (e) => {
+        // Only handle if in a compose textarea
+        const textarea = e.target;
+        if (!textarea.classList.contains('compose-textarea')) return;
+
+        // Check for Ctrl/Cmd key combinations
+        const isMod = e.ctrlKey || e.metaKey;
+        if (!isMod) return;
+
+        let format = null;
+        switch (e.key.toLowerCase()) {
+            case 'b':
+                format = 'bold';
+                break;
+            case 'i':
+                format = 'italic';
+                break;
+            case 'k':
+                format = 'link';
+                break;
+        }
+
+        if (format) {
+            e.preventDefault();
+            formatText(textarea, format);
+        }
+    });
+}
+
+function handleToolbarClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const button = e.currentTarget;
+    const format = button.dataset.format;
+    if (!format) return;
+
+    const composeArea = button.closest('.compose-area, .right-panel-compose, #compose');
+    if (!composeArea) return;
+
+    if (format === 'preview') {
+        toggleComposePreview(composeArea);
+    } else {
+        const textarea = composeArea.querySelector('.compose-textarea');
+        formatText(textarea, format);
+    }
+}
+
+// Initialize toolbar when DOM is ready
+// Use window flag since module may be loaded multiple times with different query strings
+if (!window._composeToolbarInit) {
+    window._composeToolbarInit = true;
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initComposeToolbar);
+    } else {
+        initComposeToolbar();
+    }
+}
 
 // Show upload progress (placeholder - would connect to actual upload system)
 function showUploadProgress(context, message) {
