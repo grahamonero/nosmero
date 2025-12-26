@@ -54,3 +54,5 @@ PENDING_FIXES.md
 # Dev-only files (never push to production or GitHub)
 analytics.html
 test-*.html
+# Cache files
+trending-cache.json
