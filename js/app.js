@@ -4035,6 +4035,29 @@ async function populateSettingsForm() {
             }
         }
 
+        // Sync Web of Trust toggles with localStorage
+        const webOfTrustEnabled = localStorage.getItem('webOfTrustEnabled') !== 'false'; // Default: true
+        const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true'; // Default: false
+        const personalizeScores = localStorage.getItem('personalizeScores') !== 'false'; // Default: true
+        const shareData = localStorage.getItem('shareDataWithRelatr') === 'true'; // Default: false
+
+        const enableToggle = document.getElementById('enableWebOfTrust');
+        const everywhereToggle = document.getElementById('showTrustBadgesEverywhere');
+        const personalizeToggle = document.getElementById('personalizeScores');
+        const shareToggle = document.getElementById('shareDataWithRelatr');
+
+        if (enableToggle) enableToggle.checked = webOfTrustEnabled;
+        if (everywhereToggle) everywhereToggle.checked = showEverywhere;
+        if (personalizeToggle) personalizeToggle.checked = personalizeScores;
+        if (shareToggle) shareToggle.checked = shareData;
+
+        // Update options container state
+        const optionsContainer = document.getElementById('webOfTrustOptions');
+        if (optionsContainer) {
+            optionsContainer.style.opacity = webOfTrustEnabled ? '1' : '0.5';
+            optionsContainer.style.pointerEvents = webOfTrustEnabled ? 'auto' : 'none';
+        }
+
         console.log('✅ Settings form populated successfully');
 
     } catch (error) {
@@ -4801,7 +4824,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const settingsPage = document.getElementById('settingsPage');
     if (settingsPage) {
         const observer = new MutationObserver(() => {
-            if (settingsPage.style.display === 'block') {
+            if (settingsPage.style.display !== 'none' && settingsPage.style.display !== '') {
                 // Settings page opened - sync toggles with current state
                 const webOfTrustEnabled = localStorage.getItem('webOfTrustEnabled') !== 'false'; // Default: true
                 const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true'; // Default: false

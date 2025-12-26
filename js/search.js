@@ -1191,57 +1191,102 @@ export async function performStreamingContentSearch(query) {
         since: sinceTimestamp
     };
 
-    // Get relays sorted by health (fastest first)
-    const healthyRelays = getHealthySearchRelays();
-    console.log('[Search] Using relays sorted by health:', healthyRelays.map(r =>
-        `${r} (${searchRelayHealth[r]?.avgTime || 'unknown'}ms)`
-    ));
+    // Use all SEARCH_RELAYS with single subscribeMany call
+    // NOTE: Per-relay subscriptions break nostr-tools pool connection handling
+    console.log('[Search] Querying', SEARCH_RELAYS.length, 'relays with filter:', JSON.stringify(searchFilter));
 
-    // Create parallel search subscriptions for each relay
-    const searchPromises = healthyRelays.map(relayUrl => {
-        return new Promise((resolve) => {
-            const startTime = Date.now();
-            let resultCount = 0;
+    // Single subscription to all relays at once (correct pattern for nostr-tools)
+    const nip50StartTime = Date.now();
+    let nip50ResultCount = 0;
+    let nip50ReceivedCount = 0;
 
-            const searchSub = pool.subscribeMany([relayUrl], [searchFilter], {
-                onevent(event) {
-                    // Client-side NSFW filter
-                    if (searchOptions.hideNsfw && isNsfwContent(event)) {
-                        return;
-                    }
+    await new Promise((resolve) => {
+        const searchSub = pool.subscribeMany(SEARCH_RELAYS, [searchFilter], {
+            onerror(err) {
+                console.error('[Search] NIP-50 subscription error:', err);
+            },
+            onevent(event) {
+                nip50ReceivedCount++;
 
-                    // Client-side time filter
-                    if (timeLimit > 0 && event.created_at < timeLimit) {
-                        return;
-                    }
-
-                    // Try exact match first, then fuzzy
-                    if (matchesQuery(event, parsedQuery) || matchesQuery(event, parsedQuery, true)) {
-                        resultCount++;
-                        addSearchResult(event);
-                    }
-                },
-                oneose() {
-                    const responseTime = Date.now() - startTime;
-                    updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
-                    console.log(`[Search] ${relayUrl}: ${resultCount} results in ${responseTime}ms`);
-                    searchSub.close();
-                    resolve({ relay: relayUrl, count: resultCount, time: responseTime });
+                // Client-side NSFW filter
+                if (searchOptions.hideNsfw && isNsfwContent(event)) {
+                    return;
                 }
-            });
 
-            // Timeout after 5 seconds per relay
-            setTimeout(() => {
-                const responseTime = Date.now() - startTime;
-                updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
+                // Client-side time filter
+                if (timeLimit > 0 && event.created_at < timeLimit) {
+                    return;
+                }
+
+                // Try exact match first, then fuzzy
+                if (matchesQuery(event, parsedQuery) || matchesQuery(event, parsedQuery, true)) {
+                    nip50ResultCount++;
+                    addSearchResult(event);
+                }
+            },
+            oneose() {
+                const elapsed = Date.now() - nip50StartTime;
+                console.log(`[Search] NIP-50: ${nip50ResultCount}/${nip50ReceivedCount} matched in ${elapsed}ms`);
                 searchSub.close();
-                resolve({ relay: relayUrl, count: resultCount, time: responseTime, timeout: true });
-            }, 5000);
+                resolve();
+            }
         });
+
+        // Timeout after 8 seconds for all relays
+        setTimeout(() => {
+            const elapsed = Date.now() - nip50StartTime;
+            console.log(`[Search] NIP-50: ${nip50ResultCount}/${nip50ReceivedCount} matched in ${elapsed}ms (timeout)`);
+            searchSub.close();
+            resolve();
+        }, 8000);
     });
 
-    // Wait for all relays in parallel
-    await Promise.all(searchPromises);
+    // Fallback: Broad content search for relays that don't support NIP-50
+    // This fetches recent posts and filters client-side
+    const broadFilter = {
+        kinds: [1],
+        limit: 100,
+        since: sinceTimestamp || Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60) // Last 30 days if no time filter
+    };
+
+    const broadStartTime = Date.now();
+    let broadResultCount = 0;
+
+    await new Promise((resolve) => {
+        const broadSub = pool.subscribeMany(SEARCH_RELAYS, [broadFilter], {
+            onevent(event) {
+                // Client-side NSFW filter
+                if (searchOptions.hideNsfw && isNsfwContent(event)) {
+                    return;
+                }
+
+                // Client-side time filter
+                if (timeLimit > 0 && event.created_at < timeLimit) {
+                    return;
+                }
+
+                // Must match query (exact or fuzzy)
+                if (matchesQuery(event, parsedQuery) || matchesQuery(event, parsedQuery, true)) {
+                    broadResultCount++;
+                    addSearchResult(event);
+                }
+            },
+            oneose() {
+                const elapsed = Date.now() - broadStartTime;
+                console.log(`[Search] Broad fallback: ${broadResultCount} matched in ${elapsed}ms`);
+                broadSub.close();
+                resolve();
+            }
+        });
+
+        // Shorter timeout for broad search (5 seconds)
+        setTimeout(() => {
+            const elapsed = Date.now() - broadStartTime;
+            console.log(`[Search] Broad fallback: ${broadResultCount} matched in ${elapsed}ms (timeout)`);
+            broadSub.close();
+            resolve();
+        }, 5000);
+    });
 
     // If few results, do fuzzy search on cached posts
     if (currentSearchResults.length < 10 && parsedQuery.terms.length > 0) {
@@ -1297,43 +1342,37 @@ export async function performStreamingHashtagSearch(hashtag) {
         since: sinceTimestamp
     };
 
-    // Get healthy relays and search in parallel
-    const healthyRelays = getHealthySearchRelays();
+    // Single subscription to all relays (correct pattern for nostr-tools)
+    const hashtagStartTime = Date.now();
+    let hashtagResultCount = 0;
 
-    const searchPromises = healthyRelays.map(relayUrl => {
-        return new Promise((resolve) => {
-            const startTime = Date.now();
-            let resultCount = 0;
-
-            const hashtagSub = pool.subscribeMany([relayUrl], [hashtagFilter], {
-                onevent(event) {
-                    // Client-side time filter
-                    if (timeLimit > 0 && event.created_at < timeLimit) {
-                        return;
-                    }
-
-                    resultCount++;
-                    addSearchResult(event);
-                },
-                oneose() {
-                    const responseTime = Date.now() - startTime;
-                    updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
-                    hashtagSub.close();
-                    resolve({ relay: relayUrl, count: resultCount, time: responseTime });
+    await new Promise((resolve) => {
+        const hashtagSub = pool.subscribeMany(SEARCH_RELAYS, [hashtagFilter], {
+            onevent(event) {
+                // Client-side time filter
+                if (timeLimit > 0 && event.created_at < timeLimit) {
+                    return;
                 }
-            });
 
-            // Timeout after 5 seconds
-            setTimeout(() => {
-                const responseTime = Date.now() - startTime;
-                updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
+                hashtagResultCount++;
+                addSearchResult(event);
+            },
+            oneose() {
+                const elapsed = Date.now() - hashtagStartTime;
+                console.log(`[Search] Hashtag: ${hashtagResultCount} results in ${elapsed}ms`);
                 hashtagSub.close();
-                resolve({ relay: relayUrl, count: resultCount, time: responseTime, timeout: true });
-            }, 5000);
+                resolve();
+            }
         });
-    });
 
-    await Promise.all(searchPromises);
+        // Timeout after 8 seconds
+        setTimeout(() => {
+            const elapsed = Date.now() - hashtagStartTime;
+            console.log(`[Search] Hashtag: ${hashtagResultCount} results in ${elapsed}ms (timeout)`);
+            hashtagSub.close();
+            resolve();
+        }, 8000);
+    });
 }
 
 // Streaming user search
@@ -1378,36 +1417,32 @@ export async function performStreamingUserSearch(query) {
             since: sinceTimestamp
         };
 
-        // Search relays in parallel
-        const healthyRelays = getHealthySearchRelays();
-        const searchPromises = healthyRelays.map(relayUrl => {
-            return new Promise((resolve) => {
-                const startTime = Date.now();
-                let resultCount = 0;
+        // Single subscription to all relays (correct pattern for nostr-tools)
+        const userStartTime = Date.now();
+        let userResultCount = 0;
 
-                const userSub = pool.subscribeMany([relayUrl], [userFilter], {
-                    onevent(event) {
-                        if (timeLimit > 0 && event.created_at < timeLimit) return;
-                        resultCount++;
-                        addSearchResult(event);
-                    },
-                    oneose() {
-                        const responseTime = Date.now() - startTime;
-                        updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
-                        userSub.close();
-                        resolve({ relay: relayUrl, count: resultCount });
-                    }
-                });
-
-                setTimeout(() => {
-                    updateSearchRelayHealth(relayUrl, 5000, resultCount > 0);
+        await new Promise((resolve) => {
+            const userSub = pool.subscribeMany(SEARCH_RELAYS, [userFilter], {
+                onevent(event) {
+                    if (timeLimit > 0 && event.created_at < timeLimit) return;
+                    userResultCount++;
+                    addSearchResult(event);
+                },
+                oneose() {
+                    const elapsed = Date.now() - userStartTime;
+                    console.log(`[Search] User posts: ${userResultCount} results in ${elapsed}ms`);
                     userSub.close();
-                    resolve({ relay: relayUrl, count: resultCount, timeout: true });
-                }, 5000);
+                    resolve();
+                }
             });
-        });
 
-        await Promise.all(searchPromises);
+            setTimeout(() => {
+                const elapsed = Date.now() - userStartTime;
+                console.log(`[Search] User posts: ${userResultCount} results in ${elapsed}ms (timeout)`);
+                userSub.close();
+                resolve();
+            }, 8000);
+        });
     } else {
         // Search profiles by name/handle
         updateSearchStatus('Searching users by name...');
@@ -1440,52 +1475,47 @@ export async function performStreamingUserSearch(query) {
             limit: 100 // Increased from 50
         };
 
-        // Search profiles in parallel
-        const healthyRelays = getHealthySearchRelays();
+        // Single subscription to all relays (correct pattern for nostr-tools)
         const profileResults = [];
+        const profileStartTime = Date.now();
+        let profileResultCount = 0;
 
-        const profilePromises = healthyRelays.map(relayUrl => {
-            return new Promise((resolve) => {
-                const startTime = Date.now();
-                let resultCount = 0;
+        await new Promise((resolve) => {
+            const profileSub = pool.subscribeMany(SEARCH_RELAYS, [profileFilter], {
+                onevent(event) {
+                    try {
+                        const profile = JSON.parse(event.content);
+                        const name = (profile.name || '').toLowerCase();
+                        const displayName = (profile.display_name || '').toLowerCase();
+                        const nip05 = (profile.nip05 || '').toLowerCase();
 
-                const profileSub = pool.subscribeMany([relayUrl], [profileFilter], {
-                    onevent(event) {
-                        try {
-                            const profile = JSON.parse(event.content);
-                            const name = (profile.name || '').toLowerCase();
-                            const displayName = (profile.display_name || '').toLowerCase();
-                            const nip05 = (profile.nip05 || '').toLowerCase();
-
-                            if (name.includes(lowerQuery) || displayName.includes(lowerQuery) || nip05.includes(lowerQuery)) {
-                                if (!matchedPubkeys.has(event.pubkey)) {
-                                    matchedPubkeys.add(event.pubkey);
-                                    profileResults.push({ pubkey: event.pubkey, profile });
-                                    profileCache[event.pubkey] = profile;
-                                    resultCount++;
-                                }
+                        if (name.includes(lowerQuery) || displayName.includes(lowerQuery) || nip05.includes(lowerQuery)) {
+                            if (!matchedPubkeys.has(event.pubkey)) {
+                                matchedPubkeys.add(event.pubkey);
+                                profileResults.push({ pubkey: event.pubkey, profile });
+                                profileCache[event.pubkey] = profile;
+                                profileResultCount++;
                             }
-                        } catch (e) {
-                            // Invalid JSON
                         }
-                    },
-                    oneose() {
-                        const responseTime = Date.now() - startTime;
-                        updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
-                        profileSub.close();
-                        resolve({ relay: relayUrl, count: resultCount });
+                    } catch (e) {
+                        // Invalid JSON
                     }
-                });
-
-                setTimeout(() => {
-                    updateSearchRelayHealth(relayUrl, 5000, resultCount > 0);
+                },
+                oneose() {
+                    const elapsed = Date.now() - profileStartTime;
+                    console.log(`[Search] Profiles: ${profileResultCount} results in ${elapsed}ms`);
                     profileSub.close();
-                    resolve({ relay: relayUrl, count: resultCount, timeout: true });
-                }, 5000);
+                    resolve();
+                }
             });
-        });
 
-        await Promise.all(profilePromises);
+            setTimeout(() => {
+                const elapsed = Date.now() - profileStartTime;
+                console.log(`[Search] Profiles: ${profileResultCount} results in ${elapsed}ms (timeout)`);
+                profileSub.close();
+                resolve();
+            }, 8000);
+        });
 
         // Fetch posts from matched users
         if (profileResults.length > 0) {
@@ -1499,34 +1529,31 @@ export async function performStreamingUserSearch(query) {
                 since: sinceTimestamp
             };
 
-            const postsPromises = healthyRelays.slice(0, 5).map(relayUrl => { // Use top 5 relays
-                return new Promise((resolve) => {
-                    const startTime = Date.now();
-                    let resultCount = 0;
+            const postsStartTime = Date.now();
+            let postsResultCount = 0;
 
-                    const postsSub = pool.subscribeMany([relayUrl], [postsFilter], {
-                        onevent(event) {
-                            if (timeLimit > 0 && event.created_at < timeLimit) return;
-                            resultCount++;
-                            addSearchResult(event);
-                        },
-                        oneose() {
-                            const responseTime = Date.now() - startTime;
-                            updateSearchRelayHealth(relayUrl, responseTime, resultCount > 0);
-                            postsSub.close();
-                            resolve({ relay: relayUrl, count: resultCount });
-                        }
-                    });
-
-                    setTimeout(() => {
-                        updateSearchRelayHealth(relayUrl, 5000, resultCount > 0);
+            await new Promise((resolve) => {
+                const postsSub = pool.subscribeMany(SEARCH_RELAYS, [postsFilter], {
+                    onevent(event) {
+                        if (timeLimit > 0 && event.created_at < timeLimit) return;
+                        postsResultCount++;
+                        addSearchResult(event);
+                    },
+                    oneose() {
+                        const elapsed = Date.now() - postsStartTime;
+                        console.log(`[Search] User posts (by name): ${postsResultCount} results in ${elapsed}ms`);
                         postsSub.close();
-                        resolve({ relay: relayUrl, count: resultCount, timeout: true });
-                    }, 5000);
+                        resolve();
+                    }
                 });
-            });
 
-            await Promise.all(postsPromises);
+                setTimeout(() => {
+                    const elapsed = Date.now() - postsStartTime;
+                    console.log(`[Search] User posts (by name): ${postsResultCount} results in ${elapsed}ms (timeout)`);
+                    postsSub.close();
+                    resolve();
+                }, 8000);
+            });
         }
     }
 }

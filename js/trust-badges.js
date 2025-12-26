@@ -225,8 +225,65 @@ export function addTrustBadgesToContainer(container) {
 }
 
 /**
- * Refresh all trust badges in the document
- * Useful after changing settings or cache updates
+ * Refresh trust badges incrementally - only process new/unprocessed elements
+ * Much more efficient than full refresh for dynamic content
+ * @param {HTMLElement} container - Container to search (default: document)
+ */
+export function refreshTrustBadgesIncremental(container = document) {
+  if (!shouldShowBadgesInContext()) {
+    return;
+  }
+
+  // Find all username elements that need badges but haven't been processed
+  const usernameElements = container.querySelectorAll(
+    '.username[data-pubkey]:not([data-trust-badge-processed]), .author-name[data-pubkey]:not([data-trust-badge-processed])'
+  );
+
+  if (usernameElements.length === 0) return;
+
+  // Collect unique pubkeys for batch fetching
+  const pubkeysToFetch = new Set();
+  const elementsByPubkey = new Map();
+
+  usernameElements.forEach(el => {
+    const pubkey = el.getAttribute('data-pubkey');
+    if (!pubkey || !isValidPubkey(pubkey)) return;
+
+    // Mark as processed to avoid reprocessing
+    el.setAttribute('data-trust-badge-processed', 'true');
+
+    // Group elements by pubkey for batch processing
+    if (!elementsByPubkey.has(pubkey)) {
+      elementsByPubkey.set(pubkey, []);
+    }
+    elementsByPubkey.get(pubkey).push(el);
+    pubkeysToFetch.add(pubkey);
+  });
+
+  // Batch fetch and apply badges
+  if (pubkeysToFetch.size > 0) {
+    import('./relatr.js').then(async ({ getTrustScores }) => {
+      try {
+        await getTrustScores([...pubkeysToFetch]);
+        // Apply badges to all elements
+        for (const [pubkey, elements] of elementsByPubkey) {
+          elements.forEach(el => {
+            if (!el.querySelector('.trust-badge')) {
+              addTrustBadgeToElement(el, pubkey, false); // Use cache only
+            }
+          });
+        }
+      } catch (error) {
+        console.error('[TrustBadges] Incremental refresh error:', error);
+      }
+    });
+  }
+}
+
+/**
+ * Refresh all trust badges in the document (full refresh)
+ * Use sparingly - prefer refreshTrustBadgesIncremental for better performance
+ * Only needed for: initial load, cache invalidation, manual refresh
  */
 export function refreshAllTrustBadges() {
   if (!shouldShowBadgesInContext()) {
@@ -235,11 +292,41 @@ export function refreshAllTrustBadges() {
     return;
   }
 
-  // Remove existing badges first
+  // Clear processed markers for full refresh
+  document.querySelectorAll('[data-trust-badge-processed]').forEach(el => {
+    el.removeAttribute('data-trust-badge-processed');
+  });
+
+  // Remove existing badges
   document.querySelectorAll('.trust-badge').forEach(badge => badge.remove());
 
-  // Re-add badges to all usernames
-  addTrustBadgesToContainer(document.body);
+  // Use incremental refresh to re-add badges efficiently
+  refreshTrustBadgesIncremental(document.body);
+}
+
+/**
+ * Force refresh badges for specific pubkeys only
+ * Useful when trust scores are updated for specific users
+ * @param {string[]} pubkeys - Array of pubkeys to refresh
+ */
+export function refreshTrustBadgesForPubkeys(pubkeys) {
+  if (!shouldShowBadgesInContext() || !Array.isArray(pubkeys)) return;
+
+  const pubkeySet = new Set(pubkeys);
+
+  // Find all elements with these pubkeys and clear their processed flag
+  document.querySelectorAll('[data-pubkey]').forEach(el => {
+    const pk = el.getAttribute('data-pubkey');
+    if (pubkeySet.has(pk)) {
+      el.removeAttribute('data-trust-badge-processed');
+      // Remove existing badge
+      const badge = el.querySelector('.trust-badge');
+      if (badge) badge.remove();
+    }
+  });
+
+  // Refresh those specific elements
+  refreshTrustBadgesIncremental(document.body);
 }
 
 // ==================== PROFILE PAGE BADGES ====================
@@ -497,6 +584,8 @@ export default {
   addNoteTrustBadge,
   addFeedTrustBadges,
   refreshAllTrustBadges,
+  refreshTrustBadgesIncremental,
+  refreshTrustBadgesForPubkeys,
   setTrustBadgesEnabled,
   getTrustBadgesEnabled,
   cleanup

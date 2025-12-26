@@ -51,6 +51,3 @@ api/trigger-*.js
 # System files
 .DS_Store
 Thumbs.db
-
-# Dependencies
-node_modules/
