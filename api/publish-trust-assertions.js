@@ -72,6 +72,42 @@ const BATCH_SIZE = 10;  // Publish 10 events at a time
 const BATCH_DELAY = 2000; // 2 second delay between batches
 const PUBLISH_TIMEOUT = 10000; // 10 second timeout per event
 
+// ==================== GRACEFUL SHUTDOWN ====================
+
+let isShuttingDown = false;
+let activePool = null; // Store pool reference for cleanup
+
+/**
+ * Handle graceful shutdown
+ * @param {string} signal - Signal received (SIGINT/SIGTERM)
+ */
+function handleShutdown(signal) {
+  if (isShuttingDown) return; // Prevent double handling
+  isShuttingDown = true;
+
+  console.log(`\n[TrustPublisher] Received ${signal}, shutting down gracefully...`);
+
+  // Close relay pool connections if active
+  if (activePool) {
+    try {
+      activePool.close(PUBLISHING_RELAYS);
+      console.log('[TrustPublisher] Relay pool closed');
+    } catch (err) {
+      console.error('[TrustPublisher] Error closing pool:', err.message);
+    }
+  }
+
+  // Allow current operations to complete, then force exit
+  setTimeout(() => {
+    console.log('[TrustPublisher] Forced exit after grace period');
+    process.exit(0);
+  }, 5000); // 5 second grace period
+}
+
+// Register signal handlers
+process.on('SIGINT', () => handleShutdown('SIGINT'));
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+
 // ==================== HELPER FUNCTIONS ====================
 
 /**
@@ -278,6 +314,7 @@ async function publishTrustAssertions(options = {}) {
 
   // Initialize relay pool
   const pool = new SimplePool();
+  activePool = pool; // Store reference for shutdown cleanup
 
   // Statistics
   const stats = {
@@ -303,6 +340,12 @@ async function publishTrustAssertions(options = {}) {
 
   try {
     for (let i = 0; i < batches.length; i++) {
+      // Check for shutdown request before processing each batch
+      if (isShuttingDown) {
+        console.log('[TrustPublisher] Shutdown requested, stopping after current batch');
+        break;
+      }
+
       const batch = batches[i];
       const batchNum = i + 1;
 

@@ -27,6 +27,77 @@ function isValidMoneroAddress(address) {
   return false;
 }
 
+// ==================== CIRCUIT BREAKER ====================
+
+const circuitBreakers = new Map(); // nodeUrl -> { failures, lastFailure, state }
+const CIRCUIT_FAILURE_THRESHOLD = 3;
+const CIRCUIT_RESET_TIMEOUT = 60000; // 1 minute
+const CIRCUIT_HALF_OPEN_TIMEOUT = 30000; // 30 seconds
+
+/**
+ * Get the current circuit state for a node
+ * @param {string} nodeUrl - RPC node URL
+ * @returns {string} 'closed', 'open', or 'half-open'
+ */
+function getCircuitState(nodeUrl) {
+  const breaker = circuitBreakers.get(nodeUrl);
+  if (!breaker) return 'closed';
+
+  const now = Date.now();
+
+  if (breaker.state === 'open') {
+    // Check if we should try half-open
+    if (now - breaker.lastFailure > CIRCUIT_HALF_OPEN_TIMEOUT) {
+      breaker.state = 'half-open';
+      return 'half-open';
+    }
+    return 'open';
+  }
+
+  // Reset if enough time has passed
+  if (now - breaker.lastFailure > CIRCUIT_RESET_TIMEOUT) {
+    circuitBreakers.delete(nodeUrl);
+    return 'closed';
+  }
+
+  return breaker.state;
+}
+
+/**
+ * Record a successful RPC call - resets the circuit breaker
+ * @param {string} nodeUrl - RPC node URL
+ */
+function recordSuccess(nodeUrl) {
+  circuitBreakers.delete(nodeUrl);
+}
+
+/**
+ * Record a failed RPC call - may open the circuit breaker
+ * @param {string} nodeUrl - RPC node URL
+ */
+function recordFailure(nodeUrl) {
+  const breaker = circuitBreakers.get(nodeUrl) || { failures: 0, lastFailure: 0, state: 'closed' };
+  breaker.failures++;
+  breaker.lastFailure = Date.now();
+
+  if (breaker.failures >= CIRCUIT_FAILURE_THRESHOLD) {
+    breaker.state = 'open';
+    console.log(`[Verify] Circuit breaker OPEN for ${nodeUrl}`);
+  }
+
+  circuitBreakers.set(nodeUrl, breaker);
+}
+
+/**
+ * Check if a node is available (circuit not open)
+ * @param {string} nodeUrl - RPC node URL
+ * @returns {boolean} True if node should be tried
+ */
+function isNodeAvailable(nodeUrl) {
+  const state = getCircuitState(nodeUrl);
+  return state !== 'open';
+}
+
 // Retry configuration for transient failures
 const RETRY_CONFIG = {
   maxAttempts: 5,              // More attempts for tx propagation
@@ -99,6 +170,12 @@ export async function verifyTransactionProof({ txid, txKey, recipientAddress, ex
   let lastError = null;
 
   for (const rpcUrl of config.moneroRpcNodes) {
+    // Check circuit breaker before attempting
+    if (!isNodeAvailable(rpcUrl)) {
+      console.log(`[Verify:${requestId}] Skipping ${rpcUrl} - circuit breaker OPEN`);
+      continue;
+    }
+
     try {
       console.log(`[Verify:${requestId}] Attempting verification with RPC node: ${rpcUrl}`);
 
@@ -112,10 +189,12 @@ export async function verifyTransactionProof({ txid, txKey, recipientAddress, ex
 
       const totalTime = Date.now() - startTime;
       console.log(`[Verify:${requestId}] === Verification SUCCESS in ${totalTime}ms ===`);
+      recordSuccess(rpcUrl); // Reset circuit breaker on success
       return result;
 
     } catch (error) {
       console.error(`[Verify:${requestId}] RPC node ${rpcUrl} failed:`, error.message);
+      recordFailure(rpcUrl); // Record failure for circuit breaker
       lastError = error;
       // Continue to next node
     }

@@ -82,6 +82,43 @@ try {
 
 console.log('[DB] SQLite database initialized at', DB_PATH);
 
+// ==================== TRANSACTION SUPPORT ====================
+
+/**
+ * Execute a callback within a database transaction
+ * Automatically commits on success, rolls back on error
+ * @param {Function} callback - Function to execute within transaction
+ * @returns {*} Result of the callback
+ */
+export function withTransaction(callback) {
+  const transaction = db.transaction(() => {
+    return callback();
+  });
+  return transaction();
+}
+
+// ==================== NORMALIZATION HELPERS ====================
+
+/**
+ * Normalize email address for consistent storage and lookup
+ * @param {string} email - Email to normalize
+ * @returns {string|null} Normalized email or null
+ */
+function normalizeEmail(email) {
+  if (!email || typeof email !== 'string') return null;
+  return email.toLowerCase().trim();
+}
+
+/**
+ * Normalize username for consistent storage and lookup
+ * @param {string} username - Username to normalize
+ * @returns {string|null} Normalized username or null
+ */
+function normalizeUsername(username) {
+  if (!username || typeof username !== 'string') return null;
+  return username.toLowerCase().trim();
+}
+
 // Graceful shutdown handlers
 process.on('SIGINT', () => {
   console.log('[DB] Received SIGINT, closing database connection...');
@@ -342,14 +379,18 @@ export function getRecentAuditLogs(limit = 100) {
  * @returns {Object} Created user with id
  */
 export function createUser({ npub, email, username, ncryptsec, password_hash, password_salt }) {
-  // Validate all inputs
-  validateInput({ npub, email, username, password_hash });
+  // Normalize email and username before validation and storage
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedUsername = normalizeUsername(username);
+
+  // Validate all inputs (with normalized values)
+  validateInput({ npub, email: normalizedEmail, username: normalizedUsername, password_hash });
 
   try {
     const result = statements.createUser.run({
       npub,
-      email: email || null,
-      username: username || null,
+      email: normalizedEmail,
+      username: normalizedUsername,
       ncryptsec,
       password_hash,
       password_salt: password_salt || null
@@ -390,14 +431,18 @@ export function createUser({ npub, email, username, ncryptsec, password_hash, pa
  * validation but is handled explicitly for security.
  */
 export function getUserByIdentifier(identifier) {
+  // Normalize identifier for consistent lookup
+  const normalizedIdentifier = identifier ? identifier.toLowerCase().trim() : null;
+  if (!normalizedIdentifier) return null;
+
   // First try to find by email (email takes priority)
-  const userByEmail = statements.getUserByEmail.get(identifier);
+  const userByEmail = statements.getUserByEmail.get(normalizedIdentifier);
   if (userByEmail) {
     return userByEmail;
   }
 
   // If not found by email, try username
-  const userByUsername = statements.getUserByUsername.get(identifier);
+  const userByUsername = statements.getUserByUsername.get(normalizedIdentifier);
   if (userByUsername) {
     return userByUsername;
   }
@@ -414,14 +459,18 @@ export function getUserByIdentifier(identifier) {
  * email takes priority.
  */
 export function getSaltByIdentifier(identifier) {
+  // Normalize identifier for consistent lookup
+  const normalizedIdentifier = identifier ? identifier.toLowerCase().trim() : null;
+  if (!normalizedIdentifier) return null;
+
   // First try to find by email (email takes priority)
-  const userByEmail = statements.getUserByEmail.get(identifier);
+  const userByEmail = statements.getUserByEmail.get(normalizedIdentifier);
   if (userByEmail) {
     return { password_salt: userByEmail.password_salt };
   }
 
   // If not found by email, try username
-  const userByUsername = statements.getUserByUsername.get(identifier);
+  const userByUsername = statements.getUserByUsername.get(normalizedIdentifier);
   if (userByUsername) {
     return { password_salt: userByUsername.password_salt };
   }
@@ -435,7 +484,9 @@ export function getSaltByIdentifier(identifier) {
  * @returns {Object|null}
  */
 export function getUserByEmail(email) {
-  return statements.getUserByEmail.get(email);
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return null;
+  return statements.getUserByEmail.get(normalizedEmail);
 }
 
 /**
@@ -444,7 +495,9 @@ export function getUserByEmail(email) {
  * @returns {Object|null}
  */
 export function getUserByUsername(username) {
-  return statements.getUserByUsername.get(username);
+  const normalizedUsername = normalizeUsername(username);
+  if (!normalizedUsername) return null;
+  return statements.getUserByUsername.get(normalizedUsername);
 }
 
 /**
@@ -552,7 +605,9 @@ export function verifyUserEmail(userId, authenticatedUserId) {
  * @returns {boolean}
  */
 export function emailExists(email) {
-  return !!statements.checkEmailExists.get(email);
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return false;
+  return !!statements.checkEmailExists.get(normalizedEmail);
 }
 
 /**
@@ -561,7 +616,9 @@ export function emailExists(email) {
  * @returns {boolean}
  */
 export function usernameExists(username) {
-  return !!statements.checkUsernameExists.get(username);
+  const normalizedUsername = normalizeUsername(username);
+  if (!normalizedUsername) return false;
+  return !!statements.checkUsernameExists.get(normalizedUsername);
 }
 
 /**
