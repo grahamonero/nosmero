@@ -51,8 +51,9 @@ api/test-*.js
 api/scripts/test-*.js
 api/trigger-*.js
 
-# Data files
-api/data/*.json
+# Data files - NEVER commit user data or databases
+api/data/
+*.db
 *.db-shm
 *.db-wal
 trending-cache.json
