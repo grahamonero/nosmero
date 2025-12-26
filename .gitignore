@@ -45,8 +45,17 @@ nosmero-logo-orange.svg
 nosmeroav.png
 
 # Test and trigger files
+test-*.html
+js/test-*.js
 api/test-*.js
+api/scripts/test-*.js
 api/trigger-*.js
+
+# Data files
+api/data/*.json
+*.db-shm
+*.db-wal
+trending-cache.json
 
 # System files
 .DS_Store
