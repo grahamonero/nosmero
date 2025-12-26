@@ -1,7 +1,7 @@
 // Trust Badge UI Integration
 // Adds NIP-85 Web of Trust badges to profiles and notes
 
-import { getTrustScore, getTrustLevel, getTrustBadge, queueTrustScoreRequest, getCachedTrustScore } from './relatr.js?v=2.9.41';
+import { getTrustScore, getTrustLevel, getTrustBadge, queueTrustScoreRequest, getCachedTrustScore } from './relatr.js';
 
 // ==================== CONFIGURATION ====================
 
@@ -34,7 +34,6 @@ function shouldShowBadgesInContext() {
   }
 
   // If not showing everywhere, only show on Suggested Follows & Trending pages
-  // Check if current page is one of these
   const currentPath = window.location.pathname;
   const isSpecialFeed = currentPath.includes('/suggestedfollows') ||
                         currentPath.includes('/feed/suggestedfollows') ||
@@ -94,18 +93,15 @@ export async function addTrustBadgeToElement(usernameElement, pubkey, async = tr
     if (async) {
       // Fetch score asynchronously
       trustData = await getTrustScore(pubkey);
-      console.log(`[TrustBadges] Async fetch for ${pubkey.substring(0, 8)}:`, trustData ? `score ${trustData.score}` : 'no data');
     } else {
       // Only use cached score (don't trigger API call)
       trustData = getCachedTrustScore(pubkey);
       if (!trustData) {
-        console.log(`[TrustBadges] No cached score for ${pubkey.substring(0, 8)}, queueing for fetch`);
         // Queue for later fetch
         queueTrustScoreRequest(pubkey);
         badgeSpan.remove(); // Remove loading indicator
         return;
       }
-      console.log(`[TrustBadges] Using cached score for ${pubkey.substring(0, 8)}: ${trustData.score}`);
     }
 
     // Update badge with actual score (Warning #8 - add null check before destructuring)
@@ -217,12 +213,10 @@ export function addTrustBadgesToContainer(container) {
   // Find all username elements with pubkey data
   const usernameElements = container.querySelectorAll('.username[data-pubkey], .author-name[data-pubkey]');
 
-  console.log(`[TrustBadges] addTrustBadgesToContainer: Processing ${usernameElements.length} elements`);
 
   usernameElements.forEach(element => {
     const pubkey = element.getAttribute('data-pubkey');
     if (pubkey) {
-      console.log(`[TrustBadges] Processing element for pubkey: ${pubkey.substring(0, 8)}`);
       // Use non-async mode to avoid hammering API
       // Badges will be added when scores are cached
       addTrustBadgeToElement(element, pubkey, false);
@@ -231,8 +225,65 @@ export function addTrustBadgesToContainer(container) {
 }
 
 /**
- * Refresh all trust badges in the document
- * Useful after changing settings or cache updates
+ * Refresh trust badges incrementally - only process new/unprocessed elements
+ * Much more efficient than full refresh for dynamic content
+ * @param {HTMLElement} container - Container to search (default: document)
+ */
+export function refreshTrustBadgesIncremental(container = document) {
+  if (!shouldShowBadgesInContext()) {
+    return;
+  }
+
+  // Find all username elements that need badges but haven't been processed
+  const usernameElements = container.querySelectorAll(
+    '.username[data-pubkey]:not([data-trust-badge-processed]), .author-name[data-pubkey]:not([data-trust-badge-processed])'
+  );
+
+  if (usernameElements.length === 0) return;
+
+  // Collect unique pubkeys for batch fetching
+  const pubkeysToFetch = new Set();
+  const elementsByPubkey = new Map();
+
+  usernameElements.forEach(el => {
+    const pubkey = el.getAttribute('data-pubkey');
+    if (!pubkey || !isValidPubkey(pubkey)) return;
+
+    // Mark as processed to avoid reprocessing
+    el.setAttribute('data-trust-badge-processed', 'true');
+
+    // Group elements by pubkey for batch processing
+    if (!elementsByPubkey.has(pubkey)) {
+      elementsByPubkey.set(pubkey, []);
+    }
+    elementsByPubkey.get(pubkey).push(el);
+    pubkeysToFetch.add(pubkey);
+  });
+
+  // Batch fetch and apply badges
+  if (pubkeysToFetch.size > 0) {
+    import('./relatr.js').then(async ({ getTrustScores }) => {
+      try {
+        await getTrustScores([...pubkeysToFetch]);
+        // Apply badges to all elements
+        for (const [pubkey, elements] of elementsByPubkey) {
+          elements.forEach(el => {
+            if (!el.querySelector('.trust-badge')) {
+              addTrustBadgeToElement(el, pubkey, false); // Use cache only
+            }
+          });
+        }
+      } catch (error) {
+        console.error('[TrustBadges] Incremental refresh error:', error);
+      }
+    });
+  }
+}
+
+/**
+ * Refresh all trust badges in the document (full refresh)
+ * Use sparingly - prefer refreshTrustBadgesIncremental for better performance
+ * Only needed for: initial load, cache invalidation, manual refresh
  */
 export function refreshAllTrustBadges() {
   if (!shouldShowBadgesInContext()) {
@@ -241,11 +292,41 @@ export function refreshAllTrustBadges() {
     return;
   }
 
-  // Remove existing badges first
+  // Clear processed markers for full refresh
+  document.querySelectorAll('[data-trust-badge-processed]').forEach(el => {
+    el.removeAttribute('data-trust-badge-processed');
+  });
+
+  // Remove existing badges
   document.querySelectorAll('.trust-badge').forEach(badge => badge.remove());
 
-  // Re-add badges to all usernames
-  addTrustBadgesToContainer(document.body);
+  // Use incremental refresh to re-add badges efficiently
+  refreshTrustBadgesIncremental(document.body);
+}
+
+/**
+ * Force refresh badges for specific pubkeys only
+ * Useful when trust scores are updated for specific users
+ * @param {string[]} pubkeys - Array of pubkeys to refresh
+ */
+export function refreshTrustBadgesForPubkeys(pubkeys) {
+  if (!shouldShowBadgesInContext() || !Array.isArray(pubkeys)) return;
+
+  const pubkeySet = new Set(pubkeys);
+
+  // Find all elements with these pubkeys and clear their processed flag
+  document.querySelectorAll('[data-pubkey]').forEach(el => {
+    const pk = el.getAttribute('data-pubkey');
+    if (pubkeySet.has(pk)) {
+      el.removeAttribute('data-trust-badge-processed');
+      // Remove existing badge
+      const badge = el.querySelector('.trust-badge');
+      if (badge) badge.remove();
+    }
+  });
+
+  // Refresh those specific elements
+  refreshTrustBadgesIncremental(document.body);
 }
 
 // ==================== PROFILE PAGE BADGES ====================
@@ -260,7 +341,6 @@ const retryingProfiles = new Set();
 
 export async function addProfileTrustBadge(pubkey, retries = 5) {
   if (!areTrustBadgesEnabled()) {
-    console.log('[TrustBadges] Trust badges disabled');
     return;
   }
 
@@ -280,7 +360,6 @@ export async function addProfileTrustBadge(pubkey, retries = 5) {
 
   // If not found and we have retries left, wait and try again
   if (!profileNameElement && retries > 0) {
-    console.log(`[TrustBadges] Profile name not found, retrying... (${retries} attempts left)`);
     retryingProfiles.add(retryKey);
     await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
     retryingProfiles.delete(retryKey);
@@ -302,7 +381,6 @@ export async function addProfileTrustBadge(pubkey, retries = 5) {
     return;
   }
 
-  console.log('[TrustBadges] Adding badge to profile:', pubkey.substring(0, 8));
 
   // Add badge
   await addTrustBadgeToElement(profileNameElement, pubkey, true);
@@ -372,7 +450,7 @@ export async function addFeedTrustBadges(notes, containerSelector = null) {
     // Warning #4 - Wrap dynamic import in try-catch
     let getTrustScores;
     try {
-      const relatrModule = await import('./relatr.js?v=2.9.41');
+      const relatrModule = await import('./relatr.js');
       getTrustScores = relatrModule.getTrustScores;
     } catch (importError) {
       console.error('[TrustBadges] Failed to import relatr.js:', importError);
@@ -380,7 +458,6 @@ export async function addFeedTrustBadges(notes, containerSelector = null) {
     }
 
     // Fetch all trust scores in batch
-    console.log(`[TrustBadges] Fetching scores for ${pubkeys.length} users...`);
     await getTrustScores(pubkeys);
 
     // Find the container - use provided selector or auto-detect
@@ -398,11 +475,7 @@ export async function addFeedTrustBadges(notes, containerSelector = null) {
 
     // Warning #6 - Remove dead code (unused variables)
     if (feedContainer) {
-      console.log(`[TrustBadges] Found container:`, feedContainer.id || feedContainer.className);
-      console.log(`[TrustBadges] Container innerHTML length:`, feedContainer.innerHTML.length);
-      console.log(`[TrustBadges] Container has children:`, feedContainer.children.length);
       addTrustBadgesToContainer(feedContainer);
-      console.log(`[TrustBadges] Added badges to container:`, feedContainer.id || feedContainer.className);
     } else {
       console.warn('[TrustBadges] No feed container found');
     }
@@ -421,7 +494,6 @@ export function setTrustBadgesEnabled(enabled) {
   localStorage.setItem('showTrustBadges', enabled.toString());
   refreshAllTrustBadges();
 
-  console.log(`[TrustBadges] ${enabled ? 'Enabled' : 'Disabled'}`);
 }
 
 /**
@@ -512,6 +584,8 @@ export default {
   addNoteTrustBadge,
   addFeedTrustBadges,
   refreshAllTrustBadges,
+  refreshTrustBadgesIncremental,
+  refreshTrustBadgesForPubkeys,
   setTrustBadgesEnabled,
   getTrustBadgesEnabled,
   cleanup

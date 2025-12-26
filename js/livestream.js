@@ -27,7 +27,6 @@ const livestreamState = {
     _cache: [],
     _lastFetchTime: 0,
     _isFetching: false,
-    _fetchPromise: null,
     _liveStreamSubscription: null,
     _chatSubscription: null,
     _currentStream: null,
@@ -41,9 +40,6 @@ const livestreamState = {
 
     get isFetching() { return this._isFetching; },
     set isFetching(value) { this._isFetching = value; },
-
-    get fetchPromise() { return this._fetchPromise; },
-    set fetchPromise(value) { this._fetchPromise = value; },
 
     get liveStreamSubscription() { return this._liveStreamSubscription; },
     set liveStreamSubscription(value) { this._liveStreamSubscription = value; },
@@ -106,7 +102,6 @@ function formatUSD(usd) {
 let liveStreamsCache = livestreamState.cache;
 let lastFetchTime = livestreamState.lastFetchTime;
 let isFetching = livestreamState.isFetching;
-let fetchPromise = livestreamState.fetchPromise;
 let liveStreamSubscription = livestreamState.liveStreamSubscription;
 let chatSubscription = livestreamState.chatSubscription;
 let currentStream = livestreamState.currentStream;
@@ -164,24 +159,15 @@ export async function fetchLiveStreams(forceRefresh = false) {
         return livestreamState.cache;
     }
 
-    // If already fetching, wait for that fetch to complete
-    if (livestreamState.isFetching && livestreamState.fetchPromise) {
-        console.log('📺 Fetch already in progress, waiting for it...');
-        return livestreamState.fetchPromise;
+    // Prevent concurrent fetches
+    if (livestreamState.isFetching) {
+        console.log('📺 Fetch already in progress, returning cache');
+        return livestreamState.cache;
     }
     livestreamState.isFetching = true;
 
     console.log('📺 Fetching live streams from relays...');
 
-    // Check if pool is ready (removed verbose debug logging)
-    if (!State.pool) {
-        console.error('📺 State.pool not initialized yet');
-        livestreamState.isFetching = false;
-        return [];
-    }
-
-    // Create and store the fetch promise so concurrent callers can wait
-    livestreamState.fetchPromise = (async () => {
     try {
         // Query for live stream events (kind 30311)
         const events = await State.pool.querySync(
@@ -230,15 +216,11 @@ export async function fetchLiveStreams(forceRefresh = false) {
 
     } catch (error) {
         console.error('❌ Error fetching live streams:', error);
-        console.error('❌ Error stack:', error.stack);
         return livestreamState.cache; // Return cached data on error
     } finally {
+        // Always reset flag even if error occurs
         livestreamState.isFetching = false;
-        livestreamState.fetchPromise = null;
     }
-    })();
-
-    return livestreamState.fetchPromise;
 }
 
 /**
@@ -312,6 +294,7 @@ export function subscribeToChat(stream, onMessage) {
     console.log('💬 Subscribing to chat for:', aTag);
 
     const messages = [];
+    const seenMessageIds = new Set(); // O(1) lookup for deduplication
 
     try {
         livestreamState.chatSubscription = State.pool.subscribeMany(
@@ -323,6 +306,12 @@ export function subscribeToChat(stream, onMessage) {
             }],
             {
                 onevent(event) {
+                    // O(1) duplicate check using Set
+                    if (seenMessageIds.has(event.id)) {
+                        return; // Skip duplicate
+                    }
+                    seenMessageIds.add(event.id);
+
                     const message = {
                         id: event.id,
                         pubkey: event.pubkey,
@@ -330,14 +319,11 @@ export function subscribeToChat(stream, onMessage) {
                         createdAt: event.created_at
                     };
 
-                    // Avoid duplicates
-                    if (!messages.find(m => m.id === event.id)) {
-                        messages.push(message);
-                        messages.sort((a, b) => a.createdAt - b.createdAt);
+                    messages.push(message);
+                    messages.sort((a, b) => a.createdAt - b.createdAt);
 
-                        if (typeof onMessage === 'function') {
-                            onMessage(message, messages);
-                        }
+                    if (typeof onMessage === 'function') {
+                        onMessage(message, messages);
                     }
                 },
                 oneose() {
@@ -418,7 +404,7 @@ export function renderStreamCard(stream, profile) {
     const safeImageUrl = stream.image && isSafeImageUrl(stream.image) ? Utils.escapeHtml(stream.image) : null;
 
     return `
-        <div class="livestream-card ${isLive ? 'is-live' : ''}" data-stream-id="${stream.id}" onclick="window.NostrLivestream.openStream('${stream.id}')">
+        <div class="livestream-card ${isLive ? 'is-live' : ''}" data-stream-id="${Utils.escapeHtml(stream.id)}" data-action="open-stream">
             <div class="livestream-header">
                 <img class="livestream-avatar" src="${Utils.escapeHtml(profilePic)}" alt="" onerror="this.src='/default-avatar.png'">
                 <div class="livestream-info">
@@ -538,16 +524,44 @@ export async function renderLivestreamFeed() {
 
     } catch (error) {
         console.error('❌ Error rendering livestream feed:', error);
-        feed.innerHTML = `
-            <div class="error">
-                Failed to load live streams: ${error.message}
-                <button class="retry-btn" onclick="window.NostrLivestream.renderLivestreamFeed()">Retry</button>
-            </div>
-        `;
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error';
+
+        const errorText = document.createElement('span');
+        errorText.textContent = 'Failed to load live streams: ' + error.message;
+
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'retry-btn';
+        retryBtn.textContent = 'Retry';
+        retryBtn.onclick = () => window.NostrLivestream.renderLivestreamFeed();
+
+        errorDiv.appendChild(errorText);
+        errorDiv.appendChild(retryBtn);
+        feed.innerHTML = '';
+        feed.appendChild(errorDiv);
     }
 
     isRendering = false;
 }
+
+/**
+ * Set up event delegation for livestream card clicks
+ */
+export function setupEventDelegation() {
+    document.addEventListener('click', (e) => {
+        const card = e.target.closest('.livestream-card[data-action="open-stream"]');
+        if (card) {
+            e.preventDefault();
+            const streamId = card.dataset.streamId;
+            if (streamId) {
+                openStream(streamId);
+            }
+        }
+    });
+}
+
+// Initialize event delegation when module loads
+setupEventDelegation();
 
 // ==================== STREAM PLAYER ====================
 
@@ -781,106 +795,32 @@ function renderStreamModal(stream, profile) {
  */
 function initializePlayer(streamUrl) {
     const video = document.getElementById('streamPlayer');
-    if (!video) {
-        console.error('📺 Video element not found');
-        return;
-    }
-
-    console.log('📺 Initializing player with URL:', streamUrl);
-
-    // Validate stream URL
-    if (!streamUrl || !streamUrl.startsWith('http')) {
-        console.error('📺 Invalid stream URL:', streamUrl);
-        video.parentElement.innerHTML = '<div class="stream-error">Invalid stream URL</div>';
-        return;
-    }
+    if (!video) return;
 
     // Check if HLS.js is available
     if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-        console.log('📺 Using HLS.js');
         const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: true,
-            debug: false
+            lowLatencyMode: true
         });
-
         hls.loadSource(streamUrl);
         hls.attachMedia(video);
-
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            console.log('📺 HLS manifest parsed, attempting playback');
-            video.play().catch(e => {
-                console.log('📺 Autoplay prevented:', e.message);
-                // Show play button overlay for user interaction
-                showPlayButtonOverlay(video);
-            });
+            video.play().catch(e => console.log('Autoplay prevented:', e));
         });
-
         hls.on(Hls.Events.ERROR, (event, data) => {
-            console.error('📺 HLS error:', data.type, data.details);
+            console.error('HLS error:', data);
             if (data.fatal) {
-                switch (data.type) {
-                    case Hls.ErrorTypes.NETWORK_ERROR:
-                        video.parentElement.innerHTML = '<div class="stream-error">Network error - stream may be offline or blocked</div>';
-                        break;
-                    case Hls.ErrorTypes.MEDIA_ERROR:
-                        console.log('📺 Attempting recovery from media error');
-                        hls.recoverMediaError();
-                        break;
-                    default:
-                        video.parentElement.innerHTML = '<div class="stream-error">Stream unavailable</div>';
-                        break;
-                }
+                video.parentElement.innerHTML = '<div class="stream-error">Stream unavailable</div>';
             }
         });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Native HLS support (Safari/iOS)
-        console.log('📺 Using native HLS (Safari)');
+        // Native HLS support (Safari)
         video.src = streamUrl;
-
-        video.addEventListener('error', (e) => {
-            console.error('📺 Video error:', video.error?.message);
-            video.parentElement.innerHTML = '<div class="stream-error">Stream unavailable</div>';
-        });
-
-        video.play().catch(e => {
-            console.log('📺 Autoplay prevented:', e.message);
-            showPlayButtonOverlay(video);
-        });
+        video.play().catch(e => console.log('Autoplay prevented:', e));
     } else {
-        console.error('📺 HLS not supported on this browser');
         video.parentElement.innerHTML = '<div class="stream-error">HLS playback not supported</div>';
     }
-}
-
-/**
- * Show a play button overlay when autoplay is blocked
- */
-function showPlayButtonOverlay(video) {
-    // Check if video element still exists (might have been replaced by error div)
-    if (!video || !video.parentElement) {
-        console.log('📺 Video element no longer exists, skipping play overlay');
-        return;
-    }
-
-    const container = video.parentElement;
-    const overlay = document.createElement('div');
-    overlay.className = 'play-button-overlay';
-    overlay.innerHTML = '<button class="play-btn">▶ Tap to Play</button>';
-    overlay.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); cursor: pointer;';
-    overlay.querySelector('.play-btn').style.cssText = 'background: rgba(255, 102, 0, 0.9); border: none; color: white; padding: 16px 32px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer;';
-
-    const handlePlayClick = () => {
-        video.play().then(() => {
-            overlay.remove();
-        }).catch(e => {
-            console.error('📺 Play failed:', e);
-        });
-    };
-    livestreamState.addChatEventListener(overlay, 'click', handlePlayClick);
-
-    container.style.position = 'relative';
-    container.appendChild(overlay);
 }
 
 /**

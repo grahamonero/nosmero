@@ -11,6 +11,37 @@ const MAX_RESPONSE_SIZE = 100 * 1024; // 100KB maximum response size
 // Track in-flight requests to prevent duplicate concurrent requests
 const inFlightRequests = new Map();
 
+// Track AbortControllers for cancellation support
+const activeControllers = new Map(); // cacheKey -> AbortController
+
+/**
+ * Cancel all pending NIP-05 verification requests
+ * Useful when navigating away or cleaning up
+ */
+export function cancelAllNip05Requests() {
+    for (const controller of activeControllers.values()) {
+        controller.abort();
+    }
+    activeControllers.clear();
+    inFlightRequests.clear();
+    console.log('All NIP-05 requests cancelled');
+}
+
+/**
+ * Cancel a specific NIP-05 verification request
+ * @param {string} nip05 - NIP-05 identifier
+ * @param {string} pubkey - Public key
+ */
+export function cancelNip05Request(nip05, pubkey) {
+    const cacheKey = `${nip05}:${pubkey}`;
+    const controller = activeControllers.get(cacheKey);
+    if (controller) {
+        controller.abort();
+        activeControllers.delete(cacheKey);
+        inFlightRequests.delete(cacheKey);
+    }
+}
+
 // Sanitize HTML to prevent XSS attacks
 function sanitizeForHTML(str) {
     if (typeof str !== 'string') return '';
@@ -147,15 +178,26 @@ export async function verifyNip05(nip05, pubkey) {
 
         console.log('Verifying NIP-05 identifier');
 
-        // Fetch the verification data
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-            },
-            // Add timeout to prevent hanging
-            signal: AbortSignal.timeout(10000) // 10 second timeout
-        });
+        // Create AbortController for cancellation support
+        const cacheKey = `${nip05}:${pubkey}`;
+        const controller = new AbortController();
+        activeControllers.set(cacheKey, controller);
+
+        // Set up timeout
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        try {
+            // Fetch the verification data
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                },
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+            activeControllers.delete(cacheKey);
 
         if (!response.ok) {
             return {
@@ -216,6 +258,17 @@ export async function verifyNip05(nip05, pubkey) {
             domain: sanitizeForHTML(domain),
             name: sanitizeForHTML(name)
         };
+
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            activeControllers.delete(cacheKey);
+
+            // Handle abort specifically
+            if (fetchError.name === 'AbortError') {
+                return { valid: false, error: 'Request cancelled' };
+            }
+            throw fetchError;
+        }
 
     } catch (error) {
         console.error('NIP-05 verification failed');
