@@ -4785,15 +4785,21 @@ export function formatText(textarea, format) {
             if (selectedText) {
                 // Check if selected text is a URL
                 if (selectedText.match(/^https?:\/\//)) {
+                    // Full URL - use as href
                     replacement = `[link](${selectedText})`;
                     cursorOffset = 1; // Position after [
+                } else if (selectedText.match(/^[\w-]+(\.[a-z]{2,})+/i)) {
+                    // Looks like a domain - add https://
+                    replacement = `[${selectedText}](https://${selectedText})`;
+                    cursorOffset = replacement.length;
                 } else {
-                    replacement = `[${selectedText}](url)`;
-                    cursorOffset = replacement.length - 4; // Position before url
+                    // Regular text - use as link text
+                    replacement = `[${selectedText}](https://)`;
+                    cursorOffset = replacement.length - 1; // Position after https://
                 }
             } else {
-                replacement = '[link text](url)';
-                cursorOffset = 1; // Position after [
+                replacement = '[link text](https://)';
+                cursorOffset = replacement.length - 1; // Position after https://
             }
             break;
         case 'code':
