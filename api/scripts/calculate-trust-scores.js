@@ -9,7 +9,7 @@
 
 import { readFileSync, writeFileSync } from 'fs';
 
-const RELATR_API = 'http://143.198.49.143:3001';
+const RELATR_API = process.env.RELATR_API_URL || 'http://localhost:3001';
 const BATCH_SIZE = 10; // Process in small batches to avoid overwhelming API
 const DELAY_BETWEEN_BATCHES = 1000; // 1 second
 
@@ -124,7 +124,7 @@ class TrustScoreCalculator {
 
     const data = {
       generated_at: new Date().toISOString(),
-      relatr_source: 'http://143.198.49.143:3001',
+      relatr_source: RELATR_API,
       total_accounts: sorted.length,
       failed_accounts: this.errors.length,
       score_distribution: {

@@ -72,7 +72,7 @@ const limiter = rateLimit({
 app.use('/api/verify-and-publish', limiter);
 
 // Relatr configuration
-const RELATR_BASE_URL = 'http://143.198.49.143:3001';
+const RELATR_BASE_URL = process.env.RELATR_API_URL || 'http://localhost:3001';
 const RELATR_TIMEOUT = 10000; // 10 second timeout
 
 // Health check endpoint
