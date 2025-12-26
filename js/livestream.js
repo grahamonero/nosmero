@@ -31,6 +31,7 @@ const livestreamState = {
     _chatSubscription: null,
     _currentStream: null,
     _chatEventListeners: [],
+    _renderedMessageIds: new Set(), // Track already rendered chat messages
 
     get cache() { return this._cache; },
     set cache(value) { this._cache = value; },
@@ -50,6 +51,9 @@ const livestreamState = {
     get currentStream() { return this._currentStream; },
     set currentStream(value) { this._currentStream = value; },
 
+    get renderedMessageIds() { return this._renderedMessageIds; },
+    clearRenderedMessages() { this._renderedMessageIds.clear(); },
+
     addChatEventListener(element, type, listener) {
         element.addEventListener(type, listener);
         this._chatEventListeners.push({ element, type, listener });
@@ -63,12 +67,116 @@ const livestreamState = {
     }
 };
 
+// DOM element cache - avoids repeated querySelector calls
+const domCache = {
+    _elements: {},
+
+    get(id) {
+        if (!this._elements[id]) {
+            this._elements[id] = document.getElementById(id);
+        }
+        return this._elements[id];
+    },
+
+    set(id, element) {
+        this._elements[id] = element;
+    },
+
+    clear() {
+        this._elements = {};
+    },
+
+    // Refresh a specific element (use when element might have been recreated)
+    refresh(id) {
+        this._elements[id] = document.getElementById(id);
+        return this._elements[id];
+    }
+};
+
 const CACHE_DURATION = 30 * 1000; // 30 seconds
+const STREAM_PROBE_TIMEOUT = 5000; // 5 seconds timeout for probing streams
+
+// Cache for stream URL probe results (avoid re-probing frequently)
+const streamProbeCache = new Map();
+const PROBE_CACHE_DURATION = 60 * 1000; // Cache probe results for 1 minute
 
 // XMR price cache for USD conversion
 let xmrPriceUSD = null;
 let priceLastFetched = 0;
 const PRICE_CACHE_MS = 5 * 60 * 1000;
+
+/**
+ * Probe an HLS stream URL to check if it's actually live
+ * @param {string} url - The HLS stream URL (.m3u8)
+ * @returns {Promise<boolean>} - True if stream is live, false otherwise
+ */
+async function probeStreamUrl(url) {
+    if (!url) return false;
+
+    // Check cache first
+    const cached = streamProbeCache.get(url);
+    if (cached && (Date.now() - cached.timestamp) < PROBE_CACHE_DURATION) {
+        return cached.isLive;
+    }
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), STREAM_PROBE_TIMEOUT);
+
+        const response = await fetch(url, {
+            method: 'HEAD', // Just check if resource exists
+            signal: controller.signal,
+            mode: 'cors'
+        });
+
+        clearTimeout(timeoutId);
+
+        // Consider stream live if we get a successful response
+        const isLive = response.ok;
+
+        // Cache the result
+        streamProbeCache.set(url, { isLive, timestamp: Date.now() });
+
+        return isLive;
+    } catch (error) {
+        // CORS errors, network errors, timeouts - assume not live
+        // But don't cache failures for too long (30 seconds)
+        streamProbeCache.set(url, { isLive: false, timestamp: Date.now() - (PROBE_CACHE_DURATION / 2) });
+        return false;
+    }
+}
+
+/**
+ * Validate multiple streams in parallel
+ * @param {Array} streams - Array of stream objects
+ * @returns {Promise<Array>} - Streams with validated isActuallyLive property
+ */
+async function validateStreams(streams) {
+    const liveStreams = streams.filter(s => s.status === 'live' && s.streamUrl);
+
+    // Probe all live streams in parallel
+    const probeResults = await Promise.all(
+        liveStreams.map(async (stream) => {
+            const isActuallyLive = await probeStreamUrl(stream.streamUrl);
+            return { id: stream.id, isActuallyLive };
+        })
+    );
+
+    // Create a map of results
+    const resultMap = new Map(probeResults.map(r => [r.id, r.isActuallyLive]));
+
+    // Update streams with probe results
+    return streams.map(stream => {
+        if (stream.status === 'live' && stream.streamUrl) {
+            const isActuallyLive = resultMap.get(stream.id) ?? false;
+            return { ...stream, isActuallyLive };
+        } else if (stream.status === 'live' && !stream.streamUrl) {
+            // No stream URL = definitely not live
+            return { ...stream, isActuallyLive: false };
+        }
+        return stream;
+    });
+}
 
 /**
  * Fetch XMR price from CoinGecko
@@ -208,11 +316,18 @@ export async function fetchLiveStreams(forceRefresh = false) {
             }
         }
 
-        livestreamState.cache = uniqueStreams;
+        // Validate "live" streams by probing their URLs
+        console.log('📺 Validating stream URLs...');
+        const validatedStreams = await validateStreams(uniqueStreams);
+
+        livestreamState.cache = validatedStreams;
         livestreamState.lastFetchTime = now;
 
-        console.log('📺 Found', uniqueStreams.filter(s => s.status === 'live').length, 'live streams');
-        return uniqueStreams;
+        const actuallyLive = validatedStreams.filter(s => s.status === 'live' && s.isActuallyLive !== false).length;
+        const stale = validatedStreams.filter(s => s.status === 'live' && s.isActuallyLive === false).length;
+        console.log(`📺 Found ${actuallyLive} live streams (${stale} stale/offline)`);
+
+        return validatedStreams;
 
     } catch (error) {
         console.error('❌ Error fetching live streams:', error);
@@ -328,6 +443,10 @@ export function subscribeToChat(stream, onMessage) {
                 },
                 oneose() {
                     console.log('💬 Chat subscription established');
+                    // Trigger initial render even if no messages yet
+                    if (typeof onMessage === 'function') {
+                        onMessage(null, messages);
+                    }
                 }
             }
         );
@@ -481,9 +600,15 @@ export async function renderLivestreamFeed() {
         const Posts = await import('./posts.js');
         await Posts.fetchProfiles(streamerPubkeys);
 
-        // Separate live and ended streams
-        const liveStreams = streams.filter(s => s.status === 'live');
-        const endedStreams = streams.filter(s => s.status !== 'live').slice(0, 10);
+        // Separate actually live streams from ended/stale streams
+        // isActuallyLive: true = confirmed live, false = confirmed offline, undefined = not probed
+        const liveStreams = streams.filter(s => s.status === 'live' && s.isActuallyLive !== false);
+        const endedStreams = [
+            // Streams marked as ended
+            ...streams.filter(s => s.status !== 'live'),
+            // Stale streams (marked live but probe failed)
+            ...streams.filter(s => s.status === 'live' && s.isActuallyLive === false)
+        ].slice(0, 10);
 
         let html = '';
 
@@ -604,6 +729,24 @@ function renderStreamInRightPanel(stream, profile) {
     // Hide the default feed (don't destroy it)
     const defaultFeed = document.getElementById('rightPanelDefaultFeed');
     if (defaultFeed) defaultFeed.style.display = 'none';
+
+    // Hide any active RightPanel sections (profiles, threads, etc.)
+    const activeSections = rightPanelContent.querySelectorAll('.right-panel-section.active');
+    activeSections.forEach(section => {
+        section.classList.remove('active');
+        section.style.display = 'none';
+    });
+
+    // Clear any previous stream's rendered messages and DOM cache
+    livestreamState.clearRenderedMessages();
+    domCache.clear();
+
+    // Close existing chat subscription before opening new stream
+    if (livestreamState.chatSubscription) {
+        livestreamState.chatSubscription.close();
+        livestreamState.chatSubscription = null;
+    }
+    livestreamState.cleanupChatEventListeners();
 
     // Remove any existing stream view
     const existingStreamView = document.getElementById('livestreamRightPanelView');
@@ -824,29 +967,58 @@ function initializePlayer(streamUrl) {
 }
 
 /**
- * Render chat messages
+ * Render chat messages incrementally
+ * Only renders new messages that haven't been rendered yet
  */
 async function renderChatMessages(messages) {
-    const chatContainer = document.getElementById('streamChat');
+    const chatContainer = domCache.get('streamChat') || domCache.refresh('streamChat');
     if (!chatContainer) return;
 
-    // Fetch profiles for message authors
-    const pubkeys = [...new Set(messages.map(m => m.pubkey))];
-    const Posts = await import('./posts.js');
-    await Posts.fetchProfiles(pubkeys);
+    // Always remove loading placeholder when we receive any update
+    const loadingEl = chatContainer.querySelector('.chat-loading');
+    if (loadingEl) loadingEl.remove();
 
-    chatContainer.innerHTML = messages.map(msg => {
+    // Find messages that haven't been rendered yet
+    const newMessages = messages.filter(m => !livestreamState.renderedMessageIds.has(m.id));
+
+    // If no new messages, show empty state or just return
+    if (newMessages.length === 0) {
+        if (messages.length === 0 && chatContainer.children.length === 0) {
+            chatContainer.innerHTML = '<div class="chat-empty">No messages yet. Be the first to chat!</div>';
+        }
+        return;
+    }
+
+    // Remove empty state if it exists
+    const emptyEl = chatContainer.querySelector('.chat-empty');
+    if (emptyEl) emptyEl.remove();
+
+    // Fetch profiles for NEW message authors only
+    const newPubkeys = [...new Set(newMessages.map(m => m.pubkey))];
+    const Posts = await import('./posts.js');
+    await Posts.fetchProfiles(newPubkeys);
+
+    // Append only new messages (incremental update)
+    const fragment = document.createDocumentFragment();
+    for (const msg of newMessages) {
         const profile = State.profileCache[msg.pubkey];
         const name = profile?.name || profile?.display_name || msg.pubkey.slice(0, 8) + '...';
         const isOwn = msg.pubkey === State.publicKey;
 
-        return `
-            <div class="chat-message ${isOwn ? 'own-message' : ''}">
-                <span class="chat-author" style="color: ${stringToColor(msg.pubkey)}">${Utils.escapeHtml(name)}:</span>
-                <span class="chat-content">${Utils.escapeHtml(msg.content)}</span>
-            </div>
+        const messageEl = document.createElement('div');
+        messageEl.className = `chat-message ${isOwn ? 'own-message' : ''}`;
+        messageEl.dataset.messageId = msg.id;
+        messageEl.innerHTML = `
+            <span class="chat-author" style="color: ${stringToColor(msg.pubkey)}">${Utils.escapeHtml(name)}:</span>
+            <span class="chat-content">${Utils.escapeHtml(msg.content)}</span>
         `;
-    }).join('');
+        fragment.appendChild(messageEl);
+
+        // Mark as rendered
+        livestreamState.renderedMessageIds.add(msg.id);
+    }
+
+    chatContainer.appendChild(fragment);
 
     // Scroll to bottom
     chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -858,7 +1030,7 @@ async function renderChatMessages(messages) {
 export async function sendChatMessage() {
     if (!livestreamState.currentStream) return;
 
-    const input = document.getElementById('chatInput');
+    const input = domCache.get('chatInput') || domCache.refresh('chatInput');
     if (!input || !input.value.trim()) return;
 
     const content = input.value.trim();
@@ -890,6 +1062,12 @@ export function closeStreamView() {
     // Cleanup event listeners
     livestreamState.cleanupChatEventListeners();
 
+    // Clear rendered message tracking
+    livestreamState.clearRenderedMessages();
+
+    // Clear DOM cache (elements will be gone)
+    domCache.clear();
+
     livestreamState.currentStream = null;
 
     // Remove modal if exists
@@ -903,6 +1081,15 @@ export function closeStreamView() {
     const streamView = document.getElementById('livestreamRightPanelView');
     if (streamView) streamView.remove();
 
+    // Restore any hidden RightPanel sections
+    const rightPanelContent = document.getElementById('rightPanelContent');
+    if (rightPanelContent) {
+        const hiddenSections = rightPanelContent.querySelectorAll('.right-panel-section[style*="display: none"]');
+        hiddenSections.forEach(section => {
+            section.style.display = '';
+        });
+    }
+
     // Show the default feed (dashboard)
     const defaultFeed = document.getElementById('rightPanelDefaultFeed');
     if (defaultFeed) defaultFeed.style.display = '';
@@ -912,8 +1099,8 @@ export function closeStreamView() {
  * Update tip amount USD display
  */
 async function updateTipAmountUSD() {
-    const amountInput = document.getElementById('tipAmount');
-    const usdEl = document.getElementById('tipAmountUSD');
+    const amountInput = domCache.get('tipAmount') || domCache.refresh('tipAmount');
+    const usdEl = domCache.get('tipAmountUSD') || domCache.refresh('tipAmountUSD');
 
     const amountStr = amountInput?.value.trim();
     if (!amountStr || isNaN(parseFloat(amountStr)) || parseFloat(amountStr) <= 0) {
@@ -1074,14 +1261,14 @@ export function closeTipModal() {
  * Send the XMR tip
  */
 export async function sendTip() {
-    const modal = document.getElementById('livestreamTipModal');
+    const modal = domCache.get('livestreamTipModal') || domCache.refresh('livestreamTipModal');
     if (!modal) return;
 
-    const amountInput = document.getElementById('tipAmount');
-    const messageInput = document.getElementById('tipMessage');
-    const anonymousCheckbox = document.getElementById('tipAnonymous');
-    const sendBtn = document.getElementById('sendTipBtn');
-    const statusDiv = document.getElementById('tipStatus');
+    const amountInput = domCache.get('tipAmount') || domCache.refresh('tipAmount');
+    const messageInput = domCache.get('tipMessage') || domCache.refresh('tipMessage');
+    const anonymousCheckbox = domCache.get('tipAnonymous') || domCache.refresh('tipAnonymous');
+    const sendBtn = domCache.get('sendTipBtn') || domCache.refresh('sendTipBtn');
+    const statusDiv = domCache.get('tipStatus') || domCache.refresh('tipStatus');
 
     const amount = parseFloat(amountInput.value);
     const message = messageInput.value.trim();
@@ -1269,7 +1456,8 @@ window.NostrLivestream = {
 export async function updateLiveTabIndicator() {
     try {
         const streams = await fetchLiveStreams();
-        const liveCount = streams.filter(s => s.status === 'live').length;
+        // Only count streams that are actually live (passed URL probe)
+        const liveCount = streams.filter(s => s.status === 'live' && s.isActuallyLive !== false).length;
 
         const liveTab = document.querySelector('.feed-tab[data-feed="live"]');
         if (liveTab) {
