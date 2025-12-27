@@ -16,8 +16,14 @@ export const DEFAULT_RELAYS = [
 // Search-optimized relays with NIP-50 support prioritized
 // Used for network-wide search to get results regardless of user's follow count
 export const SEARCH_RELAYS = [
+    // NIP-50 search relays (verified support)
     'wss://relay.nostr.band',
     'wss://search.nos.today',
+    'wss://relay.ditto.pub',
+    'wss://relay.davidebtc.me',
+    'wss://nostr.polyserv.xyz',
+    'wss://relay.gathr.gives',
+    // General relays (may or may not support NIP-50)
     'wss://nos.lol',
     'wss://relay.damus.io',
     'wss://purplepag.es',
