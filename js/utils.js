@@ -192,8 +192,110 @@ function isValidUrlScheme(url) {
     }
 }
 
+// Parse content with markdown support
+function parseMarkdownContent(content, skipEmbeddedNotes = false) {
+    // Store nostr mentions to restore after markdown parsing
+    const mentions = [];
+    let mentionIndex = 0;
+
+    // Replace nostr: URIs with placeholders before markdown parsing
+    let processed = content.replace(/(nostr:)?(npub1[a-z0-9]{58}|nprofile1[a-z0-9]+|note1[a-z0-9]{58}|nevent1[a-z0-9]+)/gi, (match) => {
+        mentions.push(match);
+        return `__NOSTR_MENTION_${mentionIndex++}__`;
+    });
+
+    // Parse markdown
+    let parsed = window.marked.parse(processed);
+
+    // Restore nostr mentions and convert to proper HTML
+    parsed = parsed.replace(/__NOSTR_MENTION_(\d+)__/g, (match, index) => {
+        const mention = mentions[parseInt(index)];
+        return processNostrMention(mention, skipEmbeddedNotes);
+    });
+
+    // Sanitize with DOMPurify - allow markdown tags
+    if (typeof DOMPurify !== 'undefined') {
+        parsed = DOMPurify.sanitize(parsed, {
+            ALLOWED_TAGS: ['a', 'img', 'video', 'source', 'span', 'div', 'br', 'p',
+                'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'u',
+                'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'hr', 'table', 'thead',
+                'tbody', 'tr', 'th', 'td'],
+            ALLOWED_ATTR: ['href', 'src', 'target', 'rel', 'class', 'data-nevent', 'data-noteid',
+                'data-note1', 'alt', 'controls', 'data-pubkey', 'data-action', 'data-eventid'],
+            ALLOW_DATA_ATTR: true,
+            ADD_ATTR: ['target']
+        });
+    }
+
+    return parsed;
+}
+
+// Process a nostr mention and return appropriate HTML
+function processNostrMention(mention, skipEmbeddedNotes = false) {
+    const content = mention.replace(/^nostr:/, '');
+
+    // npub mention
+    if (content.startsWith('npub1')) {
+        try {
+            const { nip19 } = window.NostrTools;
+            const decoded = nip19.decode(content);
+            const pubkey = decoded.data;
+            const profile = profileCache[pubkey];
+            const name = profile?.name || profile?.display_name || content.slice(0, 12) + '...';
+            return `<span class="mention" data-action="view-profile" data-pubkey="${escapeHtml(pubkey)}">@${escapeHtml(name)}</span>`;
+        } catch (e) {
+            return `<span class="mention">@${escapeHtml(content.slice(0, 12))}...</span>`;
+        }
+    }
+
+    // nprofile mention
+    if (content.startsWith('nprofile1')) {
+        try {
+            const { nip19 } = window.NostrTools;
+            const decoded = nip19.decode(content);
+            if (decoded.type === 'nprofile') {
+                const pubkey = decoded.data.pubkey;
+                const profile = profileCache[pubkey];
+                const name = profile?.name || profile?.display_name || content.slice(0, 12) + '...';
+                return `<span class="mention" data-action="view-profile" data-pubkey="${escapeHtml(pubkey)}">@${escapeHtml(name)}</span>`;
+            }
+        } catch (e) {
+            return `<span class="mention">@${escapeHtml(content.slice(0, 12))}...</span>`;
+        }
+    }
+
+    // note mention
+    if (content.startsWith('note1') && !skipEmbeddedNotes) {
+        try {
+            const { nip19 } = window.NostrTools;
+            const decoded = nip19.decode(content);
+            const eventId = decoded.data;
+            return `<div class="embedded-note" data-noteid="${eventId}">Loading note...</div>`;
+        } catch (e) {
+            return `<span class="mention">note:${escapeHtml(content.slice(0, 12))}...</span>`;
+        }
+    }
+
+    // nevent mention
+    if (content.startsWith('nevent1') && !skipEmbeddedNotes) {
+        return `<div class="embedded-note" data-nevent="${escapeHtml(content)}">Loading event...</div>`;
+    }
+
+    // Fallback
+    return `<span class="mention">${escapeHtml(content.slice(0, 16))}...</span>`;
+}
+
 // Parse and format post content: links, images, mentions, and embedded notes
 export function parseContent(content, skipEmbeddedNotes = false) {
+    // Check if content has markdown syntax
+    const hasMarkdown = /(\*\*|__|\*|_|#{1,6}\s|```|`|^\s*[-*+]\s|^\s*\d+\.\s|^\s*>)/m.test(content);
+
+    // If marked.js is available and content has markdown, use markdown parsing
+    if (window.marked && hasMarkdown) {
+        return parseMarkdownContent(content, skipEmbeddedNotes);
+    }
+
+    // Otherwise use standard parsing
     // Extract image URLs from any existing HTML img tags before escaping
     // This handles notes where clients embedded <img> tags directly
     let cleanContent = content.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, '$1');
