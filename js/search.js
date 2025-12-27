@@ -2116,10 +2116,38 @@ async function renderSearchResults() {
     const resultsToShow = sortedResults.slice(0, displayedResultsCount);
     const hasMoreResults = sortedResults.length > displayedResultsCount;
 
-    // Fetch missing profiles before rendering (use SEARCH_RELAYS with longer timeout)
-    const missingPubkeys = [...new Set(resultsToShow
-        .filter(post => !profileCache[post.pubkey])
-        .map(post => post.pubkey))];
+    // Collect all pubkeys we need: post authors + mentioned users in content
+    const allPubkeys = new Set();
+
+    resultsToShow.forEach(post => {
+        // Add post author
+        allPubkeys.add(post.pubkey);
+
+        // Extract mentioned pubkeys from content (npub and nprofile)
+        const npubMatches = post.content.match(/(?:nostr:)?(npub1[a-z0-9]{58})/gi) || [];
+        const nprofileMatches = post.content.match(/(?:nostr:)?(nprofile1[a-z0-9]+)/gi) || [];
+
+        npubMatches.forEach(match => {
+            try {
+                const clean = match.replace('nostr:', '');
+                const { data: pubkey } = window.NostrTools.nip19.decode(clean);
+                allPubkeys.add(pubkey);
+            } catch (e) { /* ignore invalid */ }
+        });
+
+        nprofileMatches.forEach(match => {
+            try {
+                const clean = match.replace('nostr:', '');
+                const decoded = window.NostrTools.nip19.decode(clean);
+                if (decoded.type === 'nprofile') {
+                    allPubkeys.add(decoded.data.pubkey);
+                }
+            } catch (e) { /* ignore invalid */ }
+        });
+    });
+
+    // Fetch missing profiles before rendering
+    const missingPubkeys = [...allPubkeys].filter(pk => !profileCache[pk]);
 
     if (missingPubkeys.length > 0) {
         try {
@@ -2166,6 +2194,98 @@ async function renderSearchResults() {
         TrustBadges.refreshTrustBadgesIncremental(resultsEl);
     } catch (e) {
         console.warn('[Search] Trust badges error:', e);
+    }
+
+    // Background: retry loading unresolved mention profiles
+    retryUnresolvedMentions(resultsEl);
+}
+
+// Retry fetching profiles for mentions that show as placeholders
+async function retryUnresolvedMentions(container) {
+    // Find mentions that still show placeholder text (e.g., @npub1abc..., @nprofile1xyz...)
+    const unresolvedMentions = container.querySelectorAll('.mention[data-pubkey]');
+    const pubkeysToRetry = new Set();
+    const mentionElements = new Map(); // pubkey -> [elements]
+
+    unresolvedMentions.forEach(el => {
+        const text = el.textContent;
+        // Check if it's a placeholder (starts with @npub1 or @nprofile1 and ends with ...)
+        if (text.match(/^@(npub1|nprofile1).+\.\.\.$/)) {
+            const pubkey = el.getAttribute('data-pubkey');
+            if (pubkey && !profileCache[pubkey]) {
+                pubkeysToRetry.add(pubkey);
+                if (!mentionElements.has(pubkey)) {
+                    mentionElements.set(pubkey, []);
+                }
+                mentionElements.get(pubkey).push(el);
+            }
+        }
+    });
+
+    if (pubkeysToRetry.size === 0) return;
+
+    console.log(`[Search] Retrying ${pubkeysToRetry.size} unresolved mention profiles in background...`);
+
+    // Use main relays for retry (broader coverage)
+    const RETRY_RELAYS = [
+        'wss://relay.damus.io',
+        'wss://nos.lol',
+        'wss://relay.primal.net',
+        'wss://purplepag.es',
+        'wss://relay.nostr.band'
+    ];
+
+    try {
+        const pubkeyArray = [...pubkeysToRetry];
+
+        await new Promise((resolve) => {
+            const foundPubkeys = new Set();
+
+            const sub = pool.subscribeMany(RETRY_RELAYS, [{
+                kinds: [0],
+                authors: pubkeyArray
+            }], {
+                onevent(event) {
+                    if (foundPubkeys.has(event.pubkey)) return;
+
+                    try {
+                        const profile = JSON.parse(event.content);
+                        profileCache[event.pubkey] = {
+                            ...profile,
+                            pubkey: event.pubkey,
+                            created_at: event.created_at
+                        };
+                        foundPubkeys.add(event.pubkey);
+
+                        // Update mention elements for this pubkey
+                        const name = profile.name || profile.display_name;
+                        if (name && mentionElements.has(event.pubkey)) {
+                            mentionElements.get(event.pubkey).forEach(el => {
+                                el.textContent = `@${name}`;
+                            });
+                            console.log(`[Search] Resolved mention: @${name}`);
+                        }
+
+                        if (foundPubkeys.size >= pubkeyArray.length) {
+                            sub.close();
+                            resolve();
+                        }
+                    } catch (e) { /* ignore parse errors */ }
+                },
+                oneose() {
+                    sub.close();
+                    resolve();
+                }
+            });
+
+            // Longer timeout for background retry (10 seconds)
+            setTimeout(() => {
+                sub.close();
+                resolve();
+            }, 10000);
+        });
+    } catch (e) {
+        console.warn('[Search] Background mention retry failed:', e);
     }
 }
 
