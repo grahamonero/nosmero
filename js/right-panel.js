@@ -350,8 +350,8 @@ const RightPanel = {
         // Capture current load ID to detect if superseded
         const loadId = this.loadContentId;
 
-        const posts = await this.fetchTrendingMoneroPosts();
-        this.renderPostsToPanel(posts, 'Trending Monero Notes', loadId);
+        const { posts, engagementData } = await this.fetchTrendingMoneroPosts();
+        this.renderPostsToPanel(posts, 'Trending Monero Notes', loadId, engagementData);
     },
 
     /**
@@ -363,12 +363,13 @@ const RightPanel = {
         // Capture current load ID to detect if superseded
         const loadId = this.loadContentId;
 
-        const posts = await this.fetchPopularPosts();
-        this.renderPostsToPanel(posts, 'Popular Notes', loadId);
+        const { posts, engagementData } = await this.fetchPopularPosts();
+        this.renderPostsToPanel(posts, 'Popular Notes', loadId, engagementData);
     },
 
     /**
      * Fetch trending Monero posts (uses existing logic)
+     * @returns {{ posts: Array, engagementData: Object }}
      */
     async fetchTrendingMoneroPosts() {
         // Use the existing relay pool and fetch logic
@@ -377,7 +378,7 @@ const RightPanel = {
 
         if (!pool || !relays?.length) {
             console.warn('Right panel: No pool or relays available for Monero feed');
-            return [];
+            return { posts: [], engagementData: {} };
         }
 
         const moneroTerms = ['monero', 'xmr', '#monero', '#xmr'];
@@ -396,19 +397,38 @@ const RightPanel = {
                 return moneroTerms.some(term => content.includes(term));
             });
 
-            // Sort by engagement (reactions count if available, or recency)
-            moneroEvents.sort((a, b) => b.created_at - a.created_at);
+            // Fetch engagement data for Monero posts
+            let engagementData = {};
+            if (moneroEvents.length > 0 && window.NostrPosts?.fetchEngagementCounts) {
+                engagementData = await window.NostrPosts.fetchEngagementCounts(moneroEvents.map(n => n.id));
+            }
 
-            return moneroEvents.slice(0, 20);
+            // Sort by total engagement (same as popular posts)
+            moneroEvents.sort((a, b) => {
+                const engageA = (engagementData[a.id]?.replies || 0) +
+                               (engagementData[a.id]?.reactions || 0) +
+                               (engagementData[a.id]?.zaps || 0);
+                const engageB = (engagementData[b.id]?.replies || 0) +
+                               (engagementData[b.id]?.reactions || 0) +
+                               (engagementData[b.id]?.zaps || 0);
+                // If equal engagement, sort by recency
+                if (engageB === engageA) {
+                    return b.created_at - a.created_at;
+                }
+                return engageB - engageA;
+            });
+
+            return { posts: moneroEvents.slice(0, 20), engagementData };
         } catch (error) {
             console.error('Error fetching trending Monero posts:', error);
-            return [];
+            return { posts: [], engagementData: {} };
         }
     },
 
     /**
      * Fetch popular posts - same logic as "Popular Notes" tab (loadTrendingAllFeed)
      * Fetches recent notes and sorts by engagement (replies + reactions + zaps)
+     * @returns {{ posts: Array, engagementData: Object }}
      */
     async fetchPopularPosts() {
         const pool = window.NostrState?.pool;
@@ -416,7 +436,7 @@ const RightPanel = {
 
         if (!pool || !relays?.length) {
             console.warn('Right panel: No pool or relays available for popular feed');
-            return [];
+            return { posts: [], engagementData: {} };
         }
 
         try {
@@ -434,7 +454,7 @@ const RightPanel = {
             if (DEBUG) console.log(`Right panel: Found ${notes.length} recent notes`);
 
             if (!notes || notes.length === 0) {
-                return [];
+                return { posts: [], engagementData: {} };
             }
 
             // Fetch engagement data (replies, reactions, zaps)
@@ -454,11 +474,11 @@ const RightPanel = {
                 return engageB - engageA;
             });
 
-            // Return top most engaged notes
-            return notes.slice(0, LIMITS.POPULAR_POSTS);
+            // Return top most engaged notes with engagement data
+            return { posts: notes.slice(0, LIMITS.POPULAR_POSTS), engagementData };
         } catch (error) {
             console.error('Error fetching popular posts:', error);
-            return [];
+            return { posts: [], engagementData: {} };
         }
     },
 
@@ -467,8 +487,9 @@ const RightPanel = {
      * @param {Array} posts - Posts to render
      * @param {string} title - Feed title
      * @param {number} loadId - Optional load ID to check for stale operations
+     * @param {Object} engagementData - Pre-fetched engagement data for posts
      */
-    async renderPostsToPanel(posts, title, loadId = null) {
+    async renderPostsToPanel(posts, title, loadId = null, engagementData = null) {
         if (!this.defaultFeed) return;
 
         // Check if this render is stale (another load has started)
@@ -516,7 +537,7 @@ const RightPanel = {
         if (window.NostrPosts?.renderSinglePost) {
             try {
                 const renderedPosts = await Promise.all(
-                    posts.map(post => window.NostrPosts.renderSinglePost(post, 'feed'))
+                    posts.map(post => window.NostrPosts.renderSinglePost(post, 'feed', engagementData, null))
                 );
 
                 // Final check before DOM update
@@ -1351,6 +1372,16 @@ const RightPanel = {
                 }
             }
 
+            // Fetch engagement data for thread posts
+            let threadEngagementData = {};
+            if (window.NostrPosts?.fetchEngagementCounts) {
+                try {
+                    threadEngagementData = await window.NostrPosts.fetchEngagementCounts(allPosts.map(p => p.id));
+                } catch (engageError) {
+                    console.error('Right panel thread: Error fetching engagement:', engageError);
+                }
+            }
+
             // Build a map of posts by ID for quick lookup
             const postMap = new Map();
             allPosts.forEach(post => postMap.set(post.id, post));
@@ -1427,7 +1458,7 @@ const RightPanel = {
                 const highlightStyle = isClickedNote ? 'border: 2px solid #FF6600; border-radius: 8px;' : '';
                 nodeHtml += `<div style="margin-left: ${indent}px; ${depth > 0 ? 'border-left: 2px solid #333; padding-left: 8px;' : ''} ${highlightStyle}">`;
                 if (window.NostrPosts?.renderSinglePost) {
-                    nodeHtml += await window.NostrPosts.renderSinglePost(node.post, isClickedNote ? 'highlight' : 'thread');
+                    nodeHtml += await window.NostrPosts.renderSinglePost(node.post, isClickedNote ? 'highlight' : 'thread', threadEngagementData, null);
                 } else {
                     nodeHtml += `<div class="post" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
                         ${this.escapeHtml(node.post.content)}
@@ -1774,8 +1805,10 @@ const RightPanel = {
                 }
             });
 
-            // Fetch disclosed tips and parent posts for new posts
+            // Fetch disclosed tips, engagement, and parent posts for new posts
             let parentPostsMap = {};
+            let engagementData = {};
+
             if (window.NostrPosts?.fetchDisclosedTips) {
                 try {
                     const disclosedTipsData = await window.NostrPosts.fetchDisclosedTips(newPosts);
@@ -1784,6 +1817,15 @@ const RightPanel = {
                     }
                 } catch (tipError) {
                     console.error('Right panel profile: Error fetching disclosed tips:', tipError);
+                }
+            }
+
+            // Fetch engagement data (replies, reactions, zaps)
+            if (window.NostrPosts?.fetchEngagementCounts) {
+                try {
+                    engagementData = await window.NostrPosts.fetchEngagementCounts(newPosts.map(p => p.id));
+                } catch (engageError) {
+                    console.error('Right panel profile: Error fetching engagement:', engageError);
                 }
             }
 
@@ -1798,10 +1840,10 @@ const RightPanel = {
                 }
             }
 
-            // Render posts with parent context
+            // Render posts with parent context and engagement data
             if (window.NostrPosts?.renderSinglePost) {
                 const rendered = await Promise.all(
-                    newPosts.map(post => window.NostrPosts.renderSinglePost(post, 'feed', {}, parentPostsMap))
+                    newPosts.map(post => window.NostrPosts.renderSinglePost(post, 'feed', engagementData, parentPostsMap))
                 );
 
                 if (loadMore) {
