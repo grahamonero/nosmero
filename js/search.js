@@ -29,6 +29,16 @@ let searchRelayHealthLastReset = Date.now();
 const RELAY_HEALTH_RESET_INTERVAL = 5 * 60 * 1000; // Reset health data every 5 minutes
 const SEARCH_RELAY_SLOW_THRESHOLD = 5000; // 5 seconds = considered slow
 
+// Dedicated search pool - recreated per search for consistent results
+let searchPool = null;
+
+// Background engagement fetch tracking
+let engagementFetchPromise = null;
+let engagementFetchComplete = false;
+
+// Current search phase for status display
+let currentSearchPhase = '';
+
 // Trending searches (fetched from API)
 let trendingSearches = [];
 let trendingSearchesLastFetch = 0;
@@ -275,6 +285,18 @@ export async function performSearch() {
     initializeSearchResults(query);
     updateSearchStatus('Searching cached posts...');
 
+    // Create fresh search pool for consistent results across searches
+    // This avoids nostr-tools pool deduplication causing fewer results on repeated searches
+    if (searchPool) {
+        try {
+            searchPool.close(SEARCH_RELAYS);
+        } catch (e) {
+            // Ignore close errors
+        }
+    }
+    searchPool = new window.NostrTools.SimplePool();
+    console.log('[Search] Created fresh search pool');
+
     try {
         // Determine search type and perform streaming search
         if (query.startsWith('#')) {
@@ -311,17 +333,16 @@ export async function performSearch() {
             }
         }
 
-        // Fetch engagement data for all results
-        if (currentSearchResults.length > 0) {
-            updateSearchStatus(`Fetching engagement data for ${currentSearchResults.length} results...`);
-            const Posts = await import('./posts.js');
-            const postIds = currentSearchResults.map(post => post.id);
-            searchEngagementData = await Posts.fetchEngagementCounts(postIds);
-            console.log('📊 Engagement data fetched for search results');
-            await renderSearchResults(); // Re-render with engagement counts
+        // Close search pool after search completes
+        if (searchPool) {
+            try {
+                searchPool.close(SEARCH_RELAYS);
+            } catch (e) {
+                // Ignore close errors
+            }
         }
 
-        // Update final status
+        // Update final status and render results sorted by date (default)
         if (currentSearchResults.length === 0) {
             updateSearchStatus(`No results found for "${query}"`);
             document.getElementById('searchResultsList').innerHTML = `
@@ -330,7 +351,12 @@ export async function performSearch() {
                 </div>
             `;
         } else {
-            updateSearchStatus(`Search completed - ${currentSearchResults.length} results found`);
+            updateSearchStatus(`Found ${currentSearchResults.length} result${currentSearchResults.length === 1 ? '' : 's'} for "${query}"`);
+            await renderSearchResults(); // Render immediately sorted by date
+
+            // Start background fetch of engagement data (non-blocking)
+            engagementFetchComplete = false;
+            engagementFetchPromise = fetchEngagementInBackground();
         }
 
     } catch (error) {
@@ -341,6 +367,70 @@ export async function performSearch() {
                 Search failed: ${escapeHtml(error.message)}
             </div>
         `;
+        // Close pool on error too
+        if (searchPool) {
+            try {
+                searchPool.close(SEARCH_RELAYS);
+            } catch (e) {
+                // Ignore close errors
+            }
+        }
+    }
+}
+
+// Fetch engagement data for a specific range of results (pagination-aware)
+async function fetchEngagementForRange(startIdx, endIdx) {
+    // Get the slice of results we need engagement for
+    const resultsSlice = currentSearchResults.slice(startIdx, endIdx);
+    if (resultsSlice.length === 0) return;
+
+    // Filter to only IDs we haven't fetched yet
+    const idsToFetch = resultsSlice
+        .map(post => post.id)
+        .filter(id => !engagementFetchedIds.has(id));
+
+    if (idsToFetch.length === 0) {
+        console.log(`[Search] All ${resultsSlice.length} posts in range already have engagement data`);
+        return;
+    }
+
+    try {
+        console.log(`[Search] Fetching engagement for ${idsToFetch.length} posts (range ${startIdx}-${endIdx})...`);
+        const Posts = await import('./posts.js');
+
+        // Use SEARCH_RELAYS for engagement data (same relays that returned the posts)
+        const newEngagementData = await Posts.fetchEngagementCounts(idsToFetch, SEARCH_RELAYS);
+
+        // Merge new data into existing
+        Object.assign(searchEngagementData, newEngagementData);
+
+        // Mark these IDs as fetched
+        idsToFetch.forEach(id => engagementFetchedIds.add(id));
+
+        console.log(`[Search] Engagement fetch complete for ${idsToFetch.length} posts`);
+    } catch (error) {
+        console.error('[Search] Engagement fetch failed:', error);
+    }
+}
+
+// Fetch engagement data in background (only for currently displayed results)
+async function fetchEngagementInBackground() {
+    if (currentSearchResults.length === 0) {
+        engagementFetchComplete = true;
+        return;
+    }
+
+    try {
+        // Only fetch for the first page (displayed results)
+        await fetchEngagementForRange(0, displayedResultsCount);
+
+        engagementFetchComplete = true;
+
+        // Re-render to show engagement counts
+        await renderSearchResults();
+    } catch (error) {
+        console.error('[Search] Background engagement fetch failed:', error);
+        engagementFetchComplete = true; // Mark complete even on error
     }
 }
 
@@ -628,7 +718,7 @@ export async function searchContent(query) {
             return new Promise((resolve) => {
                 const tempResults = [];
                 // Use all SEARCH_RELAYS for comprehensive network-wide results
-                const searchSub = pool.subscribeMany(SEARCH_RELAYS, [filter], {
+                const searchSub = searchPool.subscribeMany(SEARCH_RELAYS, [filter], {
                         onevent(event) {
                             // Apply advanced filtering to relay results
                             const content = event.content.toLowerCase();
@@ -731,7 +821,7 @@ export async function searchThreads(query) {
     // Try to find more thread posts from network-wide search relays
     try {
         const threadResults = [];
-        const searchSub = pool.subscribeMany(SEARCH_RELAYS, [
+        const searchSub = searchPool.subscribeMany(SEARCH_RELAYS, [
             {
                 kinds: [1],
                 limit: 50,
@@ -844,7 +934,7 @@ export async function searchArticles(query) {
         const articles = [];
 
         // Search for NIP-23 long-form articles (kind 30023) across network
-        const articleSub = pool.subscribeMany(SEARCH_RELAYS, [
+        const articleSub = searchPool.subscribeMany(SEARCH_RELAYS, [
             {
                 kinds: [30023], // NIP-23 long-form articles
                 limit: 20,
@@ -920,7 +1010,7 @@ export async function searchHashtag(hashtag) {
         const results = [];
 
         // Search for posts with this hashtag across network-wide relays
-        const hashtagSub = pool.subscribeMany(SEARCH_RELAYS, [
+        const hashtagSub = searchPool.subscribeMany(SEARCH_RELAYS, [
             {
                 kinds: [1],
                 '#t': [cleanTag],
@@ -990,7 +1080,7 @@ export async function searchUser(query) {
         try {
             const results = [];
 
-            const userSub = pool.subscribeMany(SEARCH_RELAYS, [
+            const userSub = searchPool.subscribeMany(SEARCH_RELAYS, [
                 {
                     kinds: [1],
                     authors: [searchPubkey],
@@ -1201,7 +1291,7 @@ export async function performStreamingContentSearch(query) {
     let nip50ReceivedCount = 0;
 
     await new Promise((resolve) => {
-        const searchSub = pool.subscribeMany(SEARCH_RELAYS, [searchFilter], {
+        const searchSub = searchPool.subscribeMany(SEARCH_RELAYS, [searchFilter], {
             onerror(err) {
                 console.error('[Search] NIP-50 subscription error:', err);
             },
@@ -1218,8 +1308,8 @@ export async function performStreamingContentSearch(query) {
                     return;
                 }
 
-                // Try exact match first, then fuzzy
-                if (matchesQuery(event, parsedQuery) || matchesQuery(event, parsedQuery, true)) {
+                // Exact match only - no fuzzy matching
+                if (matchesQuery(event, parsedQuery)) {
                     nip50ResultCount++;
                     addSearchResult(event);
                 }
@@ -1253,7 +1343,7 @@ export async function performStreamingContentSearch(query) {
     let broadResultCount = 0;
 
     await new Promise((resolve) => {
-        const broadSub = pool.subscribeMany(SEARCH_RELAYS, [broadFilter], {
+        const broadSub = searchPool.subscribeMany(SEARCH_RELAYS, [broadFilter], {
             onevent(event) {
                 // Client-side NSFW filter
                 if (searchOptions.hideNsfw && isNsfwContent(event)) {
@@ -1265,8 +1355,8 @@ export async function performStreamingContentSearch(query) {
                     return;
                 }
 
-                // Must match query (exact or fuzzy)
-                if (matchesQuery(event, parsedQuery) || matchesQuery(event, parsedQuery, true)) {
+                // Exact match only - no fuzzy matching
+                if (matchesQuery(event, parsedQuery)) {
                     broadResultCount++;
                     addSearchResult(event);
                 }
@@ -1288,19 +1378,6 @@ export async function performStreamingContentSearch(query) {
         }, 5000);
     });
 
-    // If few results, do fuzzy search on cached posts
-    if (currentSearchResults.length < 10 && parsedQuery.terms.length > 0) {
-        updateSearchStatus('Trying fuzzy matches...');
-        posts.forEach(post => {
-            // Skip posts outside time range
-            if (timeLimit > 0 && post.created_at < timeLimit) {
-                return;
-            }
-            if (matchesQuery(post, parsedQuery, true)) {
-                addSearchResult(post);
-            }
-        });
-    }
 }
 
 // Streaming hashtag search
@@ -1334,20 +1411,22 @@ export async function performStreamingHashtagSearch(hashtag) {
     // Calculate since timestamp for relay filter
     const sinceTimestamp = timeLimit > 0 ? timeLimit : 0;
 
-    // Hashtag filter with increased limit
+    // Hashtag filter
     const hashtagFilter = {
         kinds: [1],
         '#t': [cleanTag],
-        limit: 200, // Increased from 50
+        limit: 200,
         since: sinceTimestamp
     };
+
+    console.log('[Search] Querying', SEARCH_RELAYS.length, 'relays for hashtag:', cleanTag);
 
     // Single subscription to all relays (correct pattern for nostr-tools)
     const hashtagStartTime = Date.now();
     let hashtagResultCount = 0;
 
     await new Promise((resolve) => {
-        const hashtagSub = pool.subscribeMany(SEARCH_RELAYS, [hashtagFilter], {
+        const hashtagSub = searchPool.subscribeMany(SEARCH_RELAYS, [hashtagFilter], {
             onevent(event) {
                 // Client-side time filter
                 if (timeLimit > 0 && event.created_at < timeLimit) {
@@ -1422,7 +1501,7 @@ export async function performStreamingUserSearch(query) {
         let userResultCount = 0;
 
         await new Promise((resolve) => {
-            const userSub = pool.subscribeMany(SEARCH_RELAYS, [userFilter], {
+            const userSub = searchPool.subscribeMany(SEARCH_RELAYS, [userFilter], {
                 onevent(event) {
                     if (timeLimit > 0 && event.created_at < timeLimit) return;
                     userResultCount++;
@@ -1481,7 +1560,7 @@ export async function performStreamingUserSearch(query) {
         let profileResultCount = 0;
 
         await new Promise((resolve) => {
-            const profileSub = pool.subscribeMany(SEARCH_RELAYS, [profileFilter], {
+            const profileSub = searchPool.subscribeMany(SEARCH_RELAYS, [profileFilter], {
                 onevent(event) {
                     try {
                         const profile = JSON.parse(event.content);
@@ -1533,7 +1612,7 @@ export async function performStreamingUserSearch(query) {
             let postsResultCount = 0;
 
             await new Promise((resolve) => {
-                const postsSub = pool.subscribeMany(SEARCH_RELAYS, [postsFilter], {
+                const postsSub = searchPool.subscribeMany(SEARCH_RELAYS, [postsFilter], {
                     onevent(event) {
                         if (timeLimit > 0 && event.created_at < timeLimit) return;
                         postsResultCount++;
@@ -1579,7 +1658,7 @@ export async function performStreamingThreadsSearch(query) {
     });
 
     // Search network-wide relays for threads
-    const threadSub = pool.subscribeMany(SEARCH_RELAYS, [
+    const threadSub = searchPool.subscribeMany(SEARCH_RELAYS, [
         {
             kinds: [1],
             limit: 50,
@@ -1591,7 +1670,7 @@ export async function performStreamingThreadsSearch(query) {
             if (timeLimit > 0 && event.created_at < timeLimit) {
                 return;
             }
-            if (isThread(event) && (matchesQuery(event, parsedQuery) || matchesQuery(event, parsedQuery, true))) {
+            if (isThread(event) && matchesQuery(event, parsedQuery)) {
                 addSearchResult(event);
             }
         },
@@ -1636,7 +1715,7 @@ export async function performStreamingArticlesSearch(query) {
 
     updateSearchStatus('Searching articles...');
 
-    const articleSub = pool.subscribeMany(SEARCH_RELAYS, [
+    const articleSub = searchPool.subscribeMany(SEARCH_RELAYS, [
         {
             kinds: [30023], // NIP-23 long-form articles
             limit: 20,
@@ -1837,8 +1916,9 @@ function matchesQuery(post, parsedQuery, useFuzzy = false) {
 // Global variables for streaming search
 let currentSearchResults = [];
 let currentSearchQuery = '';
-let currentSortMode = 'engagement'; // 'stream', 'date', 'engagement'
+let currentSortMode = 'date'; // 'stream', 'date', 'engagement' - default to date for fast initial render
 let searchEngagementData = {}; // Stores engagement counts for search results
+let engagementFetchedIds = new Set(); // Track which post IDs we've fetched engagement for
 let displayedResultsCount = 0; // How many results are currently displayed
 const RESULTS_PER_PAGE = 50; // Show 50 results at a time
 
@@ -1846,9 +1926,12 @@ const RESULTS_PER_PAGE = 50; // Show 50 results at a time
 export function initializeSearchResults(query) {
     currentSearchResults = [];
     currentSearchQuery = query;
-    currentSortMode = 'engagement';
+    currentSortMode = 'date'; // Default to date for fast initial render
     searchEngagementData = {}; // Reset engagement data for new search
+    engagementFetchedIds = new Set(); // Reset fetched IDs tracker
+    engagementFetchComplete = false; // Reset engagement fetch status
     displayedResultsCount = RESULTS_PER_PAGE; // Reset to first page
+    currentSearchPhase = ''; // Reset search phase
 
     const searchResults = document.getElementById('searchResults');
     if (!searchResults) return;
@@ -1880,13 +1963,12 @@ export function initializeSearchResults(query) {
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <div style="color: #FF6600; font-weight: bold;" id="searchResultsCount">Searching for "${escapeHtml(query)}"...</div>
                 <div style="display: none;" id="sortControls">
-                    <button id="sortEngagement" onclick="setSortMode('engagement')" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">By Engagement</button>
-                    <button id="sortDate" onclick="setSortMode('date')" style="background: transparent; border: 1px solid #333; color: #fff; padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">By Date</button>
+                    <button id="sortDate" onclick="setSortMode('date')" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">By Date</button>
+                    <button id="sortEngagement" onclick="setSortMode('engagement')" style="background: transparent; border: 1px solid #333; color: #fff; padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">By Engagement</button>
                     <button id="sortStream" onclick="setSortMode('stream')" style="background: transparent; border: 1px solid #333; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">As Found</button>
                 </div>
             </div>
             ${suggestionHtml}
-            <div style="color: #666; font-size: 14px;" id="searchStatus">Searching cached posts and relays...</div>
         </div>
         <div id="searchResultsList"></div>
     `;
@@ -1894,6 +1976,10 @@ export function initializeSearchResults(query) {
     // Show skeleton loading in search results
     showSkeletonLoader('searchResultsList', 4);
 }
+
+// Throttle counter updates to avoid UI thrashing (max once per 100ms)
+let lastCountUpdate = 0;
+const COUNT_UPDATE_THROTTLE = 100; // ms
 
 // Add a single result to the streaming display
 export async function addSearchResult(post) {
@@ -1908,30 +1994,34 @@ export async function addSearchResult(post) {
     const State = await import('./state.js');
     State.eventCache[post.id] = post;
 
-    // Fetch profile if needed
-    if (!profileCache[post.pubkey]) {
-        const Posts = await import('./posts.js');
-        await Posts.fetchProfiles([post.pubkey]);
+    // Throttled count update - don't hammer the DOM
+    const now = Date.now();
+    if (now - lastCountUpdate > COUNT_UPDATE_THROTTLE) {
+        lastCountUpdate = now;
+        updateSearchResultsCount();
+
+        // Show sort controls after first few results
+        if (currentSearchResults.length >= 3) {
+            const sortControls = document.getElementById('sortControls');
+            if (sortControls) sortControls.style.display = 'block';
+        }
     }
 
-    // Update count
-    updateSearchResultsCount();
-
-    // Show sort controls after first few results
-    if (currentSearchResults.length >= 3) {
-        document.getElementById('sortControls').style.display = 'block';
-    }
-
-    // Render results based on current sort mode
-    await renderSearchResults();
+    // NOTE: Don't render here - rendering happens after search completes
+    // This prevents 500+ full re-renders during search
 }
 
-// Update the results count display
+// Update the results count display (during search - shows count with current phase)
 function updateSearchResultsCount() {
     const countEl = document.getElementById('searchResultsCount');
     if (countEl) {
         const count = currentSearchResults.length;
-        countEl.textContent = `Found ${count} result${count === 1 ? '' : 's'} for "${escapeHtml(currentSearchQuery)}"`;
+        // Combine count with current search phase if available
+        if (currentSearchPhase && !currentSearchPhase.startsWith('Found') && !currentSearchPhase.startsWith('No results')) {
+            countEl.textContent = `Finding ${count} result${count === 1 ? '' : 's'} - ${currentSearchPhase.toLowerCase()}`;
+        } else {
+            countEl.textContent = `Finding ${count} result${count === 1 ? '' : 's'} for "${currentSearchQuery}"...`;
+        }
     }
 }
 
@@ -1953,13 +2043,39 @@ export async function setSortMode(mode) {
         activeBtn.style.color = '#000';
     }
 
-    // Fetch engagement data if switching to engagement mode and not already fetched
-    if (mode === 'engagement' && currentSearchResults.length > 0 && Object.keys(searchEngagementData).length === 0) {
-        updateSearchStatus('Fetching engagement data...');
-        const Posts = await import('./posts.js');
-        const postIds = currentSearchResults.map(post => post.id);
-        searchEngagementData = await Posts.fetchEngagementCounts(postIds);
-        console.log('📊 Engagement data fetched for', postIds.length, 'search results');
+    // If switching to engagement mode, we need engagement data for all results to sort properly
+    if (mode === 'engagement' && currentSearchResults.length > 0) {
+        // Check how many results still need engagement data
+        const unfetchedIds = currentSearchResults
+            .map(post => post.id)
+            .filter(id => !engagementFetchedIds.has(id));
+
+        if (unfetchedIds.length > 0) {
+            updateSearchStatus(`Fetching engagement data (${unfetchedIds.length} posts)...`);
+
+            // Batch fetch in groups of 50 to avoid overwhelming relays
+            const BATCH_SIZE = 50;
+            const Posts = await import('./posts.js');
+
+            for (let i = 0; i < unfetchedIds.length; i += BATCH_SIZE) {
+                const batch = unfetchedIds.slice(i, i + BATCH_SIZE);
+                const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+                const totalBatches = Math.ceil(unfetchedIds.length / BATCH_SIZE);
+                updateSearchStatus(`Fetching engagement data (batch ${batchNum}/${totalBatches})...`);
+
+                try {
+                    const batchData = await Posts.fetchEngagementCounts(batch, SEARCH_RELAYS);
+                    Object.assign(searchEngagementData, batchData);
+                    batch.forEach(id => engagementFetchedIds.add(id));
+                } catch (error) {
+                    console.error(`[Search] Batch ${batchNum} engagement fetch failed:`, error);
+                }
+            }
+
+            engagementFetchComplete = true;
+            console.log('[Search] Engagement data fetched for', unfetchedIds.length, 'search results');
+        }
+        updateSearchStatus(`Found ${currentSearchResults.length} result${currentSearchResults.length === 1 ? '' : 's'} for "${currentSearchQuery}" (sorted by engagement)`);
     }
 
     await renderSearchResults();
@@ -2004,15 +2120,14 @@ async function renderSearchResults() {
     const resultsToShow = sortedResults.slice(0, displayedResultsCount);
     const hasMoreResults = sortedResults.length > displayedResultsCount;
 
-    // Fetch missing profiles before rendering
-    const missingPubkeys = resultsToShow
+    // Fetch missing profiles before rendering (use SEARCH_RELAYS with longer timeout)
+    const missingPubkeys = [...new Set(resultsToShow
         .filter(post => !profileCache[post.pubkey])
-        .map(post => post.pubkey);
+        .map(post => post.pubkey))];
 
     if (missingPubkeys.length > 0) {
         try {
-            const Posts = await import('./posts.js');
-            await Posts.fetchProfiles([...new Set(missingPubkeys)]); // Dedupe pubkeys
+            await fetchSearchProfiles(missingPubkeys);
         } catch (e) {
             console.warn('[Search] Error fetching profiles:', e);
         }
@@ -2056,10 +2171,10 @@ async function renderSearchResults() {
         console.warn('[Search] Embedded notes processing error:', e);
     }
 
-    // Add trust badges to search results
+    // Add trust badges to search results (use incremental which batch-fetches scores)
     try {
         const TrustBadges = await import('./trust-badges.js');
-        await TrustBadges.addTrustBadgesToContainer(resultsEl);
+        TrustBadges.refreshTrustBadgesIncremental(resultsEl);
     } catch (e) {
         console.warn('[Search] Trust badges error:', e);
     }
@@ -2067,7 +2182,12 @@ async function renderSearchResults() {
 
 // Load more search results
 export async function loadMoreSearchResults() {
+    const previousCount = displayedResultsCount;
     displayedResultsCount += RESULTS_PER_PAGE;
+
+    // Fetch engagement for the new page of results before rendering
+    await fetchEngagementForRange(previousCount, displayedResultsCount);
+
     await renderSearchResults();
 
     // Scroll to where new results start (optional - can remove if jarring)
@@ -2155,18 +2275,90 @@ export async function displaySearchResults(results, query) {
         await addSearchResult(result);
     }
 
-    updateSearchStatus('Search completed');
+    updateSearchStatus(`Found ${currentSearchResults.length} result${currentSearchResults.length === 1 ? '' : 's'} for "${query}"`);
 }
 
-// Update search status message
+// Update search status message (now updates the main header)
 export function updateSearchStatus(message) {
-    const statusEl = document.getElementById('searchStatus');
-    if (statusEl) {
-        statusEl.textContent = message;
+    // Track the current search phase for combining with count
+    currentSearchPhase = message;
+
+    // Status is now shown in the main searchResultsCount element
+    const countEl = document.getElementById('searchResultsCount');
+    if (countEl && message) {
+        countEl.textContent = message;
     }
 }
 
 // ==================== UTILITY FUNCTIONS ====================
+
+// Fetch profiles for search results using SEARCH_RELAYS (same relays that returned posts)
+// Uses longer timeout than default fetchProfiles since search results may be from less common relays
+async function fetchSearchProfiles(pubkeys) {
+    if (!pubkeys || pubkeys.length === 0) return;
+
+    // Filter out pubkeys we already have profiles for
+    const unknownPubkeys = pubkeys.filter(pk => !profileCache[pk]);
+    if (unknownPubkeys.length === 0) return;
+
+    console.log(`[Search] Fetching profiles for ${unknownPubkeys.length} users from SEARCH_RELAYS`);
+
+    try {
+        await new Promise((resolve) => {
+            let profilesReceived = 0;
+            const foundPubkeys = new Set();
+
+            const sub = pool.subscribeMany(SEARCH_RELAYS, [
+                {
+                    kinds: [0], // User metadata
+                    authors: unknownPubkeys
+                }
+            ], {
+                onevent(event) {
+                    try {
+                        // Skip if we already processed this pubkey
+                        if (foundPubkeys.has(event.pubkey)) {
+                            return;
+                        }
+
+                        const profile = JSON.parse(event.content);
+                        profileCache[event.pubkey] = {
+                            ...profile,
+                            pubkey: event.pubkey,
+                            created_at: event.created_at
+                        };
+
+                        foundPubkeys.add(event.pubkey);
+                        profilesReceived++;
+
+                        // Early termination: close as soon as all profiles found
+                        if (profilesReceived >= unknownPubkeys.length) {
+                            console.log(`[Search] All ${profilesReceived} profiles found`);
+                            sub.close();
+                            resolve();
+                        }
+                    } catch (error) {
+                        console.error('[Search] Failed to parse profile:', error);
+                    }
+                },
+                oneose() {
+                    console.log(`[Search] Profile fetch complete: ${profilesReceived}/${unknownPubkeys.length}`);
+                    sub.close();
+                    resolve();
+                }
+            });
+
+            // 5-second timeout for search profiles (longer than default)
+            setTimeout(() => {
+                console.log(`[Search] Profile fetch timeout: ${profilesReceived}/${unknownPubkeys.length}`);
+                sub.close();
+                resolve();
+            }, 5000);
+        });
+    } catch (error) {
+        console.error('[Search] Error fetching profiles:', error);
+    }
+}
 
 // Get feed authors for search (import from utils)
 function getFeedAuthors() {
