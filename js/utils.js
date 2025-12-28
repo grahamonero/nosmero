@@ -574,9 +574,9 @@ async function fetchEventById(eventId, relayHints = []) {
 
         // Combine relay hints with user's read relays, prioritizing hints
         // Also add some fallback discovery relays for better coverage
+        // NOTE: relay.nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
         const fallbackRelays = [
             'wss://relay.damus.io',
-            'wss://relay.nostr.band',
             'wss://nos.lol',
             'wss://relay.snort.social'
         ];

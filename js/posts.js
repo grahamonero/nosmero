@@ -11,9 +11,9 @@ export const POSTS_PER_PAGE = 10;
 export const MAX_CONTENT_LENGTH = 4000;
 
 // Major public relays for fetching parent posts (replies could be from any user)
+// NOTE: relay.nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
 const PARENT_POST_RELAYS = [
     'wss://relay.damus.io',
-    'wss://relay.nostr.band',
     'wss://nos.lol',
     'wss://relay.snort.social',
     'wss://nostr.wine',
@@ -3695,11 +3695,11 @@ export async function fetchEngagementCounts(postIds, customRelays = null) {
         }
 
         // Use custom relays if provided, otherwise use major public relays
+        // NOTE: nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
         const relays = customRelays || [
             'wss://relay.damus.io',
             'wss://nos.lol',
-            'wss://relay.primal.net',
-            'wss://nostr.band'
+            'wss://relay.primal.net'
         ];
 
         const counts = {};
@@ -3990,11 +3990,11 @@ export async function fetchProfiles(pubkeys) {
         }
 
         // Use major public relays for fast profile fetching (not user's NIP-65 relays)
+        // NOTE: nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
         const majorRelays = [
             'wss://relay.damus.io',
             'wss://nos.lol',
-            'wss://relay.primal.net',
-            'wss://nostr.band'
+            'wss://relay.primal.net'
         ];
 
         console.log('📡 Querying major public relays for profiles');
@@ -4079,7 +4079,8 @@ async function fetchMissingProfilesViaNIP65(missingPubkeys) {
         console.log(`🔍 Fetching NIP-65 relay lists for ${missingPubkeys.length} missing users`);
 
         // Step 1: Query major relays for NIP-65 relay lists (kind 10002)
-        const majorRelays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://nostr.band'];
+        // NOTE: nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
+        const majorRelays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
         const userRelayLists = {};
 
         await new Promise((resolve) => {
@@ -4902,15 +4903,54 @@ export function initComposeToolbar() {
         button.addEventListener('click', handleToolbarClick);
     });
 
-    // Also use MutationObserver for dynamically added toolbars
+    // Wrap emojis in spans for click detection
+    document.querySelectorAll('.emoji-grid').forEach(grid => {
+        if (!grid.dataset.wrapped) {
+            grid.dataset.wrapped = 'true';
+            const emojis = [...grid.textContent];
+            grid.innerHTML = emojis.map(e => `<span class="emoji">${e}</span>`).join('');
+        }
+    });
+
+    // Emoji picker click handler - use event delegation
+    document.addEventListener('click', (e) => {
+        // Check if clicked on an emoji span
+        if (e.target.classList.contains('emoji')) {
+            const emoji = e.target.textContent;
+            const picker = e.target.closest('.emoji-picker');
+            const composeArea = picker?.closest('.compose-area, #compose');
+            const textarea = composeArea?.querySelector('.compose-textarea');
+            if (textarea && emoji) {
+                insertEmoji(textarea, emoji);
+                picker.style.display = 'none';
+            }
+            return;
+        }
+
+        // Close emoji picker when clicking outside
+        if (!e.target.closest('.emoji-picker') && !e.target.closest('[data-format="emoji"]')) {
+            document.querySelectorAll('.emoji-picker').forEach(p => p.style.display = 'none');
+        }
+    });
+
+    // Also use MutationObserver for dynamically added toolbars and emoji grids
     const observer = new MutationObserver((mutations) => {
         mutations.forEach(mutation => {
             mutation.addedNodes.forEach(node => {
                 if (node.nodeType === 1) {
+                    // Bind toolbar buttons
                     node.querySelectorAll?.('.compose-toolbar button[data-format]')?.forEach(btn => {
                         if (!btn.dataset.toolbarBound) {
                             btn.dataset.toolbarBound = 'true';
                             btn.addEventListener('click', handleToolbarClick);
+                        }
+                    });
+                    // Wrap emoji grids
+                    node.querySelectorAll?.('.emoji-grid')?.forEach(grid => {
+                        if (!grid.dataset.wrapped) {
+                            grid.dataset.wrapped = 'true';
+                            const emojis = [...grid.textContent];
+                            grid.innerHTML = emojis.map(e => `<span class="emoji">${e}</span>`).join('');
                         }
                     });
                 }
@@ -4933,10 +4973,39 @@ function handleToolbarClick(e) {
 
     if (format === 'preview') {
         toggleComposePreview(composeArea);
+    } else if (format === 'emoji') {
+        toggleEmojiPicker(composeArea);
     } else {
         const textarea = composeArea.querySelector('.compose-textarea');
         formatText(textarea, format);
     }
+}
+
+/**
+ * Toggle emoji picker visibility
+ */
+function toggleEmojiPicker(composeArea) {
+    const picker = composeArea.querySelector('.emoji-picker');
+    if (!picker) return;
+
+    const isVisible = picker.style.display !== 'none';
+    picker.style.display = isVisible ? 'none' : 'block';
+}
+
+/**
+ * Insert emoji at cursor position
+ */
+function insertEmoji(textarea, emoji) {
+    if (!textarea || !emoji) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = textarea.value.substring(0, start);
+    const after = textarea.value.substring(end);
+
+    textarea.value = before + emoji + after;
+    textarea.focus();
+    textarea.setSelectionRange(start + emoji.length, start + emoji.length);
 }
 
 // Initialize toolbar when DOM is ready
