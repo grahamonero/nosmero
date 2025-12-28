@@ -7,10 +7,10 @@ import * as Relays from './relays.js';
 import * as Utils from './utils.js';
 
 // Livestream-specific relays (known to have NIP-53 events)
+// NOTE: relay.nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
 const LIVESTREAM_RELAYS = [
     'wss://relay.damus.io',
     'wss://nos.lol',
-    'wss://relay.nostr.band',
     'wss://relay.snort.social',
     'wss://nostr.wine',
     'wss://purplepag.es',

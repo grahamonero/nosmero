@@ -4,20 +4,20 @@
 import * as State from './state.js';
 
 // Default relays configuration
+// NOTE: relay.nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
 export const DEFAULT_RELAYS = [
     'wss://nos.lol',
     'wss://relay.damus.io',
     'wss://purplepag.es',
-    'wss://relay.nostr.band',
     'wss://relay.snort.social',
     'wss://nostr.wine'
 ];
 
 // Search-optimized relays with NIP-50 support prioritized
 // Used for network-wide search to get results regardless of user's follow count
+// NOTE: relay.nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
 export const SEARCH_RELAYS = [
     // NIP-50 search relays (verified support)
-    'wss://relay.nostr.band',
     'wss://search.nos.today',
     'wss://relay.ditto.pub',
     'wss://relay.davidebtc.me',
@@ -42,8 +42,8 @@ export const SEARCH_RELAYS = [
 
 // Aggregating relays for social graph queries (followers/following)
 // These relays index contact lists broadly, providing comprehensive follower data
+// NOTE: relay.nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
 export const SOCIAL_GRAPH_RELAYS = [
-    'wss://relay.nostr.band',
     'wss://relay.primal.net',
     'wss://relay.damus.io',
     'wss://nos.lol',
@@ -110,11 +110,11 @@ const RELAY_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 const MAX_OUTBOX_RELAYS = 5; // Limit relays per user to avoid too many connections
 
 // Major relays for discovering NIP-65 relay lists
+// NOTE: relay.nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
 const DISCOVERY_RELAYS = [
     'wss://purplepag.es',
     'wss://relay.damus.io',
-    'wss://nos.lol',
-    'wss://relay.nostr.band'
+    'wss://nos.lol'
 ];
 
 /**

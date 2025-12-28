@@ -714,6 +714,12 @@ export async function searchContent(query) {
             since: Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60) // Last 30 days
         });
 
+        // Initialize search pool if needed (for trending feed which calls this directly)
+        if (!searchPool) {
+            searchPool = new window.NostrTools.SimplePool();
+            console.log('[Search] Created search pool for content search');
+        }
+
         const searchPromises = searchFilters.map(filter => {
             return new Promise((resolve) => {
                 const tempResults = [];
@@ -1005,9 +1011,15 @@ export async function searchArticles(query) {
 // Search for hashtags
 export async function searchHashtag(hashtag) {
     const cleanTag = hashtag.replace('#', '').toLowerCase();
-    
+
     try {
         const results = [];
+
+        // Initialize search pool if needed (for trending feed which calls this directly)
+        if (!searchPool) {
+            searchPool = new window.NostrTools.SimplePool();
+            console.log('[Search] Created search pool for hashtag search');
+        }
 
         // Search for posts with this hashtag across network-wide relays
         const hashtagSub = searchPool.subscribeMany(SEARCH_RELAYS, [
@@ -2238,12 +2250,12 @@ async function retryUnresolvedMentions(container) {
     console.log(`[Search] Retrying ${pubkeysToRetry.size} unresolved mention profiles in background...`);
 
     // Use main relays for retry (broader coverage)
+    // NOTE: relay.nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
     const RETRY_RELAYS = [
         'wss://relay.damus.io',
         'wss://nos.lol',
         'wss://relay.primal.net',
-        'wss://purplepag.es',
-        'wss://relay.nostr.band'
+        'wss://purplepag.es'
     ];
 
     try {

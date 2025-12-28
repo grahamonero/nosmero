@@ -30,9 +30,9 @@ const LIMITS = Object.freeze({
 });
 
 // Fallback relays for better coverage when user relays fail
+// NOTE: relay.nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
 const FALLBACK_RELAYS = Object.freeze([
     'wss://relay.damus.io',
-    'wss://relay.nostr.band',
     'wss://nos.lol',
     'wss://relay.snort.social'
 ]);
@@ -2013,7 +2013,11 @@ const RightPanel = {
                 <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
                 <button type="button" data-format="quote" title="Quote">"</button>
                 <button type="button" data-format="list" title="Bullet list">•</button>
+                <button type="button" data-format="emoji" title="Add emoji">😀</button>
                 <button type="button" data-format="preview" title="Preview" class="preview-btn">Preview</button>
+            </div>
+            <div id="panelEmojiPicker" class="emoji-picker" style="display: none;">
+                <div class="emoji-grid">😀😃😄😁😅😂🤣😊😇🙂😉😌😍🥰😘😗😋😛😜🤪😎🤩🥳😏😒😔😟😕🙁😣😢😭😤😠😡🤬😱😨😰🤔🤫🤭🤥😶😐😑🙄😬😮😲🥱😴🤤😷🤒🤕🤢🤮🤧🥵🥶🥴😵🤯🤠🥳🥸😎🤓🧐😈👿👋🤚✋🖐️👌🤌✌️🤞🤟🤘🤙👈👉👆👇☝️👍👎✊👊🤛🤜👏🙌👐🤝🙏💪🦾❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝✨⭐🌟💫🔥💥💢💦💨🎉🎊🎁🏆🥇🥈🥉</div>
             </div>
             <div style="text-align: right; color: var(--text-muted); font-size: 12px; margin-top: 4px;">
                 <span id="panelCharCount">0/4000</span>
