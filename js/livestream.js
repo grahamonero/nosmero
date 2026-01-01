@@ -1214,7 +1214,7 @@ export async function showTipModal() {
                     </div>
                 ` : `
                     <div class="wallet-warning">
-                        Wallet not unlocked. <a href="#" onclick="openWalletModal(); return false;">Open wallet</a> to send tips.
+                        Tip Jar not unlocked. <a href="#" onclick="openWalletModal(); return false;">Open Tip Jar</a> to send tips.
                     </div>
                 `}
             </div>

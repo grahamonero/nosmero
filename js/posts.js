@@ -4528,7 +4528,7 @@ function updateMoneroInputHint(input, hintType) {
     hint.style.cssText = 'font-size: 11px; color: #888; margin-top: 4px; cursor: pointer;';
 
     if (hintType === 'unlock') {
-        hint.innerHTML = '🔒 <span style="text-decoration: underline;">Unlock wallet</span> to auto-fill address';
+        hint.innerHTML = '🔒 <span style="text-decoration: underline;">Unlock Tip Jar</span> to auto-fill address';
         hint.onclick = async () => {
             // Trigger wallet unlock
             if (window.WalletModal?.show) {

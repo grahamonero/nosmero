@@ -698,7 +698,7 @@
         <div id="loadingView" class="wallet-view active">
             <div style="text-align: center; padding: 60px 20px;">
                 <div class="sync-spinner" style="width: 40px; height: 40px; margin: 0 auto 20px;"></div>
-                <p style="color: #999;">Loading wallet...</p>
+                <p style="color: #999;">Loading Tip Jar...</p>
             </div>
         </div>
 
@@ -732,7 +732,7 @@
                 <input type="password" id="confirmPin" class="pin-input" placeholder="Confirm PIN" maxlength="20">
                 <div id="createPinError" class="error-msg" style="display: none; margin-top: 12px;"></div>
                 <br><br>
-                <button onclick="walletPage.createWallet()" class="unlock-btn" style="width: 100%;">Create Wallet</button>
+                <button onclick="walletPage.createWallet()" class="unlock-btn" style="width: 100%;">Create Tip Jar</button>
             </div>
         </div>
 
@@ -795,7 +795,7 @@
                     <input type="password" id="restorePinConfirm" class="pin-input" placeholder="Confirm PIN" maxlength="20" style="width: 100%;">
                 </div>
                 <div id="restoreError" class="error-msg" style="display: none; margin-bottom: 12px;"></div>
-                <button id="restoreBtn" onclick="walletPage.restoreWallet()" class="unlock-btn" style="width: 100%;">Restore Wallet</button>
+                <button id="restoreBtn" onclick="walletPage.restoreWallet()" class="unlock-btn" style="width: 100%;">Restore Tip Jar</button>
             </div>
         </div>
 
@@ -881,7 +881,7 @@
             <!-- Quick Actions -->
             <div class="quick-actions">
                 <button onclick="walletPage.showSeed()" class="quick-action-btn">🔑 View Seed Phrase</button>
-                <button onclick="walletPage.deleteWallet()" class="quick-action-btn" style="color: #ff6b6b; border-color: #ff6b6b33;">🗑️ Delete Wallet</button>
+                <button onclick="walletPage.deleteWallet()" class="quick-action-btn" style="color: #ff6b6b; border-color: #ff6b6b33;">🗑️ Delete Tip Jar</button>
             </div>
         </div>
 
@@ -1868,11 +1868,11 @@
             },
 
             async deleteWallet() {
-                if (!confirm('Delete wallet? Cannot be undone without seed phrase!')) return;
+                if (!confirm('Delete Tip Jar? Cannot be undone without seed phrase!')) return;
                 if (!confirm('FINAL WARNING: All funds lost without seed. Continue?')) return;
 
                 await Wallet.delete_();
-                window.showToast?.('Wallet deleted', 'info');
+                window.showToast?.('Tip Jar deleted', 'info');
                 this.showView('noWalletView');
             },
 
@@ -1974,7 +1974,7 @@
 
                 this.tempSeed = null;
                 this.tempPin = null;
-                window.showToast?.('Wallet created!', 'success');
+                window.showToast?.('Tip Jar created!', 'success');
                 await this.showDashboard();
             },
 
@@ -2022,14 +2022,14 @@
 
                 try {
                     await Wallet.restore(words.join(' '), pin, height);
-                    window.showToast?.('Wallet restored!', 'success');
+                    window.showToast?.('Tip Jar restored!', 'success');
                     await this.showDashboard();
                 } catch (err) {
                     console.error('[WalletPage] Restore failed:', err);
                     errorEl.textContent = err.message || 'Failed to restore';
                     errorEl.style.display = 'block';
                 } finally {
-                    btn.textContent = 'Restore Wallet';
+                    btn.textContent = 'Restore Tip Jar';
                     btn.disabled = false;
                 }
             }

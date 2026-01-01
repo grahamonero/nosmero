@@ -185,8 +185,8 @@ function renderPaymentMethodSelection(paywall, hasWallet, isUnlocked) {
                     <button class="paywall-method-btn recommended" onclick="NostrPaywall.selectPaymentMethod('nosmero')">
                         <span class="method-icon">⚡</span>
                         <span class="method-details">
-                            <span class="method-title">Nosmero Wallet</span>
-                            <span class="method-desc">${isUnlocked ? 'Instant unlock' : 'Unlock wallet first'}</span>
+                            <span class="method-title">Nosmero Tip Jar</span>
+                            <span class="method-desc">${isUnlocked ? 'Instant unlock' : 'Unlock Tip Jar first'}</span>
                         </span>
                         <span class="method-badge">Instant</span>
                     </button>
@@ -194,7 +194,7 @@ function renderPaymentMethodSelection(paywall, hasWallet, isUnlocked) {
                     <a href="/wallet.html" class="paywall-method-btn setup">
                         <span class="method-icon">💰</span>
                         <span class="method-details">
-                            <span class="method-title">Set Up Nosmero Wallet</span>
+                            <span class="method-title">Set Up Nosmero Tip Jar</span>
                             <span class="method-desc">Recommended for instant unlocks</span>
                         </span>
                     </a>
@@ -271,7 +271,7 @@ function showWalletPinPrompt() {
 
     content.innerHTML = `
         <div class="paywall-modal-body">
-            <p style="color: var(--text-secondary); margin-bottom: 16px;">Enter your wallet PIN to continue</p>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">Enter your Tip Jar PIN to continue</p>
             <input type="password" id="paywallWalletPin" placeholder="Enter PIN"
                 style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 16px; text-align: center; letter-spacing: 4px;"
                 maxlength="20" inputmode="numeric">
@@ -279,7 +279,7 @@ function showWalletPinPrompt() {
         </div>
         <div class="paywall-modal-footer">
             <button class="paywall-modal-btn cancel" onclick="NostrPaywall.goBackToMethodSelection()">Back</button>
-            <button class="paywall-modal-btn confirm" onclick="NostrPaywall.submitWalletPin()">Unlock Wallet</button>
+            <button class="paywall-modal-btn confirm" onclick="NostrPaywall.submitWalletPin()">Unlock Tip Jar</button>
         </div>
     `;
 
@@ -1242,7 +1242,7 @@ export async function togglePaywall(enabled) {
 
             // Show helpful error
             const errorMsg = 'To create paywalled content, you need a Monero address. Either:\n\n' +
-                '• Set up a Nosmero wallet (recommended)\n' +
+                '• Set up a Nosmero Tip Jar (recommended)\n' +
                 '• Enter your XMR address in the field above';
 
             if (typeof UI !== 'undefined' && UI.showErrorToast) {

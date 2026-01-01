@@ -180,7 +180,7 @@ export async function openWalletModal(options = {}) {
 
     // Check if user is logged into Nostr
     if (!State.publicKey) {
-        renderError('Please log in to use the tip jar.');
+        renderError('Please log in to use the Tip Jar.');
         return;
     }
 
@@ -217,7 +217,7 @@ export function lockWallet() {
     }
     showLockButton(false);
     renderLockedView();
-    showToast('Tip jar locked', 'info');
+    showToast('Tip Jar locked', 'info');
 }
 
 /**
@@ -261,7 +261,7 @@ function renderLoading() {
     getContentEl().innerHTML = `
         <div style="text-align: center; padding: 60px 20px;">
             <div style="width: 40px; height: 40px; margin: 0 auto 20px; border: 3px solid #333; border-top-color: #FF6600; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-            <p style="color: #999;">Loading tip jar...</p>
+            <p style="color: #999;">Loading Tip Jar...</p>
         </div>
     `;
 }
@@ -441,7 +441,7 @@ async function renderDashboard() {
         <!-- Quick Actions -->
         <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
             <button onclick="window.WalletModal.showSeedView()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #333; border-radius: 8px; color: #999; cursor: pointer; font-size: 14px; margin-bottom: 10px;">🔑 View Seed Phrase</button>
-            <button onclick="window.WalletModal.deleteWallet()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #ff6b6b33; border-radius: 8px; color: #ff6b6b; cursor: pointer; font-size: 14px;">🗑️ Delete Wallet</button>
+            <button onclick="window.WalletModal.deleteWallet()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #ff6b6b33; border-radius: 8px; color: #ff6b6b; cursor: pointer; font-size: 14px;">🗑️ Delete Tip Jar</button>
         </div>
     `;
 
@@ -1560,11 +1560,11 @@ export async function copySeed() {
  * Delete wallet
  */
 export async function deleteWallet() {
-    if (!confirm('Delete wallet? Cannot be undone without seed phrase!')) return;
+    if (!confirm('Delete Tip Jar? Cannot be undone without seed phrase!')) return;
     if (!confirm('FINAL WARNING: All funds lost without seed. Continue?')) return;
 
     await Wallet.delete_();
-    showToast('Wallet deleted', 'info');
+    showToast('Tip Jar deleted', 'info');
     renderNoWalletView();
 }
 

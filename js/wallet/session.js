@@ -48,7 +48,7 @@ function updateStatusDisplay(state, data = {}) {
 
     switch (state) {
         case 'no-wallet':
-            statusEl.innerHTML = '💰 Setup Wallet';
+            statusEl.innerHTML = '💰 Setup Tip Jar';
             statusEl.classList.add('no-wallet');
             statusEl.style.display = '';
             statusEl.onclick = () => window.location.href = '/wallet.html';
@@ -56,7 +56,7 @@ function updateStatusDisplay(state, data = {}) {
             break;
 
         case 'locked':
-            statusEl.innerHTML = '🔒 Unlock Wallet';
+            statusEl.innerHTML = '🔒 Unlock Tip Jar';
             statusEl.classList.add('locked');
             statusEl.style.display = '';
             statusEl.onclick = promptUnlock;
@@ -74,7 +74,7 @@ function updateStatusDisplay(state, data = {}) {
 
         case 'ready':
             const balance = data.balance || '0.00000';
-            statusEl.innerHTML = `🔓 Wallet (${balance} XMR)`;
+            statusEl.innerHTML = `🔓 Tip Jar (${balance} XMR)`;
             statusEl.classList.add('ready');
             statusEl.style.display = '';
             statusEl.onclick = () => window.location.href = '/wallet.html';
@@ -101,7 +101,7 @@ async function promptUnlock() {
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 360px;">
             <div class="modal-header">
-                <h3>🔐 Unlock Wallet</h3>
+                <h3>🔐 Unlock Tip Jar</h3>
                 <button class="modal-close" onclick="document.getElementById('walletUnlockModal').remove()">✕</button>
             </div>
             <div class="modal-body" style="padding: 20px;">

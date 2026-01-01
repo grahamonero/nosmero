@@ -440,11 +440,11 @@ export async function unlockContent(noteId, onProgress = () => {}) {
 
     // Check if wallet is unlocked
     if (!MoneroClient.isWalletUnlocked()) {
-        throw new Error('Wallet must be unlocked to pay');
+        throw new Error('Tip Jar must be unlocked to pay');
     }
 
     // Check balance
-    onProgress({ step: 'checking_balance', message: 'Checking wallet balance...' });
+    onProgress({ step: 'checking_balance', message: 'Checking Tip Jar balance...' });
     const { unlockedBalance } = await MoneroClient.getBalance();
     const priceAtomic = MoneroClient.parseXMR(paywall.priceXmr.toString());
 

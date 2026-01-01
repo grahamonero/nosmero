@@ -180,9 +180,10 @@ function bech32Decode(str) {
     throw new Error('bech32Decode: input must be a non-empty string');
   }
 
-  // Maximum bech32 length is 90 characters per BIP-173
-  if (str.length > 90) {
-    throw new Error('bech32Decode: string too long (max 90 characters)');
+  // BIP-173 specifies 90 chars for Bitcoin addresses, but NIP-49 ncryptsec
+  // is ~162 chars (91 bytes encoded). Limit to 170 for ncryptsec support.
+  if (str.length > 170) {
+    throw new Error('bech32Decode: string too long (max 170 characters)');
   }
 
   // Validate no mixed case

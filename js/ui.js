@@ -657,7 +657,7 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                             }
                         });
                     } else {
-                        showNotification('Wallet not available', 'error');
+                        showNotification('Tip Jar not available', 'error');
                     }
                 };
             }
@@ -3922,7 +3922,7 @@ export function processQueueWithWallet() {
             queueItems: queue
         });
     } else {
-        showErrorToast('Wallet not available');
+        showErrorToast('Tip Jar not available');
     }
 }
 
