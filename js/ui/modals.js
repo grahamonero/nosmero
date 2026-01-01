@@ -781,9 +781,9 @@ async function updateWalletTipButton() {
             status.textContent = 'Create a tip jar to send tips instantly';
         } else if (!isUnlocked) {
             btn.textContent = 'Unlock & Send';
-            status.textContent = 'Enter PIN to unlock wallet';
+            status.textContent = 'Enter PIN to unlock Tip Jar';
         } else {
-            btn.textContent = 'Send from Wallet';
+            btn.textContent = 'Send from Tip Jar';
             const balance = await Wallet.getBalance();
             const availableXMR = Wallet.formatXMR(balance.unlockedBalance);
             status.textContent = `Available: ${availableXMR} XMR`;
@@ -841,7 +841,7 @@ function showWalletPinInput(postId, authorName, moneroAddress, amount, recipient
 
     section.innerHTML = `
         <div style="text-align: center; margin-bottom: 12px;">
-            <span style="color: #FF6600; font-weight: 600;">🔐 Unlock Wallet</span>
+            <span style="color: #FF6600; font-weight: 600;">🔐 Unlock Tip Jar</span>
         </div>
         <input type="password" id="walletTipPin" placeholder="Enter PIN"
                style="width: 100%; padding: 12px; background: #1a1a1a; border: 2px solid #FF6600; border-radius: 8px; color: #fff; text-align: center; font-size: 16px; margin-bottom: 12px;">
@@ -898,7 +898,7 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
     section.innerHTML = `
         <div style="text-align: center; padding: 20px;">
             <div style="color: #FF6600; font-weight: 600; margin-bottom: 12px;">💳 Sending Tip...</div>
-            <div id="walletTipProgress" style="color: #888; font-size: 14px;">Syncing wallet...</div>
+            <div id="walletTipProgress" style="color: #888; font-size: 14px;">Syncing Tip Jar...</div>
         </div>
     `;
 
@@ -906,7 +906,7 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
 
     try {
         // Sync wallet before sending
-        if (progress) progress.textContent = 'Syncing wallet...';
+        if (progress) progress.textContent = 'Syncing Tip Jar...';
         await Wallet.sync();
 
         // Check balance before attempting transaction
@@ -1162,7 +1162,7 @@ function showQueueWalletPinInput(queue) {
 
     section.innerHTML = `
         <div style="text-align: center; margin-bottom: 12px;">
-            <span style="color: #FF6600; font-weight: 600;">🔐 Unlock Wallet</span>
+            <span style="color: #FF6600; font-weight: 600;">🔐 Unlock Tip Jar</span>
         </div>
         <input type="password" id="queueWalletPin" placeholder="Enter PIN"
                style="width: 100%; padding: 12px; background: #1a1a1a; border: 2px solid #FF6600; border-radius: 8px; color: #fff; text-align: center; font-size: 16px; margin-bottom: 12px;">

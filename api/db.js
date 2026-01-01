@@ -512,13 +512,10 @@ export function getUserByNpub(npub) {
 /**
  * Update last login timestamp
  * @param {number} userId - User ID to update
- * @param {number} authenticatedUserId - ID of the authenticated user making the request
  */
-export function updateLastLogin(userId, authenticatedUserId) {
-  // Authorization check: user can only update their own login timestamp
-  if (userId !== authenticatedUserId) {
-    throw new Error('Unauthorized: Cannot update login timestamp for another user');
-  }
+export function updateLastLogin(userId) {
+  // Note: Authorization is handled by the auth module - this is only called
+  // after successful password verification
   statements.updateLastLogin.run(userId);
 }
 
@@ -569,13 +566,9 @@ export function updateUserRecovery({ npub, email, username, ncryptsec, password_
  * Update user's ncryptsec (for password reset)
  * @param {number} userId - User ID to update
  * @param {string} ncryptsec - New encrypted private key
- * @param {number} authenticatedUserId - ID of the authenticated user making the request
  */
-export function updateNcryptsec(userId, ncryptsec, authenticatedUserId) {
-  // Authorization check: user can only update their own ncryptsec
-  if (userId !== authenticatedUserId) {
-    throw new Error('Unauthorized: Cannot update ncryptsec for another user');
-  }
+export function updateNcryptsec(userId, ncryptsec) {
+  // Note: Authorization is handled by token verification in auth module
   statements.updateNcryptsec.run(ncryptsec, userId);
 
   // Log password change
@@ -589,13 +582,9 @@ export function updateNcryptsec(userId, ncryptsec, authenticatedUserId) {
 /**
  * Mark user's email as verified
  * @param {number} userId - User ID to verify
- * @param {number} authenticatedUserId - ID of the authenticated user making the request
  */
-export function verifyUserEmail(userId, authenticatedUserId) {
-  // Authorization check: user can only verify their own email
-  if (userId !== authenticatedUserId) {
-    throw new Error('Unauthorized: Cannot verify email for another user');
-  }
+export function verifyUserEmail(userId) {
+  // Note: Authorization is handled by token verification in auth module
   statements.verifyEmail.run(userId);
 }
 

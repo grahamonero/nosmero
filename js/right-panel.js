@@ -111,6 +111,9 @@ const RightPanel = {
         window.addEventListener('nosmero:login', () => this.loadDefaultContent());
         window.addEventListener('nosmero:logout', () => this.loadDefaultContent());
 
+        // Listen for wallet state changes to update dashboard wallet section
+        window.addEventListener('nosmero:wallet-changed', () => this.refreshWalletSection());
+
         if (DEBUG) console.log('Right panel initialized');
     },
 
@@ -607,7 +610,7 @@ const RightPanel = {
                 <div class="dashboard-section" id="dashboardWallet">
                     <div class="dashboard-section-header">
                         <span class="dashboard-icon">💰</span>
-                        <span class="dashboard-section-title">Wallet</span>
+                        <span class="dashboard-section-title">Tip Jar</span>
                     </div>
                     <div class="dashboard-section-content">
                         <div class="loading-small">Loading...</div>
@@ -671,9 +674,9 @@ const RightPanel = {
                 container.innerHTML = `
                     <div class="dashboard-row">
                         <span class="dashboard-label">Status</span>
-                        <span class="dashboard-value muted">No wallet created</span>
+                        <span class="dashboard-value muted">No Tip Jar created</span>
                     </div>
-                    <button class="dashboard-action-btn" onclick="openWalletModal()">Create Wallet</button>
+                    <button class="dashboard-action-btn" onclick="openWalletModal()">Create Tip Jar</button>
                 `;
                 return;
             }
@@ -686,7 +689,7 @@ const RightPanel = {
                         <span class="dashboard-label">Status</span>
                         <span class="dashboard-value">🔒 Locked</span>
                     </div>
-                    <button class="dashboard-action-btn" onclick="openWalletModal()">Unlock Wallet</button>
+                    <button class="dashboard-action-btn" onclick="openWalletModal()">Unlock Tip Jar</button>
                 `;
                 return;
             }
@@ -694,9 +697,10 @@ const RightPanel = {
             // Wallet is unlocked - get balance
             let balanceHtml = '<span class="dashboard-value muted">--</span>';
             try {
-                const balance = await walletModule.getBalance?.();
-                if (balance !== undefined) {
-                    const formatted = walletModule.formatXMR?.(balance) || (Number(balance) / 1e12).toFixed(4);
+                const balanceData = await walletModule.getBalance?.();
+                if (balanceData !== undefined) {
+                    const bal = balanceData.balance ?? balanceData ?? 0n;
+                    const formatted = walletModule.formatXMR?.(bal) || (Number(bal) / 1e12).toFixed(4);
                     balanceHtml = `<span class="dashboard-value">${formatted} XMR</span>`;
                 }
             } catch (e) {
@@ -719,16 +723,30 @@ const RightPanel = {
                     <span class="dashboard-label">Tips received</span>
                     <span class="dashboard-value">${tipsReceived.count} ${tipsReceived.total ? `(${tipsReceived.total})` : ''}</span>
                 </div>
-                <button class="dashboard-action-btn" onclick="openWalletModal()">Open Wallet</button>
+                <button class="dashboard-action-btn" onclick="openWalletModal()">Open Tip Jar</button>
             `;
         } catch (error) {
             console.error('Error loading wallet section:', error);
             container.innerHTML = `
                 <div class="dashboard-row">
-                    <span class="dashboard-value muted">Error loading wallet</span>
+                    <span class="dashboard-value muted">Error loading Tip Jar</span>
                 </div>
             `;
         }
+    },
+
+    /**
+     * Refresh just the wallet section of the dashboard (called when wallet state changes)
+     */
+    async refreshWalletSection() {
+        // Only refresh if we're on the default view showing the dashboard
+        if (this.currentView !== 'default') return;
+
+        const container = document.querySelector('#dashboardWallet .dashboard-section-content');
+        if (!container) return;
+
+        if (DEBUG) console.log('Right panel: Refreshing wallet section after wallet state change');
+        await this.loadWalletSection();
     },
 
     /**

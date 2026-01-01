@@ -1286,6 +1286,37 @@
             color: #fff;
         }
 
+        /* Emoji Picker */
+        .emoji-picker {
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .emoji-picker .emoji-grid {
+            font-size: 24px;
+            line-height: 1.8;
+            word-wrap: break-word;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+        }
+
+        .emoji-picker .emoji-grid .emoji {
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: background 0.15s ease;
+        }
+
+        .emoji-picker .emoji-grid .emoji:hover {
+            background: rgba(255, 102, 0, 0.3);
+        }
+
         /* Compose Preview */
         .compose-preview {
             background: rgba(255, 255, 255, 0.05);
