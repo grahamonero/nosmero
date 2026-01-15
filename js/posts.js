@@ -5519,110 +5519,135 @@ export function removeMedia(context) {
     currentMediaUrl = null;
 }
 
-// Upload media to nostr.build with NIP-98 authentication
+// Media upload providers - tried in order with fallback
+const mediaProviders = [
+    {
+        name: 'nostr.build',
+        url: 'https://nostr.build/api/v2/upload/files',
+        upload: async function(file) {
+            const authEvent = await createNIP98AuthEvent('https://nostr.build/api/v2/upload/files');
+            const authHeader = 'Nostr ' + btoa(JSON.stringify(authEvent));
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch('https://nostr.build/api/v2/upload/files', {
+                method: 'POST',
+                headers: { 'Authorization': authHeader },
+                body: formData
+            });
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const result = await response.json();
+
+            if (result.data?.[0]?.url) return result.data[0].url;
+            if (result.url) return result.url;
+            throw new Error('No URL in response');
+        }
+    },
+    {
+        name: 'nostrcheck.me',
+        url: 'https://nostrcheck.me/api/v2/media',
+        upload: async function(file) {
+            const authEvent = await createNIP98AuthEvent('https://nostrcheck.me/api/v2/media');
+            const authHeader = 'Nostr ' + btoa(JSON.stringify(authEvent));
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch('https://nostrcheck.me/api/v2/media', {
+                method: 'POST',
+                headers: { 'Authorization': authHeader },
+                body: formData
+            });
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const result = await response.json();
+
+            // NIP-96 response format
+            if (result.nip94_event?.tags) {
+                const urlTag = result.nip94_event.tags.find(t => t[0] === 'url');
+                if (urlTag?.[1]) return urlTag[1];
+            }
+            if (result.url) return result.url;
+            throw new Error('No URL in response');
+        }
+    },
+    {
+        name: 'void.cat',
+        url: 'https://void.cat/upload',
+        upload: async function(file) {
+            // void.cat uses custom headers instead of NIP-98
+            const arrayBuffer = await file.arrayBuffer();
+            const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+            const response = await fetch('https://void.cat/upload', {
+                method: 'POST',
+                headers: {
+                    'V-Content-Type': file.type,
+                    'V-Full-Digest': hashHex,
+                    'V-Filename': file.name
+                },
+                body: file
+            });
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const result = await response.json();
+
+            if (result.file?.url) return result.file.url;
+            if (result.url) return result.url;
+            if (result.id) return `https://void.cat/d/${result.id}`;
+            throw new Error('No URL in response');
+        }
+    }
+];
+
+// Helper to create NIP-98 auth event
+async function createNIP98AuthEvent(url) {
+    const unsignedEvent = {
+        kind: 27235,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+            ['u', url],
+            ['method', 'POST']
+        ],
+        content: ''
+    };
+
+    if (State.getPrivateKeyForSigning() === 'extension' || State.getPrivateKeyForSigning() === 'nsec-app') {
+        if (!window.nostr) throw new Error('window.nostr not available');
+        unsignedEvent.pubkey = State.publicKey;
+        return await window.nostr.signEvent(unsignedEvent);
+    } else {
+        return await Utils.signEvent(unsignedEvent);
+    }
+}
+
+// Upload media with fallback across multiple providers
 async function uploadMediaToBlossom() {
     if (!currentMediaFile) return null;
-    
-    console.log('Starting nostr.build upload for file:', currentMediaFile.name, 'Size:', currentMediaFile.size, 'Type:', currentMediaFile.type);
-    
-    try {
-        // Create NIP-98 auth event
-        let authEvent;
 
-        if (State.getPrivateKeyForSigning() === 'extension' || State.getPrivateKeyForSigning() === 'nsec-app') {
-            // Use window.nostr to sign (browser extension or nsec.app)
-            if (!window.nostr) {
-                throw new Error('window.nostr not available');
-            }
-            
-            const unsignedEvent = {
-                kind: 27235, // NIP-98 HTTP Auth kind
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [
-                    ['u', mediaUploadConfig.uploadUrl],
-                    ['method', 'POST']
-                ],
-                content: '',
-                pubkey: State.publicKey
-            };
-            
-            authEvent = await window.nostr.signEvent(unsignedEvent);
-        } else {
-            // Sign with private key
-            const unsignedEvent = {
-                kind: 27235, // NIP-98 HTTP Auth kind
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [
-                    ['u', mediaUploadConfig.uploadUrl],
-                    ['method', 'POST']
-                ],
-                content: ''
-            };
+    console.log('Starting media upload for file:', currentMediaFile.name, 'Size:', currentMediaFile.size, 'Type:', currentMediaFile.type);
 
-            authEvent = await Utils.signEvent(unsignedEvent);
+    const errors = [];
+
+    for (const provider of mediaProviders) {
+        try {
+            console.log(`Trying ${provider.name}...`);
+            const url = await provider.upload(currentMediaFile);
+            console.log(`Success with ${provider.name}:`, url);
+            currentMediaUrl = url;
+            return url;
+        } catch (error) {
+            console.warn(`${provider.name} failed:`, error.message);
+            errors.push(`${provider.name}: ${error.message}`);
         }
-        
-        console.log('Created NIP-98 auth event:', authEvent);
-        
-        // Convert auth event to base64 for Authorization header
-        const authHeader = 'Nostr ' + btoa(JSON.stringify(authEvent));
-        
-        // Create form data with the file
-        const formData = new FormData();
-        formData.append('file', currentMediaFile);
-        
-        console.log('Uploading to nostr.build:', mediaUploadConfig.uploadUrl);
-        
-        // Perform the upload with NIP-98 auth
-        const uploadResponse = await fetch(mediaUploadConfig.uploadUrl, {
-            method: 'POST',
-            headers: {
-                'Authorization': authHeader
-            },
-            body: formData
-        });
-        
-        console.log('Response status:', uploadResponse.status, uploadResponse.statusText);
-        
-        if (!uploadResponse.ok) {
-            const errorText = await uploadResponse.text();
-            console.error('Upload error:', errorText);
-            throw new Error(`Upload failed: ${uploadResponse.status} - ${errorText}`);
-        }
-        
-        // Parse response
-        const uploadResult = await uploadResponse.json();
-        console.log('Upload result:', uploadResult);
-        
-        // Extract URL from nostr.build response
-        let mediaUrl = null;
-        
-        // Handle different response formats from nostr.build
-        if (uploadResult.url) {
-            mediaUrl = uploadResult.url;
-        } else if (uploadResult.data && Array.isArray(uploadResult.data) && uploadResult.data.length > 0) {
-            mediaUrl = uploadResult.data[0].url || uploadResult.data[0].responsive_url;
-        } else if (uploadResult.nip94_event && uploadResult.nip94_event.tags) {
-            // Extract URL from NIP-94 event tags
-            const urlTag = uploadResult.nip94_event.tags.find(tag => tag[0] === 'url');
-            if (urlTag) {
-                mediaUrl = urlTag[1];
-            }
-        }
-        
-        if (!mediaUrl) {
-            console.error('No media URL found in response:', uploadResult);
-            throw new Error('No media URL returned from nostr.build');
-        }
-        
-        console.log('Upload successful! Media URL:', mediaUrl);
-        currentMediaUrl = mediaUrl;
-        return mediaUrl;
-        
-    } catch (error) {
-        console.error('nostr.build upload error:', error);
-        throw new Error(`Media upload failed: ${error.message}`);
     }
+
+    // All providers failed
+    throw new Error('All upload providers failed: ' + errors.join('; '));
 }
 
 // ==================== POST CREATION ====================

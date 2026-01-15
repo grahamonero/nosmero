@@ -1172,6 +1172,9 @@ const RightPanel = {
             section.innerHTML = '';
         });
 
+        // Clear any pending media upload
+        this.currentPanelMedia = null;
+
         // Show default feed
         if (this.defaultFeed) {
             this.defaultFeed.style.display = '';
@@ -2023,6 +2026,7 @@ const RightPanel = {
                 Replying to: <span id="replyToPreview">Loading...</span>
             </div>` : ''}
             <textarea class="compose-textarea" id="panelComposeText" placeholder="${replyTo ? 'Write your reply...' : 'What\'s happening?'}" maxlength="4000"></textarea>
+            <div id="panelMediaPreview" class="media-preview" style="display: none;"></div>
             <div id="panelComposePreview" class="compose-preview" style="display: none;"></div>
             <div class="compose-toolbar">
                 <button type="button" data-format="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
@@ -2063,10 +2067,242 @@ const RightPanel = {
         // Focus textarea
         textarea?.focus();
 
+        // Setup media input handler
+        const mediaInput = section.querySelector('#panelMediaInput');
+        mediaInput?.addEventListener('change', (e) => {
+            this.handlePanelMediaUpload(e.target);
+        });
+
         // Load reply context if replying
         if (replyTo) {
             this.loadReplyContext(replyTo);
         }
+    },
+
+    // Track current media for panel compose
+    currentPanelMedia: null,
+
+    /**
+     * Handle media file selection in panel compose
+     */
+    handlePanelMediaUpload(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        // Validate file type
+        if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+            window.NostrUtils?.showNotification?.('Please select an image or video file', 'error');
+            input.value = '';
+            return;
+        }
+
+        // Validate file size (50MB max for nostr.build)
+        const maxSize = 50 * 1024 * 1024;
+        if (file.size > maxSize) {
+            window.NostrUtils?.showNotification?.('File size must be less than 50MB', 'error');
+            input.value = '';
+            return;
+        }
+
+        this.currentPanelMedia = file;
+        this.showPanelMediaPreview(file);
+    },
+
+    /**
+     * Show media preview in panel compose
+     */
+    showPanelMediaPreview(file) {
+        const preview = document.getElementById('panelMediaPreview');
+        if (!preview) return;
+
+        const fileSize = (file.size / 1024 / 1024).toFixed(2) + ' MB';
+        const fileType = file.type.startsWith('image/') ? '🖼️' : '🎥';
+
+        preview.innerHTML = `
+            <div class="media-info" style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: var(--card-bg); border-radius: 6px; margin-bottom: 8px;">
+                <span style="font-size: 13px;">${fileType} ${file.name} (${fileSize})</span>
+                <button class="remove-media" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px;" title="Remove media">✕</button>
+            </div>
+            <div id="panelMediaContent" style="max-height: 200px; overflow: hidden; border-radius: 8px;"></div>
+        `;
+
+        // Add remove handler
+        preview.querySelector('.remove-media')?.addEventListener('click', () => {
+            this.removePanelMedia();
+        });
+
+        // Create file preview
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const content = document.getElementById('panelMediaContent');
+            if (!content) return;
+
+            if (file.type.startsWith('image/')) {
+                content.innerHTML = `<img src="${e.target.result}" alt="Preview" style="width: 100%; height: auto; display: block;">`;
+            } else if (file.type.startsWith('video/')) {
+                content.innerHTML = `<video controls style="width: 100%; max-height: 200px;"><source src="${e.target.result}" type="${file.type}"></video>`;
+            }
+        };
+        reader.readAsDataURL(file);
+
+        preview.style.display = 'block';
+    },
+
+    /**
+     * Remove media from panel compose
+     */
+    removePanelMedia() {
+        const preview = document.getElementById('panelMediaPreview');
+        const input = document.getElementById('panelMediaInput');
+
+        if (preview) {
+            preview.style.display = 'none';
+            preview.innerHTML = '';
+        }
+        if (input) input.value = '';
+        this.currentPanelMedia = null;
+    },
+
+    /**
+     * Upload media to nostr.build with NIP-98 auth
+     */
+    // Media upload providers - tried in order with fallback
+    mediaProviders: [
+        {
+            name: 'nostr.build',
+            url: 'https://nostr.build/api/v2/upload/files',
+            upload: async function(file) {
+                // Create NIP-98 auth event
+                const authEvent = {
+                    kind: 27235,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [
+                        ['u', 'https://nostr.build/api/v2/upload/files'],
+                        ['method', 'POST']
+                    ],
+                    content: ''
+                };
+
+                const signedAuth = await window.NostrUtils?.signEvent?.(authEvent);
+                if (!signedAuth) throw new Error('Failed to sign auth event');
+
+                const authHeader = 'Nostr ' + btoa(JSON.stringify(signedAuth));
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch('https://nostr.build/api/v2/upload/files', {
+                    method: 'POST',
+                    headers: { 'Authorization': authHeader },
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+
+                // Extract URL from response
+                if (result.data?.[0]?.url) return result.data[0].url;
+                if (result.url) return result.url;
+                throw new Error('No URL in response');
+            }
+        },
+        {
+            name: 'nostrcheck.me',
+            url: 'https://nostrcheck.me/api/v2/media',
+            upload: async function(file) {
+                // Create NIP-98 auth event for nostrcheck
+                const authEvent = {
+                    kind: 27235,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [
+                        ['u', 'https://nostrcheck.me/api/v2/media'],
+                        ['method', 'POST']
+                    ],
+                    content: ''
+                };
+
+                const signedAuth = await window.NostrUtils?.signEvent?.(authEvent);
+                if (!signedAuth) throw new Error('Failed to sign auth event');
+
+                const authHeader = 'Nostr ' + btoa(JSON.stringify(signedAuth));
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch('https://nostrcheck.me/api/v2/media', {
+                    method: 'POST',
+                    headers: { 'Authorization': authHeader },
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+
+                // NIP-96 response format
+                if (result.nip94_event?.tags) {
+                    const urlTag = result.nip94_event.tags.find(t => t[0] === 'url');
+                    if (urlTag?.[1]) return urlTag[1];
+                }
+                if (result.url) return result.url;
+                throw new Error('No URL in response');
+            }
+        },
+        {
+            name: 'void.cat',
+            url: 'https://void.cat/upload',
+            upload: async function(file) {
+                // void.cat uses custom headers instead of NIP-98
+                // Calculate SHA256 hash of file
+                const arrayBuffer = await file.arrayBuffer();
+                const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+                const response = await fetch('https://void.cat/upload', {
+                    method: 'POST',
+                    headers: {
+                        'V-Content-Type': file.type,
+                        'V-Full-Digest': hashHex,
+                        'V-Filename': file.name
+                    },
+                    body: file
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+
+                // void.cat response format
+                if (result.file?.url) return result.file.url;
+                if (result.url) return result.url;
+                if (result.id) return `https://void.cat/d/${result.id}`;
+                throw new Error('No URL in response');
+            }
+        }
+    ],
+
+    /**
+     * Upload media with fallback across multiple providers
+     */
+    async uploadPanelMedia() {
+        if (!this.currentPanelMedia) return null;
+
+        const file = this.currentPanelMedia;
+        console.log('Uploading media:', file.name, file.size, file.type);
+
+        const errors = [];
+
+        for (const provider of this.mediaProviders) {
+            try {
+                console.log(`Trying ${provider.name}...`);
+                const url = await provider.upload(file);
+                console.log(`Success with ${provider.name}:`, url);
+                return url;
+            } catch (error) {
+                console.warn(`${provider.name} failed:`, error.message);
+                errors.push(`${provider.name}: ${error.message}`);
+            }
+        }
+
+        // All providers failed
+        throw new Error('All upload providers failed: ' + errors.join('; '));
     },
 
     /**
@@ -2165,9 +2401,19 @@ const RightPanel = {
             return;
         }
 
-        const content = textarea.value.trim();
+        let content = textarea.value.trim();
 
         try {
+            // Upload media if present
+            if (this.currentPanelMedia) {
+                window.NostrUtils?.showNotification?.('Uploading media...', 'info');
+                const mediaUrl = await this.uploadPanelMedia();
+                if (mediaUrl) {
+                    // Append media URL to content
+                    content = content + '\n\n' + mediaUrl;
+                }
+            }
+
             // Check if paywall is enabled (only for new posts, not replies)
             const paywallCheckbox = document.getElementById('panelPaywallEnabled');
             const isPaywalled = !replyToId && paywallCheckbox?.checked;
@@ -2183,10 +2429,13 @@ const RightPanel = {
                 throw new Error('Post function not available');
             }
 
+            // Clear media state
+            this.currentPanelMedia = null;
+
             this.close();
         } catch (error) {
             console.error('Error submitting:', error);
-            // Error notification already shown by the send functions
+            window.NostrUtils?.showNotification?.('Failed to post: ' + error.message, 'error');
         }
     },
 
