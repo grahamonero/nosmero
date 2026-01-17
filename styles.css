@@ -777,11 +777,13 @@
         /* Post text content with proper word wrapping for long URLs */
         .post-content {
             margin: 12px 0;
-            line-height: 1.4;
+            font-size: 16px;
+            line-height: 1.55;
+            letter-spacing: 0.01em;
             word-wrap: break-word;
             overflow-wrap: break-word;
             word-break: break-word; /* Ensures long URLs don't overflow */
-            max-width: 100%;
+            max-width: 65ch; /* Optimal line length ~65 characters */
             overflow: hidden;
         }
         
@@ -836,7 +838,7 @@
         .post-content h6 { font-size: 1em; }
 
         .post-content p {
-            margin: 0.4em 0;
+            margin: 0.75em 0;
         }
 
         .post-content strong,
@@ -2234,7 +2236,9 @@
             
             .post-content {
                 font-size: 16px;
-                line-height: 1.5;
+                line-height: 1.55;
+                letter-spacing: 0.01em;
+                max-width: 100%; /* Full width on mobile */
             }
             
             /* Mobile search adjustments */
