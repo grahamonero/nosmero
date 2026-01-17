@@ -254,7 +254,7 @@ export function showLoginWithNsec() {
 
                 <div style="margin-bottom: 30px;">
                     <input type="password" id="nsecInput" placeholder="nsec1..."
-                           style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 20px;"
+                           style="width: 100%; padding: 16px; background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-primary); font-size: 14px; margin-bottom: 20px;"
                            data-action="nsec-login">
 
                     <div style="display: flex; gap: 12px; justify-content: center;">
@@ -263,7 +263,7 @@ export function showLoginWithNsec() {
                             🔑 Login
                         </button>
                         <button data-action="show-auth"
-                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
+                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: var(--bg-hover); color: var(--text-primary);">
                             ← Back
                         </button>
                     </div>
@@ -322,7 +322,7 @@ export function showLoginWithAmber() {
 
                 <div style="margin-bottom: 30px;">
                     <input type="text" id="amberBunkerInput" placeholder="Paste your bunker:// URI from Amber..."
-                           style="width: 100%; padding: 16px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 20px;"
+                           style="width: 100%; padding: 16px; background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-primary); font-size: 14px; margin-bottom: 20px;"
                            data-action="amber-login">
 
                     <div style="display: flex; gap: 12px; justify-content: center;">
@@ -331,7 +331,7 @@ export function showLoginWithAmber() {
                             📱 Connect to Amber
                         </button>
                         <button data-action="show-auth"
-                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
+                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: var(--bg-hover); color: var(--text-primary);">
                             ← Back
                         </button>
                     </div>
@@ -431,7 +431,7 @@ export async function showLoginWithNsecApp() {
                         </p>
                     </div>
 
-                    <button data-action="show-auth" style="margin-top: 20px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
+                    <button data-action="show-auth" style="margin-top: 20px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: var(--bg-hover); color: var(--text-primary);">
                         ← Back to Login Options
                     </button>
                 </div>
@@ -464,7 +464,7 @@ export function showGeneratedKeyModal(nsec) {
         keyModal.innerHTML = `
             <div class="modal-content" style="max-width: 500px;">
                 <div class="modal-header" style="color: #FF6600;">🔑 Your New Private Key</div>
-                <div id="nsecDisplay" style="margin: 20px 0; padding: 20px; background: #1a1a1a; border-radius: 8px; font-family: monospace; word-break: break-all; font-size: 14px; color: #fff;"></div>
+                <div id="nsecDisplay" style="margin: 20px 0; padding: 20px; background: var(--bg-tertiary); border-radius: 8px; font-family: monospace; word-break: break-all; font-size: 14px; color: var(--text-primary);"></div>
                 <div style="margin-bottom: 20px; color: #ff6600; font-weight: bold;">
                     ⚠️ CRITICAL: Save this key securely - it cannot be recovered!
                 </div>
@@ -478,7 +478,7 @@ export function showGeneratedKeyModal(nsec) {
                     <button id="copyNsecBtn" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                         📋 Copy Key
                     </button>
-                    <button data-action="close-key-modal" style="background: #333; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">
+                    <button data-action="close-key-modal" style="background: var(--bg-hover); color: var(--text-primary); border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">
                         I've Saved It Safely
                     </button>
                 </div>
@@ -559,17 +559,17 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                     Amount (XMR)
                 </label>
                 <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 8px;">
-                    <button class="preset-amount-btn" data-amount="0.00009" style="background: #333; border: 1px solid #FF6600; color: #FF6600; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">0.00009</button>
-                    <button class="preset-amount-btn" data-amount="0.00018" style="background: #333; border: 1px solid #FF6600; color: #FF6600; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">0.00018</button>
-                    <button class="preset-amount-btn" data-amount="custom" style="background: #333; border: 1px solid #888; color: #888; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">Custom</button>
+                    <button class="preset-amount-btn" data-amount="0.00009" style="background: var(--bg-hover); border: 1px solid #FF6600; color: #FF6600; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">0.00009</button>
+                    <button class="preset-amount-btn" data-amount="0.00018" style="background: var(--bg-hover); border: 1px solid #FF6600; color: #FF6600; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">0.00018</button>
+                    <button class="preset-amount-btn" data-amount="custom" style="background: var(--bg-hover); border: 1px solid var(--border-secondary); color: var(--text-muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">Custom</button>
                 </div>
                 <input type="number"
                        id="moneroZapAmount"
                        value="${escapeHtml(defaultAmount)}"
                        step="0.00001"
                        min="0.00001"
-                       style="width: 100%; padding: 10px; border: 2px solid #FF6600; border-radius: 8px; font-size: 16px; text-align: center; background: #1a1a1a; color: #fff;">
-                <div id="zapAmountUSD" style="text-align: center; margin-top: 8px; font-size: 14px; color: #888;"></div>
+                       style="width: 100%; padding: 10px; border: 2px solid #FF6600; border-radius: 8px; font-size: 16px; text-align: center; background: var(--bg-tertiary); color: var(--text-primary);">
+                <div id="zapAmountUSD" style="text-align: center; margin-top: 8px; font-size: 14px; color: var(--text-muted);"></div>
             </div>
             <div style="margin-bottom: 20px; font-size: 12px; color: #666; word-break: break-all; text-align: center;">
                 ${escapeHtml(moneroAddress)}
@@ -584,18 +584,18 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                         style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                     Send from Wallet
                 </button>
-                <div id="walletTipStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: #888;"></div>
+                <div id="walletTipStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: var(--text-muted);"></div>
             </div>
 
             <div style="text-align: center; color: #666; font-size: 12px; margin-bottom: 12px;">─── OR ───</div>
 
             <div style="display: flex; gap: 12px; justify-content: center;">
                 <button id="zapNowBtn"
-                        style="background: #333; border: 1px solid #888; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        style="background: var(--bg-hover); border: 1px solid var(--border-secondary); color: var(--text-primary); padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                     QR Code
                 </button>
                 <button id="addToQueueBtn"
-                        style="background: #333; border: 1px solid #6B73FF; color: #6B73FF; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        style="background: var(--bg-hover); border: 1px solid #6B73FF; color: #6B73FF; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                     Add to Queue (${zapQueue.length}/20)
                 </button>
             </div>
@@ -648,8 +648,8 @@ export function openZapModal(postId, authorName, moneroAddress, mode = 'choose',
                     }
                     // Highlight selected
                     presetBtns.forEach(b => {
-                        b.style.background = '#333';
-                        b.style.borderColor = b.dataset.amount === 'custom' ? '#888' : '#FF6600';
+                        b.style.background = 'var(--bg-hover)';
+                        b.style.borderColor = b.dataset.amount === 'custom' ? 'var(--border-secondary)' : '#FF6600';
                     });
                     btn.style.background = '#FF6600';
                     btn.style.borderColor = '#FF6600';
@@ -844,12 +844,12 @@ function showWalletPinInput(postId, authorName, moneroAddress, amount, recipient
             <span style="color: #FF6600; font-weight: 600;">🔐 Unlock Tip Jar</span>
         </div>
         <input type="password" id="walletTipPin" placeholder="Enter PIN"
-               style="width: 100%; padding: 12px; background: #1a1a1a; border: 2px solid #FF6600; border-radius: 8px; color: #fff; text-align: center; font-size: 16px; margin-bottom: 12px;">
+               style="width: 100%; padding: 12px; background: var(--bg-tertiary); border: 2px solid #FF6600; border-radius: 8px; color: var(--text-primary); text-align: center; font-size: 16px; margin-bottom: 12px;">
         <button id="walletUnlockBtn"
                 style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
             Unlock & Send ${amount} XMR
         </button>
-        <div id="walletTipStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: #888;"></div>
+        <div id="walletTipStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: var(--text-muted);"></div>
     `;
 
     setTimeout(() => {
@@ -898,7 +898,7 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
     section.innerHTML = `
         <div style="text-align: center; padding: 20px;">
             <div style="color: #FF6600; font-weight: 600; margin-bottom: 12px;">💳 Sending Tip...</div>
-            <div id="walletTipProgress" style="color: #888; font-size: 14px;">Syncing Tip Jar...</div>
+            <div id="walletTipProgress" style="color: var(--text-muted); font-size: 14px;">Syncing Tip Jar...</div>
         </div>
     `;
 
@@ -951,23 +951,23 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
             <div style="text-align: center; margin-bottom: 12px;">
                 <span style="color: #FF6600; font-weight: 600;">💳 Confirm Tip</span>
             </div>
-            <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+            <div style="background: var(--bg-tertiary); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="color: #888;">Amount:</span>
-                    <span style="color: #fff;">${amount} XMR${amountUSD}</span>
+                    <span style="color: var(--text-muted);">Amount:</span>
+                    <span style="color: var(--text-primary);">${amount} XMR${amountUSD}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="color: #888;">Fee:</span>
+                    <span style="color: var(--text-muted);">Fee:</span>
                     <span style="color: #ffc107;">${feeXMR} XMR${feeUSD}</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 8px;">
-                    <span style="color: #888; font-weight: 600;">Total:</span>
+                <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border-primary); padding-top: 8px;">
+                    <span style="color: var(--text-muted); font-weight: 600;">Total:</span>
                     <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR${totalUSD}</span>
                 </div>
             </div>
             <div style="margin-bottom: 12px;">
-                <label style="display: block; margin-bottom: 8px; color: #888; font-size: 13px;">Disclosure:</label>
-                <select id="walletTipDisclosure" style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff;">
+                <label style="display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 13px;">Disclosure:</label>
+                <select id="walletTipDisclosure" style="width: 100%; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 6px; color: var(--text-primary);">
                     <option value="verified">✓ Verified (shown on note with proof)</option>
                     <option value="secret">🔒 Secret (no disclosure)</option>
                 </select>
@@ -978,7 +978,7 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
                     Confirm & Send
                 </button>
                 <button id="cancelTipBtn"
-                        style="background: #333; border: none; color: #fff; padding: 12px 16px; border-radius: 8px; cursor: pointer;">
+                        style="background: var(--bg-hover); border: none; color: var(--text-primary); padding: 12px 16px; border-radius: 8px; cursor: pointer;">
                     Cancel
                 </button>
             </div>
@@ -994,7 +994,7 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
                 section.innerHTML = `
                     <div style="text-align: center; padding: 20px;">
                         <div style="color: #FF6600; font-weight: 600; margin-bottom: 12px;">💳 Sending...</div>
-                        <div style="color: #888; font-size: 14px;">Broadcasting transaction...</div>
+                        <div style="color: var(--text-muted); font-size: 14px;">Broadcasting transaction...</div>
                     </div>
                 `;
 
@@ -1012,7 +1012,7 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
                     section.innerHTML = `
                         <div style="text-align: center; padding: 20px;">
                             <div style="color: #10B981; font-weight: 600; font-size: 18px; margin-bottom: 8px;">✓ Tip Sent!</div>
-                            <div style="color: #888; font-size: 12px; word-break: break-all;">${result.txHash.slice(0, 16)}...</div>
+                            <div style="color: var(--text-muted); font-size: 12px; word-break: break-all;">${result.txHash.slice(0, 16)}...</div>
                         </div>
                     `;
 
@@ -1033,7 +1033,7 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
                     section.innerHTML = `
                         <div style="text-align: center; padding: 20px;">
                             <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Send Failed</div>
-                            <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
+                            <div style="color: var(--text-muted); font-size: 12px;">${escapeHtml(err.message)}</div>
                         </div>
                     `;
                 }
@@ -1054,7 +1054,7 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
         section.innerHTML = `
             <div style="text-align: center; padding: 20px;">
                 <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Transaction Failed</div>
-                <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
+                <div style="color: var(--text-muted); font-size: 12px;">${escapeHtml(err.message)}</div>
             </div>
         `;
     }
@@ -1165,12 +1165,12 @@ function showQueueWalletPinInput(queue) {
             <span style="color: #FF6600; font-weight: 600;">🔐 Unlock Tip Jar</span>
         </div>
         <input type="password" id="queueWalletPin" placeholder="Enter PIN"
-               style="width: 100%; padding: 12px; background: #1a1a1a; border: 2px solid #FF6600; border-radius: 8px; color: #fff; text-align: center; font-size: 16px; margin-bottom: 12px;">
+               style="width: 100%; padding: 12px; background: var(--bg-tertiary); border: 2px solid #FF6600; border-radius: 8px; color: var(--text-primary); text-align: center; font-size: 16px; margin-bottom: 12px;">
         <button id="queueUnlockBtn"
                 style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
             Unlock & Continue
         </button>
-        <div id="queueWalletStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: #888;"></div>
+        <div id="queueWalletStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: var(--text-muted);"></div>
     `;
 
     setTimeout(() => {
@@ -1218,7 +1218,7 @@ async function showQueueBatchConfirm(queue) {
     section.innerHTML = `
         <div style="text-align: center; padding: 20px;">
             <div style="color: #FF6600; font-weight: 600; margin-bottom: 12px;">💳 Preparing Batch...</div>
-            <div id="queueBatchProgress" style="color: #888; font-size: 14px;">Syncing wallet...</div>
+            <div id="queueBatchProgress" style="color: var(--text-muted); font-size: 14px;">Syncing wallet...</div>
         </div>
     `;
 
@@ -1275,39 +1275,39 @@ async function showQueueBatchConfirm(queue) {
             <div style="text-align: center; margin-bottom: 12px;">
                 <span style="color: #FF6600; font-weight: 600;">💳 Confirm Batch Send</span>
             </div>
-            <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+            <div style="background: var(--bg-tertiary); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="color: #888;">Tips (${queue.length}):</span>
+                    <span style="color: var(--text-muted);">Tips (${queue.length}):</span>
                     <div style="text-align: right;">
-                        <span style="color: #fff;">${Wallet.formatXMR(txDetails.totalAmount)} XMR</span>
-                        ${tipsUSD ? `<div style="color: #888; font-size: 11px;">≈ ${tipsUSD}</div>` : ''}
+                        <span style="color: var(--text-primary);">${Wallet.formatXMR(txDetails.totalAmount)} XMR</span>
+                        ${tipsUSD ? `<div style="color: var(--text-muted); font-size: 11px;">≈ ${tipsUSD}</div>` : ''}
                     </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="color: #888;">Fee (one!):</span>
+                    <span style="color: var(--text-muted);">Fee (one!):</span>
                     <div style="text-align: right;">
                         <span style="color: #ffc107;">${feeXMR} XMR</span>
-                        ${feeUSD ? `<div style="color: #888; font-size: 11px;">≈ ${feeUSD}</div>` : ''}
+                        ${feeUSD ? `<div style="color: var(--text-muted); font-size: 11px;">≈ ${feeUSD}</div>` : ''}
                     </div>
                 </div>
-                <div style="display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 8px;">
-                    <span style="color: #888; font-weight: 600;">Total:</span>
+                <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border-primary); padding-top: 8px;">
+                    <span style="color: var(--text-muted); font-weight: 600;">Total:</span>
                     <div style="text-align: right;">
                         <span style="color: #FF6600; font-weight: 600;">${totalXMR} XMR</span>
-                        ${totalUSD ? `<div style="color: #888; font-size: 11px;">≈ ${totalUSD}</div>` : ''}
+                        ${totalUSD ? `<div style="color: var(--text-muted); font-size: 11px;">≈ ${totalUSD}</div>` : ''}
                     </div>
                 </div>
             </div>
 
             <!-- Disclosure Options -->
             <div style="margin-bottom: 12px;">
-                <label style="display: block; margin-bottom: 8px; color: #888; font-size: 13px;">Disclosure:</label>
+                <label style="display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 13px;">Disclosure:</label>
                 <div style="margin-bottom: 8px;">
                     <label style="display: flex; align-items: center; cursor: pointer;">
                         <input type="radio" name="queueDisclosureMode" value="all" checked style="margin-right: 8px;">
-                        <span style="color: #fff;">Apply to all:</span>
+                        <span style="color: var(--text-primary);">Apply to all:</span>
                     </label>
-                    <select id="queueDisclosureAll" style="width: 100%; padding: 8px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; margin-top: 4px;">
+                    <select id="queueDisclosureAll" style="width: 100%; padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 6px; color: var(--text-primary); margin-top: 4px;">
                         <option value="verified">✓ Verified (shown on notes with proof)</option>
                         <option value="secret">🔒 Secret (no disclosure)</option>
                     </select>
@@ -1315,13 +1315,13 @@ async function showQueueBatchConfirm(queue) {
                 <div>
                     <label style="display: flex; align-items: center; cursor: pointer;">
                         <input type="radio" name="queueDisclosureMode" value="individual" style="margin-right: 8px;">
-                        <span style="color: #fff;">Per tip:</span>
+                        <span style="color: var(--text-primary);">Per tip:</span>
                     </label>
                     <div id="queuePerTipDisclosure" style="display: none; max-height: 150px; overflow-y: auto; margin-top: 8px;">
                         ${queue.map((item, i) => `
                             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                                 <span style="color: #FF6600; font-size: 12px; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.authorName)}</span>
-                                <select id="queueDisclosure_${i}" style="flex: 1; padding: 6px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 12px;">
+                                <select id="queueDisclosure_${i}" style="flex: 1; padding: 6px; background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 4px; color: var(--text-primary); font-size: 12px;">
                                     <option value="verified">✓ Verified</option>
                                     <option value="secret">🔒 Secret</option>
                                 </select>
@@ -1337,7 +1337,7 @@ async function showQueueBatchConfirm(queue) {
                     Send All
                 </button>
                 <button id="queueCancelBtn"
-                        style="background: #333; border: none; color: #fff; padding: 12px 16px; border-radius: 8px; cursor: pointer;">
+                        style="background: var(--bg-hover); border: none; color: var(--text-primary); padding: 12px 16px; border-radius: 8px; cursor: pointer;">
                     Cancel
                 </button>
             </div>
@@ -1389,8 +1389,8 @@ async function showQueueBatchConfirm(queue) {
         section.innerHTML = `
             <div style="text-align: center; padding: 20px;">
                 <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Transaction Failed</div>
-                <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
-                <button data-action="back-to-queue" style="margin-top: 12px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                <div style="color: var(--text-muted); font-size: 12px;">${escapeHtml(err.message)}</div>
+                <button data-action="back-to-queue" style="margin-top: 12px; background: var(--bg-hover); border: none; color: var(--text-primary); padding: 8px 16px; border-radius: 6px; cursor: pointer;">
                     Back
                 </button>
             </div>
@@ -1412,7 +1412,7 @@ async function sendQueueBatch(queue, disclosures) {
     section.innerHTML = `
         <div style="text-align: center; padding: 20px;">
             <div style="color: #FF6600; font-weight: 600; margin-bottom: 12px;">💳 Sending...</div>
-            <div style="color: #888; font-size: 14px;">Broadcasting batch transaction...</div>
+            <div style="color: var(--text-muted); font-size: 14px;">Broadcasting batch transaction...</div>
         </div>
     `;
 
@@ -1432,8 +1432,8 @@ async function sendQueueBatch(queue, disclosures) {
         section.innerHTML = `
             <div style="text-align: center; padding: 20px;">
                 <div style="color: #10B981; font-weight: 600; font-size: 18px; margin-bottom: 8px;">✓ All Tips Sent!</div>
-                <div style="color: #888; font-size: 12px; word-break: break-all;">${result.txHash.slice(0, 20)}...</div>
-                <div style="color: #888; font-size: 12px; margin-top: 8px;">${queue.length} tips in one transaction</div>
+                <div style="color: var(--text-muted); font-size: 12px; word-break: break-all;">${result.txHash.slice(0, 20)}...</div>
+                <div style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">${queue.length} tips in one transaction</div>
             </div>
         `;
 
@@ -1468,8 +1468,8 @@ async function sendQueueBatch(queue, disclosures) {
         section.innerHTML = `
             <div style="text-align: center; padding: 20px;">
                 <div style="color: #ef4444; font-weight: 600; margin-bottom: 8px;">Send Failed</div>
-                <div style="color: #888; font-size: 12px;">${escapeHtml(err.message)}</div>
-                <button data-action="back-to-queue" style="margin-top: 12px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                <div style="color: var(--text-muted); font-size: 12px;">${escapeHtml(err.message)}</div>
+                <button data-action="back-to-queue" style="margin-top: 12px; background: var(--bg-hover); border: none; color: var(--text-primary); padding: 8px 16px; border-radius: 6px; cursor: pointer;">
                     Back
                 </button>
             </div>
@@ -1783,7 +1783,7 @@ export function openLightningZapModal(postId, authorName, lightningAddress) {
                    value="${defaultAmount}"
                    step="1"
                    min="1"
-                   style="width: 100%; padding: 10px; border: 2px solid #FFDF00; border-radius: 8px; font-size: 16px; text-align: center; background: #1a1a1a; color: #fff;">
+                   style="width: 100%; padding: 10px; border: 2px solid #FFDF00; border-radius: 8px; font-size: 16px; text-align: center; background: var(--bg-tertiary); color: var(--text-primary);">
         </div>
         <div style="margin-bottom: 20px; font-size: 12px; color: #666; word-break: break-all; text-align: center;">
             ${escapeHtml(lightningAddress)}
@@ -1805,7 +1805,7 @@ export function openLightningZapModal(postId, authorName, lightningAddress) {
                 ⚡ Send Lightning Zap
             </button>
             <button data-action="close-lightning-modal"
-                    style="background: #333; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                    style="background: var(--bg-hover); border: none; color: var(--text-primary); padding: 12px 20px; border-radius: 8px; cursor: pointer;">
                 Cancel
             </button>
         </div>
@@ -2244,11 +2244,11 @@ export async function showZapQueue() {
         `;
     } else {
         content.innerHTML = `
-            <div style="margin-bottom: 16px; padding: 12px; background: #1a1a1a; border-radius: 8px;">
+            <div style="margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
                 <strong>${queue.length} note${queue.length === 1 ? '' : 's'} in queue</strong>
                 <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">
                     Total: ${totalAmount.toFixed(5)} XMR
-                    ${totalUSD ? `<span style="color: #888; font-size: 12px; margin-left: 8px;">≈ ${totalUSD}</span>` : ''}
+                    ${totalUSD ? `<span style="color: var(--text-muted); font-size: 12px; margin-left: 8px;">≈ ${totalUSD}</span>` : ''}
                 </div>
             </div>
 
@@ -2256,13 +2256,13 @@ export async function showZapQueue() {
             <div id="queueWalletSection" style="margin-bottom: 16px; padding: 16px; background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px;">
                 <div style="text-align: center; margin-bottom: 12px;">
                     <span style="color: #FF6600; font-weight: 600;">💳 Send All with Nosmero Wallet</span>
-                    <div style="font-size: 12px; color: #888; margin-top: 4px;">One transaction, one fee!</div>
+                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">One transaction, one fee!</div>
                 </div>
                 <button id="queueWalletSendBtn"
                         style="width: 100%; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
                     ${hasWallet ? (isUnlocked ? 'Send All' : 'Unlock & Send All') : 'Create Tip Jar'}
                 </button>
-                <div id="queueWalletStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: #888;">
+                <div id="queueWalletStatus" style="text-align: center; margin-top: 8px; font-size: 12px; color: var(--text-muted);">
                     ${hasWallet && isUnlocked ? `Available: ${Wallet.formatXMR(availableBalance)} XMR` : (hasWallet ? 'Enter PIN to unlock' : 'Create a tip jar to batch send')}
                 </div>
             </div>
@@ -2270,7 +2270,7 @@ export async function showZapQueue() {
             <div style="text-align: center; color: #666; font-size: 12px; margin-bottom: 12px;">─── OR ───</div>
 
             <div style="margin-bottom: 16px;">
-                <button data-action="show-batch-qr" style="width: 100%; background: #333; border: 1px solid #888; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                <button data-action="show-batch-qr" style="width: 100%; background: var(--bg-hover); border: 1px solid var(--border-secondary); color: var(--text-primary); padding: 12px 20px; border-radius: 8px; cursor: pointer;">
                     Show QR Codes Sequentially
                 </button>
                 <div style="font-size: 11px; color: #666; text-align: center; margin-top: 4px;">For external wallet users</div>
@@ -2281,12 +2281,12 @@ export async function showZapQueue() {
                     const itemAmount = parseFloat(item.amount || '0.00018');
                     const itemUSD = xmrPrice ? formatUSD(itemAmount * xmrPrice) : null;
                     return `
-                    <div style="background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="background: var(--bg-tertiary); border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1;">
                             <div style="font-weight: bold; color: #FF6600;">${escapeHtml(item.authorName)}</div>
                             <div style="font-size: 14px; color: #FF6600; margin-top: 4px;">
                                 ${escapeHtml(item.amount || '0.00018')} XMR
-                                ${itemUSD ? `<span style="color: #888; font-size: 11px; margin-left: 6px;">≈ ${itemUSD}</span>` : ''}
+                                ${itemUSD ? `<span style="color: var(--text-muted); font-size: 11px; margin-left: 6px;">≈ ${itemUSD}</span>` : ''}
                             </div>
                             <div style="font-size: 12px; color: #666; margin-top: 4px; word-break: break-all;">${escapeHtml(item.moneroAddress.substring(0, 20))}...${escapeHtml(item.moneroAddress.substring(item.moneroAddress.length - 10))}</div>
                         </div>
@@ -2470,7 +2470,7 @@ export function showBatchQrCodes() {
 
                 <div style="display: flex; gap: 12px; justify-content: center;">
                     ${currentIndex > 0 ? `
-                        <button data-action="batch-qr-previous" style="background: #666; border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer;">
+                        <button data-action="batch-qr-previous" style="background: var(--bg-hover); border: none; color: var(--text-primary); padding: 12px 20px; border-radius: 8px; cursor: pointer;">
                             ← Previous
                         </button>
                     ` : ''}

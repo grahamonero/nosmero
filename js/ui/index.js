@@ -29,8 +29,8 @@ export const hideSkeletonLoader = Skeleton.hideSkeletonLoader;
 // Theme functions
 export const setTheme = Theme.setTheme;
 export const applyTheme = Theme.applyTheme;
-export const updateElementsForTheme = Theme.updateElementsForTheme;
 export const updateThemeIcons = Theme.updateThemeIcons;
+export const initTheme = Theme.initTheme;
 
 // Navigation functions
 export const openHamburgerMenu = Navigation.openHamburgerMenu;

@@ -185,7 +185,7 @@ export async function loadFeedWithSubscription() {
                         if (!existingLoadMore && displayedPostCount < State.posts.length) {
                             const feed = document.getElementById('feed');
                             const loadMoreButton = `
-                                <div id="loadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                                <div id="loadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
                                     <button onclick="NostrPosts.loadMorePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                                         Load More Posts (${State.posts.length - displayedPostCount} available)
                                     </button>
@@ -222,7 +222,7 @@ export async function renderFeedIncremental() {
 
     // Show loading indicator at top while posts are coming in
     const loadingIndicator = `
-        <div id="feedLoadingIndicator" style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); padding: 10px; text-align: center; font-size: 14px; color: #FF6600; border-bottom: 1px solid #333;">
+        <div id="feedLoadingIndicator" style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); padding: 10px; text-align: center; font-size: 14px; color: #FF6600; border-bottom: 1px solid var(--border-primary);">
             📡 Loading posts from relays... (${State.posts.length} loaded)
         </div>
     `;
@@ -571,7 +571,7 @@ export async function loadTrendingFeed(forceRefresh = false) {
 
         // Add Load More button if needed
         const loadMoreButton = hasMorePosts ? `
-            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
                 <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                     Load More Posts (${remainingCount} available)
                 </button>
@@ -811,7 +811,7 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
                 <div style="color: #FF6600; font-size: 18px; font-weight: bold; margin-bottom: 8px;">
                     📈 Viewing Trending Monero Notes
                 </div>
-                <div style="color: #ccc; font-size: 15px; margin-bottom: 12px;">
+                <div style="color: var(--text-secondary); font-size: 15px; margin-bottom: 12px;">
                     ${topNotes.length} notes from the past 7 days, ranked by interactions
                 </div>
                 <div style="color: #888; font-size: 14px;">
@@ -822,7 +822,7 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
 
         // Add Load More button if needed
         const loadMoreButton = hasMorePosts ? `
-            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
                 <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                     Load More Posts (${remainingCount} available)
                 </button>
@@ -971,7 +971,7 @@ async function renderCachedTrendingFeed(cache) {
             <div style="color: #FF6600; font-size: 18px; font-weight: bold; margin-bottom: 8px;">
                 📈 Viewing Trending Monero Notes
             </div>
-            <div style="color: #ccc; font-size: 15px; margin-bottom: 8px;">
+            <div style="color: var(--text-secondary); font-size: 15px; margin-bottom: 8px;">
                 ${cache.notes_cached} notes from the past ${cache.time_window_days} days, ranked by interactions
             </div>
             <div style="color: #888; font-size: 13px; margin-bottom: 12px;">
@@ -985,7 +985,7 @@ async function renderCachedTrendingFeed(cache) {
 
     // Load More button
     const loadMoreButton = hasMorePosts ? `
-        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
             <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                 Load More Posts (${remainingCount} available)
             </button>
@@ -1105,7 +1105,7 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
 
     // Load More button
     const loadMoreButton = hasMorePosts ? `
-        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+        <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
             <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                 Load More Posts (${remainingCount} available)
             </button>
@@ -1322,7 +1322,7 @@ async function loadTrendingFeedForNewUser() {
             .filter(([key, pack]) => pack.accounts.length > 0)
             .map(([key, pack]) => `
                 <button onclick="followStarterPack('${key}')"
-                        style="background: #222; border: 1px solid #444; color: #fff; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; margin: 4px; transition: all 0.2s;"
+                        style="background: var(--bg-secondary); border: 1px solid #444; color: var(--text-primary); padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; margin: 4px; transition: all 0.2s;"
                         onmouseover="this.style.borderColor='#FF6600'; this.style.background='#2a2a2a';"
                         onmouseout="this.style.borderColor='#444'; this.style.background='#222';">
                     <span>${pack.icon}</span>
@@ -1338,17 +1338,17 @@ async function loadTrendingFeedForNewUser() {
                     <div style="color: #FF6600; font-size: 22px; font-weight: bold; margin-bottom: 8px;">
                         Welcome to Nosmero!
                     </div>
-                    <div style="color: #ccc; font-size: 15px; margin-bottom: 4px;">
+                    <div style="color: var(--text-secondary); font-size: 15px; margin-bottom: 4px;">
                         You're not following anyone yet, so here are the
                     </div>
-                    <div style="color: #fff; font-size: 17px; font-weight: 600;">
+                    <div style="color: var(--text-primary); font-size: 17px; font-weight: 600;">
                         📈 Trending Monero Notes
                     </div>
                 </div>
 
                 <div style="background: rgba(0,0,0,0.3); border-radius: 10px; padding: 16px; margin-bottom: 16px;">
                     <div style="color: #aaa; font-size: 13px; margin-bottom: 12px; text-align: center;">
-                        <strong style="color: #fff;">How it works:</strong> Follow users to build your personalized feed. Their posts will appear here instead of trending content.
+                        <strong style="color: var(--text-primary);">How it works:</strong> Follow users to build your personalized feed. Their posts will appear here instead of trending content.
                     </div>
 
                     ${starterPackButtons ? `
@@ -1375,7 +1375,7 @@ async function loadTrendingFeedForNewUser() {
 
         // Load More button
         const loadMoreButton = hasMorePosts ? `
-            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
                 <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                     Load More Posts (${remainingCount} available)
                 </button>
@@ -1466,7 +1466,7 @@ async function loadMoreTrendingPosts() {
                 } catch (error) {
                     console.error('Error rendering trending post:', error);
                     return `
-                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px;">
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-primary); border-radius: 12px; padding: 20px; margin-bottom: 16px;">
                             <div style="color: #666; font-size: 12px;">Error rendering post</div>
                         </div>
                     `;
@@ -1489,7 +1489,7 @@ async function loadMoreTrendingPosts() {
 
         // Add new Load More button if needed
         const loadMoreButton = hasMorePosts ? `
-            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+            <div id="trendingLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
                 <button onclick="loadMoreTrendingPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                     Load More Posts (${remainingCount} available)
                 </button>
@@ -2176,7 +2176,7 @@ export async function loadWebOfTrustFeed() {
 
             // Always show Load More button (infinite cycling)
             const loadMoreButton = `
-                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
                     <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                         Load More Posts
                     </button>
@@ -2184,7 +2184,7 @@ export async function loadWebOfTrustFeed() {
             `;
 
             feed.innerHTML = `
-                <div style="padding: 16px 20px; border-bottom: 1px solid #333; background: rgba(255, 255, 255, 0.02);">
+                <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-primary); background: rgba(255, 255, 255, 0.02);">
                     <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Suggested Follows</h3>
                     <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
                         Posts from high-scoring users in your extended network (past 24 hours)
@@ -2327,7 +2327,7 @@ export async function loadMoreWebOfTrustPosts() {
 
             // Always show Load More button (infinite cycling)
             const newLoadMoreButton = `
-                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
                     <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                         Load More Posts
                     </button>
@@ -2354,7 +2354,7 @@ export async function loadMoreWebOfTrustPosts() {
 
             if (loadMoreContainer) {
                 loadMoreContainer.innerHTML = `
-                    <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                    <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
                         <p style="color: #666; margin-bottom: 12px;">No posts in this batch</p>
                         <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                             Load More Posts
@@ -2369,7 +2369,7 @@ export async function loadMoreWebOfTrustPosts() {
         const loadMoreContainer = document.getElementById('webOfTrustLoadMoreContainer');
         if (loadMoreContainer) {
             loadMoreContainer.innerHTML = `
-                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+                <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
                     <p style="color: #ff6666; margin-bottom: 12px;">Error loading posts. Please try again.</p>
                     <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                         Retry
@@ -2522,13 +2522,13 @@ export function initializeHomeFeedResults() {
     console.log('✅ Feed element found, setting up homeFeedList');
 
     feed.innerHTML = `
-        <div id="homeFeedHeader" style="margin-bottom: 20px; padding: 12px; background: #1a1a1a; border-radius: 8px;">
+        <div id="homeFeedHeader" style="margin-bottom: 20px; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <div style="color: #FF6600; font-weight: bold;" id="homeFeedCount">Loading your timeline...</div>
                 <div style="display: none;" id="homeFeedSortControls">
                     <button id="homeSortStream" onclick="setHomeFeedSortMode('stream')" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">As Found</button>
-                    <button id="homeSortDate" onclick="setHomeFeedSortMode('date')" style="background: transparent; border: 1px solid #333; color: #fff; padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">By Date</button>
-                    <button id="homeSortEngagement" onclick="setHomeFeedSortMode('engagement')" style="background: transparent; border: 1px solid #333; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">By Engagement</button>
+                    <button id="homeSortDate" onclick="setHomeFeedSortMode('date')" style="background: transparent; border: 1px solid var(--border-primary); color: var(--text-primary); padding: 6px 12px; border-radius: 4px; margin-right: 4px; cursor: pointer; font-size: 12px;">By Date</button>
+                    <button id="homeSortEngagement" onclick="setHomeFeedSortMode('engagement')" style="background: transparent; border: 1px solid var(--border-primary); color: var(--text-primary); padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">By Engagement</button>
                 </div>
             </div>
             <div style="color: #666; font-size: 14px;" id="homeFeedStatus">Initializing...</div>
@@ -2888,23 +2888,22 @@ async function updateParentPosts(parentPostsMap) {
 
         // Render the parent post preview (not full post)
         const parentAuthor = getAuthorInfo(parentPost);
-        const textColor = '#ccc';
 
         const parentHtml = `
-            <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px; opacity: 0.8;">
+            <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px;">
                 <div class="post-header" style="font-size: 14px;">
                     ${parentAuthor.picture ?
                         `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
-                        `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
+                        `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
                     }
                     <div class="post-info">
                         <span class="username" style="font-size: 14px;">${parentAuthor.name}</span>
                         <span class="timestamp" style="font-size: 12px;">${Utils.formatTime(parentPost.created_at)}</span>
                     </div>
                 </div>
-                <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis; color: ${textColor};">${Utils.parseContent(parentPost.content)}</div>
+                <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis;">${Utils.parseContent(parentPost.content)}</div>
             </div>
-            <div style="color: #666; font-size: 12px; margin-bottom: 8px;">↳</div>
+            <div style="color: var(--text-muted); font-size: 12px; margin-bottom: 8px;">↳</div>
         `;
 
         replyContextEl.innerHTML = parentHtml;
@@ -3006,31 +3005,29 @@ export async function renderFeed(loadMore = false) {
 
         if (parentPost) {
             const parentAuthor = getAuthorInfo(parentPost);
-            const textColor = '#ccc';
-            const borderColor = '#444';
-            
+
             parentHtml = `
-                <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px; opacity: 0.8;">
+                <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px;">
                     <div class="post-header" style="font-size: 14px;">
-                        ${parentAuthor.picture ? 
-                            `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` : 
-                            `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
+                        ${parentAuthor.picture ?
+                            `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
+                            `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
                         }
                         <div class="post-info">
                             <span class="username" data-pubkey="${parentPost.pubkey}" style="font-size: 14px;">${parentAuthor.name}</span>
                             <span class="timestamp" style="font-size: 12px;">${Utils.formatTime(parentPost.created_at)}</span>
                         </div>
                     </div>
-                    <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis; color: ${textColor};">${Utils.parseContent(parentPost.content)}</div>
+                    <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis;">${Utils.parseContent(parentPost.content)}</div>
                 </div>
-                <div style="color: #666; font-size: 12px; margin-bottom: 8px;">↳</div>
+                <div style="color: var(--text-muted); font-size: 12px; margin-bottom: 8px;">↳</div>
             `;
         }
-        
+
         return `
             <div class="post" data-post-id="${post.id}" data-pubkey="${post.pubkey}">
                 ${parentHtml}
-                <div ${parentHtml ? 'style="border-left: 2px solid #444; padding-left: 12px;"' : ''}>
+                <div ${parentHtml ? 'style="border-left: 2px solid var(--border-secondary); padding-left: 12px;"' : ''}>
                 <div class="post-header">
                     ${author.picture ?
                         `<img class="avatar" src="${window.ThumbHashLoader?.getPlaceholder(author.picture) || author.picture}" data-thumbhash-src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;${window.ThumbHashLoader?.getPlaceholder(author.picture) ? ' filter: blur(4px); transition: filter 0.3s;' : ''}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)"/>` : ''
@@ -3115,7 +3112,7 @@ export async function renderFeed(loadMore = false) {
     // Add load more button if there are more posts
     const hasMorePosts = displayedPostCount < State.posts.length;
     const loadMoreButton = hasMorePosts ? `
-        <div id="loadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid #333;">
+        <div id="loadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
             <button onclick="NostrPosts.loadMorePosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                 Load More Posts (${State.posts.length - displayedPostCount} available)
             </button>
@@ -3504,10 +3501,10 @@ export function repostNote(postId) {
 
     document.getElementById('repostingTo').innerHTML = `
         <div style="display: flex; align-items: center; margin-bottom: 8px;">
-            <span style="color: #fff; font-weight: bold; margin-right: 8px;">${author.name}</span>
+            <span style="color: var(--text-primary); font-weight: bold; margin-right: 8px;">${author.name}</span>
             <span style="color: #999;">@${author.handle}</span>
         </div>
-        <div style="color: #fff;">${Utils.parseContent(truncatedContent)}</div>
+        <div style="color: var(--text-primary);">${Utils.parseContent(truncatedContent)}</div>
     `;
 
     // Reset modal to quick repost mode
@@ -4497,24 +4494,22 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
 
             if (parentPost) {
                 const parentAuthor = getAuthorInfo(parentPost);
-                const textColor = '#ccc';
-                const borderColor = '#444';
 
                 parentHtml = `
-                    <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px; opacity: 0.8;">
+                    <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px;">
                         <div class="post-header" style="font-size: 14px;">
                             ${parentAuthor.picture ?
                                 `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
-                                `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
+                                `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
                             }
                             <div class="post-info">
                                 <span class="username" style="font-size: 14px;">${parentAuthor.name}</span>
                                 <span class="timestamp" style="font-size: 12px;">${Utils.formatTime(parentPost.created_at)}</span>
                             </div>
                         </div>
-                        <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis; color: ${textColor};">${Utils.parseContent(parentPost.content)}</div>
+                        <div class="post-content" style="font-size: 14px; margin-top: 4px; max-height: 100px; overflow: hidden; text-overflow: ellipsis;">${Utils.parseContent(parentPost.content)}</div>
                     </div>
-                    <div style="color: #666; font-size: 12px; margin-bottom: 8px; margin-left: 12px;">↑ Replying to</div>
+                    <div style="color: var(--text-muted); font-size: 12px; margin-bottom: 8px; margin-left: 12px;">↑ Replying to</div>
                 `;
             }
         }
@@ -5780,7 +5775,7 @@ export async function showDisclosedTipDetails(postId, event) {
         const amountColor = isMuted ? '#999' : (tip.verified ? '#10B981' : '#FF6600');
 
         return `
-            <div style="padding: 12px; border-bottom: 1px solid #333; background: ${bgColor}; ${isMuted ? 'opacity: 0.6;' : ''}">
+            <div style="padding: 12px; border-bottom: 1px solid var(--border-primary); background: ${bgColor}; ${isMuted ? 'opacity: 0.6;' : ''}">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap;">
                         <div onclick="closeDisclosedTipsModal(); showUserProfile('${tip.tipper}');" style="font-weight: bold; color: ${textColor}; cursor: pointer; text-decoration: underline;">${tipperName}</div>
@@ -5824,8 +5819,8 @@ export async function showDisclosedTipDetails(postId, event) {
     // Create modal
     const modalHtml = `
         <div id="disclosedTipsModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 10000;" onclick="closeDisclosedTipsModal()">
-            <div style="background: #1a1a1a; border-radius: 16px; max-width: 600px; width: 90%; max-height: 80vh; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid #333;" onclick="event.stopPropagation()">
-                <div style="padding: 20px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: space-between;">
+            <div style="background: var(--bg-tertiary); border-radius: 16px; max-width: 600px; width: 90%; max-height: 80vh; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid var(--border-primary);" onclick="event.stopPropagation()">
+                <div style="padding: 20px; border-bottom: 1px solid var(--border-primary); display: flex; align-items: center; justify-content: space-between;">
                     <div>
                         <h2 style="margin: 0; color: #FF6600;">💰 Tips for this Note</h2>
                         <div style="font-size: 14px; color: #999; margin-top: 8px;">
@@ -6248,7 +6243,7 @@ async function updateWidgetReceivedTips() {
         return `
             <div ${clickHandler} style="padding: 6px 0; border-bottom: 1px solid rgba(255, 102, 0, 0.1); ${cursorStyle}">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="font-size: 11px; color: #ccc; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    <div style="font-size: 11px; color: var(--text-secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                         ${badge} From: ${name}
                     </div>
                     <div style="font-size: 11px; color: #FF6600; font-weight: bold; margin-left: 8px;">
@@ -6292,7 +6287,7 @@ async function updateWidgetSentTips() {
         return `
             <div ${clickHandler} style="padding: 6px 0; border-bottom: 1px solid rgba(255, 102, 0, 0.1); ${cursorStyle}">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="font-size: 11px; color: #ccc; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    <div style="font-size: 11px; color: var(--text-secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                         ${badge} To: ${name}
                     </div>
                     <div style="font-size: 11px; color: #FF6600; font-weight: bold; margin-left: 8px;">
@@ -6616,11 +6611,11 @@ function renderTipActivityWidget() {
                 <!-- Network Activity -->
                 <div style="font-size: 13px; color: #999; margin-bottom: 8px;">Network Activity (All-Time)</div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                    <div style="font-size: 14px; color: #ccc;">Total:</div>
+                    <div style="font-size: 14px; color: var(--text-secondary);">Total:</div>
                     <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetNetworkStats.totalXMR.toFixed(5)} XMR</div>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                    <div style="font-size: 14px; color: #ccc;">Tips:</div>
+                    <div style="font-size: 14px; color: var(--text-secondary);">Tips:</div>
                     <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetNetworkStats.count}</div>
                 </div>
 
@@ -6632,11 +6627,11 @@ function renderTipActivityWidget() {
                         <span id="widgetReceivedArrow" style="color: #FF6600; font-size: 16px;">▼</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                        <div style="font-size: 14px; color: #ccc;">✓ Verified:</div>
+                        <div style="font-size: 14px; color: var(--text-secondary);">Verified:</div>
                         <div style="font-size: 14px; color: #10B981; font-weight: bold;">${widgetPersonalStats.verified.totalXMR.toFixed(5)} XMR</div>
                     </div>
                     <div style="display: flex; justify-content: space-between;">
-                        <div style="font-size: 14px; color: #ccc;">💰 Disclosed:</div>
+                        <div style="font-size: 14px; color: var(--text-secondary);">Disclosed:</div>
                         <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetPersonalStats.disclosed.totalXMR.toFixed(5)} XMR</div>
                     </div>
 
@@ -6653,11 +6648,11 @@ function renderTipActivityWidget() {
                         <span id="widgetSentArrow" style="color: #FF6600; font-size: 16px;">▼</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                        <div style="font-size: 14px; color: #ccc;">Total:</div>
+                        <div style="font-size: 14px; color: var(--text-secondary);">Total:</div>
                         <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetSentStats.totalXMR.toFixed(5)} XMR</div>
                     </div>
                     <div style="display: flex; justify-content: space-between;">
-                        <div style="font-size: 14px; color: #ccc;">Tips:</div>
+                        <div style="font-size: 14px; color: var(--text-secondary);">Tips:</div>
                         <div style="font-size: 14px; color: #FF6600; font-weight: bold;">${widgetSentStats.count}</div>
                     </div>
 
@@ -6820,7 +6815,7 @@ async function showMoreTrendingAll() {
     if (trendingAllOffset === 20) {
         // First page - replace everything
         feed.innerHTML = `
-            <div style="padding: 16px 20px; border-bottom: 1px solid #333; background: rgba(255, 255, 255, 0.02);">
+            <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-primary); background: rgba(255, 255, 255, 0.02);">
                 <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Popular Notes</h3>
                 <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
                     Popular notes across Nostr (past 24 hours)
@@ -7015,7 +7010,7 @@ export async function loadDiscoverFeed() {
         );
 
         feed.innerHTML = `
-            <div style="padding: 16px 20px; border-bottom: 1px solid #333; background: rgba(255, 255, 255, 0.02);">
+            <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-primary); background: rgba(255, 255, 255, 0.02);">
                 <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Discover</h3>
                 <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
                     Random notes from quality accounts (trust score ≥70)

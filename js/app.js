@@ -972,31 +972,31 @@ function displayProfileHeader(profile) {
             }
             
             <div style="flex-grow: 1; min-width: 0;">
-                <h1 style="margin: 0 0 8px 0; color: #fff; font-size: 24px; font-weight: bold;">${displayName}</h1>
-                <p style="margin: 0 0 8px 0; color: #888; font-family: monospace; font-size: 14px; word-break: break-all;">${shortPubkey}</p>
-                
+                <h1 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 24px; font-weight: bold;">${displayName}</h1>
+                <p style="margin: 0 0 8px 0; color: var(--text-muted); font-family: monospace; font-size: 14px; word-break: break-all;">${shortPubkey}</p>
+
                 <div id="nip05Display" style="margin: 0 0 8px 0;"></div>
-                
-                ${profile.about ? `<p style="margin: 8px 0 0 0; color: #ccc; line-height: 1.5;">${Utils.escapeHtml(profile.about)}</p>` : ''}
-                
+
+                ${profile.about ? `<p style="margin: 8px 0 0 0; color: var(--text-secondary); line-height: 1.5;">${Utils.escapeHtml(profile.about)}</p>` : ''}
+
                 ${profile.website ? `<p style="margin: 8px 0 0 0;"><a href="${profile.website}" target="_blank" style="color: #FF6600; text-decoration: none;">🔗 ${profile.website}</a></p>` : ''}
-                
+
                 <div id="profileMoneroAddress" style="margin: 12px 0 0 0;"></div>
                 <div id="profileLightningAddress" style="margin: 8px 0 0 0;"></div>
-                
+
                 <div style="margin-top: 16px; display: flex; gap: 20px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
                     <div style="display: flex; gap: 20px;">
                         <div style="text-align: center;">
-                            <div style="color: #fff; font-weight: bold; font-size: 18px;" id="postsCount">-</div>
-                            <div style="color: #888; font-size: 14px;">Posts</div>
+                            <div style="color: var(--text-primary); font-weight: bold; font-size: 18px;" id="postsCount">-</div>
+                            <div style="color: var(--text-muted); font-size: 14px;">Posts</div>
                         </div>
                         <div style="text-align: center; cursor: pointer;" onclick="showFollowingList()">
-                            <div style="color: #fff; font-weight: bold; font-size: 18px;" id="followingCount">-</div>
-                            <div style="color: #888; font-size: 14px;">Following</div>
+                            <div style="color: var(--text-primary); font-weight: bold; font-size: 18px;" id="followingCount">-</div>
+                            <div style="color: var(--text-muted); font-size: 14px;">Following</div>
                         </div>
                         <div style="text-align: center; cursor: pointer;" onclick="showFollowersList()">
-                            <div style="color: #fff; font-weight: bold; font-size: 18px;" id="followersCount">-</div>
-                            <div style="color: #888; font-size: 14px;">Followers</div>
+                            <div style="color: var(--text-primary); font-weight: bold; font-size: 18px;" id="followersCount">-</div>
+                            <div style="color: var(--text-muted); font-size: 14px;">Followers</div>
                         </div>
                     </div>
                     <div style="display: flex; gap: 12px; flex-wrap: wrap;">
@@ -1151,10 +1151,10 @@ async function displayMoneroAddressInProfile(profile) {
                             Copy
                         </button>
                     </div>
-                    <div style="color: #fff; font-family: monospace; font-size: 14px; word-break: break-all; line-height: 1.4;">
+                    <div style="color: var(--text-primary); font-family: monospace; font-size: 14px; word-break: break-all; line-height: 1.4;">
                         ${Utils.escapeHtml(moneroAddress)}
                     </div>
-                    <div style="color: #ccc; font-size: 11px; margin-top: 6px;">
+                    <div style="color: var(--text-secondary); font-size: 11px; margin-top: 6px;">
                         Available for XMR zaps
                     </div>
                 </div>
@@ -1659,17 +1659,17 @@ async function loadSettings_OLD_DISABLED() {
             <h2 style="color: #FF6600; margin-bottom: 30px;">⚙️ Settings</h2>
             
             <!-- Appearance Settings -->
-            <div style="margin-bottom: 40px; background: #1a1a1a; padding: 20px; border-radius: 12px;">
-                <h3 style="color: #fff; margin-bottom: 20px;">🎨 Appearance</h3>
+            <div class="settings-section-card" style="margin-bottom: 40px;">
+                <h3 style="color: var(--text-primary); margin-bottom: 20px;">🎨 Appearance</h3>
                 <div style="margin-bottom: 15px;">
-                    <label style="color: #ccc; display: block; margin-bottom: 8px;">Theme</label>
+                    <label style="color: var(--text-secondary); display: block; margin-bottom: 8px;">Theme</label>
                     <div style="display: flex; gap: 12px;">
-                        <button id="darkThemeBtn" onclick="setTheme('dark')" 
+                        <button id="darkThemeBtn" onclick="setTheme('dark')"
                                 style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold;">
                             🌙 Dark
                         </button>
-                        <button id="lightThemeBtn" onclick="setTheme('light')" 
-                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff;">
+                        <button id="lightThemeBtn" onclick="setTheme('light')"
+                                style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: var(--bg-hover); color: var(--text-primary);">
                             ☀️ Light
                         </button>
                     </div>
@@ -1677,64 +1677,64 @@ async function loadSettings_OLD_DISABLED() {
             </div>
             
             <!-- NIP-65 Relay Settings -->
-            <div style="margin-bottom: 40px; background: #1a1a1a; padding: 20px; border-radius: 12px;">
-                <h3 style="color: #fff; margin-bottom: 20px;">📡 NIP-65 Relay Management</h3>
-                
+            <div class="settings-section-card" style="margin-bottom: 40px;">
+                <h3 style="color: var(--text-primary); margin-bottom: 20px;">📡 NIP-65 Relay Management</h3>
+
                 <div style="margin-bottom: 20px; padding: 15px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
-                    <p style="color: #ccc; margin: 0; font-size: 14px;">
-                        Configure your read and write relays according to NIP-65 specification. 
+                    <p style="color: var(--text-secondary); margin: 0; font-size: 14px;">
+                        Configure your read and write relays according to NIP-65 specification.
                         This helps other clients know where to find your content and where to send messages.
                     </p>
                 </div>
-                
+
                 <div style="margin-bottom: 20px;">
-                    <label style="color: #ccc; display: block; margin-bottom: 8px;">Your Relay List</label>
-                    <div id="relaysList" style="background: #333; padding: 15px; border-radius: 8px; max-height: 400px; overflow-y: auto;">
-                        <div style="color: #666;">Loading relays...</div>
+                    <label style="color: var(--text-secondary); display: block; margin-bottom: 8px;">Your Relay List</label>
+                    <div id="relaysList" style="background: var(--bg-hover); padding: 15px; border-radius: 8px; max-height: 400px; overflow-y: auto;">
+                        <div style="color: var(--text-muted);">Loading relays...</div>
                     </div>
                 </div>
-                
+
                 <div style="margin-bottom: 20px;">
-                    <label style="color: #ccc; display: block; margin-bottom: 8px;">Add New Relay</label>
+                    <label style="color: var(--text-secondary); display: block; margin-bottom: 8px;">Add New Relay</label>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <input type="text" id="newRelayInput" placeholder="wss://relay.example.com" 
-                               style="flex: 1; min-width: 250px; padding: 10px; background: #333; border: 1px solid #555; border-radius: 6px; color: #fff;">
-                        <label style="display: flex; align-items: center; color: #ccc;">
+                        <input type="text" id="newRelayInput" placeholder="wss://relay.example.com"
+                               class="theme-input" style="flex: 1; min-width: 250px;">
+                        <label style="display: flex; align-items: center; color: var(--text-secondary);">
                             <input type="checkbox" id="relayReadCheck" checked style="margin-right: 5px;"> Read
                         </label>
-                        <label style="display: flex; align-items: center; color: #ccc;">
+                        <label style="display: flex; align-items: center; color: var(--text-secondary);">
                             <input type="checkbox" id="relayWriteCheck" checked style="margin-right: 5px;"> Write
                         </label>
-                        <button onclick="addNIP65Relay()" 
-                                style="padding: 10px 20px; background: #6B73FF; border: none; color: #fff; border-radius: 6px; cursor: pointer;">
+                        <button onclick="addNIP65Relay()"
+                                style="padding: 10px 20px; background: #6B73FF; border: none; color: var(--text-primary); border-radius: 6px; cursor: pointer;">
                             Add Relay
                         </button>
                     </div>
                 </div>
-                
+
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button onclick="publishRelayList()" 
+                    <button onclick="publishRelayList()"
                             style="padding: 10px 20px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">
                         📢 Publish Relay List
                     </button>
-                    <button onclick="importRelayList()" 
-                            style="padding: 10px 20px; background: #4CAF50; border: none; color: #fff; border-radius: 6px; cursor: pointer;">
+                    <button onclick="importRelayList()"
+                            style="padding: 10px 20px; background: #4CAF50; border: none; color: var(--text-primary); border-radius: 6px; cursor: pointer;">
                         📥 Import from Profile
                     </button>
-                    <button onclick="resetToDefaultRelays()" 
-                            style="padding: 10px 20px; background: #666; border: none; color: #fff; border-radius: 6px; cursor: pointer;">
+                    <button onclick="resetToDefaultRelays()"
+                            style="padding: 10px 20px; background: var(--bg-hover); border: none; color: var(--text-primary); border-radius: 6px; cursor: pointer;">
                         🔄 Reset to Defaults
                     </button>
                 </div>
             </div>
             
             <!-- Privacy & Security -->
-            <div style="margin-bottom: 40px; background: #1a1a1a; padding: 20px; border-radius: 12px;">
-                <h3 style="color: #fff; margin-bottom: 20px;">🔒 Privacy & Security</h3>
+            <div class="settings-section-card" style="margin-bottom: 40px;">
+                <h3 style="color: var(--text-primary); margin-bottom: 20px;">🔒 Privacy & Security</h3>
                 <div style="margin-bottom: 15px;">
-                    <label style="color: #ccc; display: block; margin-bottom: 8px;">Private Key Storage</label>
-                    <div style="background: #333; padding: 15px; border-radius: 8px;">
-                        <p style="color: #fff; margin: 0; font-size: 14px;">
+                    <label style="color: var(--text-secondary); display: block; margin-bottom: 8px;">Private Key Storage</label>
+                    <div style="background: var(--bg-hover); padding: 15px; border-radius: 8px;">
+                        <p style="color: var(--text-primary); margin: 0; font-size: 14px;">
                             ${State.getPrivateKeyForSigning() === 'extension' ?
                                 '🔌 Using browser extension (most secure)' :
                                 State.getPrivateKeyForSigning() === 'nsec-app' ?
@@ -1747,7 +1747,7 @@ async function loadSettings_OLD_DISABLED() {
                     </div>
                 </div>
                 <div style="margin-top: 15px;">
-                    <button onclick="exportPrivateKey()" 
+                    <button onclick="exportPrivateKey()"
                             style="padding: 10px 20px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">
                         🔑 Export Private Key
                     </button>
@@ -1755,75 +1755,75 @@ async function loadSettings_OLD_DISABLED() {
             </div>
             
             <!-- Posting Settings -->
-            <div style="margin-bottom: 40px; background: #1a1a1a; padding: 20px; border-radius: 12px;">
-                <h3 style="color: #fff; margin-bottom: 20px;">📝 Posting & Zaps</h3>
-                
+            <div class="settings-section-card" style="margin-bottom: 40px;">
+                <h3 style="color: var(--text-primary); margin-bottom: 20px;">📝 Posting & Zaps</h3>
+
                 <!-- Monero Settings -->
                 <div style="margin-bottom: 25px; padding: 15px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
                     <h4 style="color: #FF6600; margin: 0 0 15px 0;">💰 Monero (XMR) Zaps</h4>
                     <div style="margin-bottom: 15px;">
-                        <label style="color: #ccc; display: block; margin-bottom: 8px;">Default Zap Amount (XMR)</label>
+                        <label style="color: var(--text-secondary); display: block; margin-bottom: 8px;">Default Zap Amount (XMR)</label>
                         <input type="text" id="defaultZapAmount" placeholder="0.00018"
                                value="${Utils.escapeHtml(localStorage.getItem('default-zap-amount') || '0.00018')}"
-                               style="padding: 10px; background: #333; border: 1px solid #555; border-radius: 6px; color: #fff; width: 150px;">
+                               class="theme-input" style="width: 150px;">
                     </div>
                     <div style="margin-bottom: 15px;">
-                        <label style="color: #ccc; display: block; margin-bottom: 8px;">Your Monero Address (for receiving XMR zaps)</label>
+                        <label style="color: var(--text-secondary); display: block; margin-bottom: 8px;">Your Monero Address (for receiving XMR zaps)</label>
                         <input type="text" id="userMoneroAddress" placeholder="44ABC...XMR"
                                value="${Utils.escapeHtml(localStorage.getItem('user-monero-address') || '')}"
-                               style="padding: 10px; background: #333; border: 1px solid #555; border-radius: 6px; color: #fff; width: 100%; max-width: 500px;">
+                               class="theme-input" style="width: 100%; max-width: 500px;">
                     </div>
                 </div>
-                
+
                 <!-- Lightning Settings -->
                 <div style="margin-bottom: 25px; padding: 15px; background: rgba(255, 223, 0, 0.1); border-radius: 8px; border-left: 3px solid #FFDF00;">
                     <h4 style="color: #FFDF00; margin: 0 0 15px 0;">⚡ Lightning (BTC) Zaps</h4>
                     <div style="margin-bottom: 15px;">
-                        <label style="color: #ccc; display: block; margin-bottom: 8px;">Lightning Address (for receiving BTC zaps)</label>
-                        <input type="text" id="userLightningAddress" placeholder="user@getalby.com or user@wallet-of-satoshi.com" 
+                        <label style="color: var(--text-secondary); display: block; margin-bottom: 8px;">Lightning Address (for receiving BTC zaps)</label>
+                        <input type="text" id="userLightningAddress" placeholder="user@getalby.com or user@wallet-of-satoshi.com"
                                value="${Utils.escapeHtml(localStorage.getItem('user-lightning-address') || '')}"
-                               style="padding: 10px; background: #333; border: 1px solid #555; border-radius: 6px; color: #fff; width: 100%; max-width: 500px;">
-                        <p style="color: #888; font-size: 12px; margin-top: 5px;">
+                               class="theme-input" style="width: 100%; max-width: 500px;">
+                        <p style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">
                             💡 Popular lightning addresses: Alby (@getalby.com), Wallet of Satoshi (@wallet-of-satoshi.com), Strike (@strike.me)
                         </p>
                     </div>
                     <div style="margin-bottom: 15px;">
-                        <label style="color: #ccc; display: block; margin-bottom: 8px;">Default BTC Zap Amount (sats)</label>
-                        <input type="text" id="defaultBtcZapAmount" placeholder="1000" 
+                        <label style="color: var(--text-secondary); display: block; margin-bottom: 8px;">Default BTC Zap Amount (sats)</label>
+                        <input type="text" id="defaultBtcZapAmount" placeholder="1000"
                                value="${Utils.escapeHtml(localStorage.getItem('default-btc-zap-amount') || '1000')}"
-                               style="padding: 10px; background: #333; border: 1px solid #555; border-radius: 6px; color: #fff; width: 150px;">
+                               class="theme-input" style="width: 150px;">
                     </div>
                 </div>
-                
-                <button onclick="savePostingSettings()" 
-                        style="padding: 10px 20px; background: #4CAF50; border: none; color: #fff; border-radius: 6px; cursor: pointer; font-weight: bold;">
+
+                <button onclick="savePostingSettings()"
+                        style="padding: 10px 20px; background: #4CAF50; border: none; color: var(--text-primary); border-radius: 6px; cursor: pointer; font-weight: bold;">
                     💾 Save Zap Settings
                 </button>
             </div>
             
             <!-- Account Management -->
-            <div style="margin-bottom: 40px; background: #1a1a1a; padding: 20px; border-radius: 12px;">
-                <h3 style="color: #fff; margin-bottom: 20px;">👤 Account</h3>
+            <div class="settings-section-card" style="margin-bottom: 40px;">
+                <h3 style="color: var(--text-primary); margin-bottom: 20px;">👤 Account</h3>
                 <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                    <button onclick="logout()" 
-                            style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #ff4444; color: #fff; font-weight: bold;">
+                    <button onclick="logout()"
+                            style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #ff4444; color: var(--text-primary); font-weight: bold;">
                         🚪 Logout
                     </button>
-                    <button onclick="clearAllData()" 
-                            style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #ff6666; color: #fff; font-weight: bold;">
+                    <button onclick="clearAllData()"
+                            style="padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; background: #ff6666; color: var(--text-primary); font-weight: bold;">
                         🗑️ Clear All Data
                     </button>
                 </div>
             </div>
-            
+
             <!-- About -->
-            <div style="background: #1a1a1a; padding: 20px; border-radius: 12px;">
-                <h3 style="color: #fff; margin-bottom: 20px;">ℹ️ About</h3>
-                <div style="color: #ccc; line-height: 1.6;">
+            <div class="settings-section-card">
+                <h3 style="color: var(--text-primary); margin-bottom: 20px;">ℹ️ About</h3>
+                <div style="color: var(--text-secondary); line-height: 1.6;">
                     <p><strong style="color: #FF6600;">Nosmero v0.95</strong> - Modular Architecture</p>
                     <p>A decentralized social client for the Nostr protocol with Monero zap integration.</p>
                     <p>Built with modular ES6 components for maximum maintainability.</p>
-                    <div style="margin-top: 20px; padding: 15px; background: #333; border-radius: 8px;">
+                    <div style="margin-top: 20px; padding: 15px; background: var(--bg-hover); border-radius: 8px;">
                         <h4 style="color: #FF6600; margin: 0 0 10px 0;">Key Features:</h4>
                         <ul style="margin: 0; padding-left: 20px;">
                             <li>🔐 Secure key management</li>
@@ -4295,8 +4295,9 @@ function closeSettingsModal() {
     goBackFromSettings();
 }
 
-// Change theme immediately when selected
-function changeTheme(theme) {
+// Set theme (called from settings buttons)
+function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
     console.log('🎨 Theme changed to:', theme);
     Utils.showNotification(`Theme changed to ${theme}`, 'success');
@@ -4308,11 +4309,9 @@ function toggleTheme() {
     const currentTheme = localStorage.getItem('theme') || 'dark';
     const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
 
+    document.documentElement.setAttribute('data-theme', newTheme);
     localStorage.setItem('theme', newTheme);
     console.log('🎨 Theme toggled to:', newTheme);
-
-    // Apply the theme
-    applyTheme(newTheme);
 
     updateThemeToggleUI(newTheme);
     Utils.showNotification(`Switched to ${newTheme} theme`, 'success');
@@ -4338,108 +4337,8 @@ function updateThemeToggleUI(theme) {
 function initializeThemeToggle() {
     const currentTheme = localStorage.getItem('theme') || 'dark';
     updateThemeToggleUI(currentTheme);
-    // Also apply the theme on initialization
-    applyTheme(currentTheme);
-}
-
-// Apply theme CSS variables and styles
-function applyTheme(theme) {
-    const root = document.documentElement;
-
-    if (theme === 'light') {
-        root.style.setProperty('--bg-primary', '#ffffff');
-        root.style.setProperty('--bg-secondary', '#f5f5f5');
-        root.style.setProperty('--bg-tertiary', '#e0e0e0');
-        root.style.setProperty('--text-primary', '#000000');
-        root.style.setProperty('--text-secondary', '#333333');
-        root.style.setProperty('--text-muted', '#666666');
-        root.style.setProperty('--border-color', '#d0d0d0');
-        root.style.setProperty('--sidebar-bg', '#f8f8f8');
-        root.style.setProperty('--post-bg', '#ffffff');
-        root.style.setProperty('--hover-bg', '#f0f0f0');
-
-        document.body.style.background = '#ffffff';
-        document.body.style.color = '#000000';
-
-        updateElementsForTheme('light');
-    } else {
-        root.style.setProperty('--bg-primary', '#000000');
-        root.style.setProperty('--bg-secondary', '#1a1a1a');
-        root.style.setProperty('--bg-tertiary', '#2a2a2a');
-        root.style.setProperty('--text-primary', '#ffffff');
-        root.style.setProperty('--text-secondary', '#e0e0e0');
-        root.style.setProperty('--text-muted', '#999999');
-        root.style.setProperty('--border-color', '#333333');
-        root.style.setProperty('--sidebar-bg', '#111111');
-        root.style.setProperty('--post-bg', '#1a1a1a');
-        root.style.setProperty('--hover-bg', '#2a2a2a');
-
-        document.body.style.background = '#000000';
-        document.body.style.color = '#ffffff';
-
-        updateElementsForTheme('dark');
-    }
-}
-
-// Update individual elements for theme
-function updateElementsForTheme(theme) {
-    // Sidebar
-    const sidebar = document.querySelector('.sidebar');
-    if (sidebar) {
-        sidebar.style.background = theme === 'light' ? '#f8f8f8' : '#111';
-        sidebar.style.borderRight = theme === 'light' ? '1px solid #d0d0d0' : '1px solid #333';
-    }
-
-    // Main content area
-    const main = document.querySelector('.main');
-    if (main) {
-        main.style.background = theme === 'light' ? '#ffffff' : '#000';
-    }
-
-    // Posts
-    document.querySelectorAll('.post').forEach(post => {
-        post.style.background = theme === 'light' ? '#ffffff' : '#1a1a1a';
-        post.style.borderBottom = theme === 'light' ? '1px solid #e0e0e0' : '1px solid #333';
-        post.style.color = theme === 'light' ? '#000' : '#fff';
-    });
-
-    // Compose area
-    const compose = document.getElementById('compose');
-    if (compose) {
-        compose.style.background = theme === 'light' ? '#f5f5f5' : '#1a1a1a';
-        compose.style.borderBottom = theme === 'light' ? '1px solid #d0d0d0' : '1px solid #333';
-    }
-
-    // Form elements
-    document.querySelectorAll('textarea, input[type="text"], input[type="number"]').forEach(input => {
-        input.style.background = theme === 'light' ? '#ffffff' : '#000';
-        input.style.color = theme === 'light' ? '#000' : '#fff';
-        input.style.border = theme === 'light' ? '1px solid #d0d0d0' : '1px solid #333';
-    });
-
-    // Navigation items
-    document.querySelectorAll('.nav-item').forEach(navItem => {
-        navItem.style.color = theme === 'light' ? '#333' : '#ccc';
-    });
-
-    // Messages page
-    const messagesPage = document.getElementById('messagesPage');
-    if (messagesPage) {
-        messagesPage.style.background = theme === 'light' ? '#ffffff' : '#000';
-    }
-
-    // Conversations list
-    const conversationsList = document.getElementById('conversationsList');
-    if (conversationsList) {
-        conversationsList.style.background = theme === 'light' ? '#f8f8f8' : '#111';
-    }
-
-    // Modal content
-    document.querySelectorAll('.modal-content').forEach(modal => {
-        modal.style.background = theme === 'light' ? '#ffffff' : '#1a1a1a';
-        modal.style.color = theme === 'light' ? '#000' : '#fff';
-        modal.style.border = theme === 'light' ? '1px solid #d0d0d0' : '1px solid #333';
-    });
+    // Apply theme via data-theme attribute
+    document.documentElement.setAttribute('data-theme', currentTheme);
 }
 
 // ==================== RELAY MANAGEMENT FOR SETTINGS MODAL ====================
@@ -4459,7 +4358,7 @@ async function populateRelayLists() {
     if (readRelaysList) {
         readRelaysList.innerHTML = readRelays.map(relay => `
             <div style="display: flex; align-items: center; justify-content: between; padding: 8px; background: rgba(255, 102, 0, 0.1); border-radius: 6px; margin-bottom: 6px;">
-                <span style="color: #fff; font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${relay}</span>
+                <span style="color: var(--text-primary); font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${relay}</span>
                 <button onclick="removeReadRelayFromModal('${relay}')"
                         style="background: #ff4444; border: none; border-radius: 4px; color: white; padding: 4px 8px; font-size: 12px; cursor: pointer; margin-left: 8px;">
                     Remove
@@ -4473,7 +4372,7 @@ async function populateRelayLists() {
     if (writeRelaysList) {
         writeRelaysList.innerHTML = writeRelays.map(relay => `
             <div style="display: flex; align-items: center; justify-content: between; padding: 8px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; margin-bottom: 6px;">
-                <span style="color: #fff; font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${relay}</span>
+                <span style="color: var(--text-primary); font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${relay}</span>
                 <button onclick="removeWriteRelayFromModal('${relay}')"
                         style="background: #ff4444; border: none; border-radius: 4px; color: white; padding: 4px 8px; font-size: 12px; cursor: pointer; margin-left: 8px;">
                     Remove
@@ -4647,7 +4546,7 @@ async function removeWriteRelayFromModal(relayUrl) {
 window.loadSettings = loadSettings;
 window.saveSettings = saveSettings;
 window.closeSettingsModal = closeSettingsModal;
-window.changeTheme = changeTheme;
+window.setTheme = setTheme;
 window.toggleTheme = toggleTheme;
 window.initializeThemeToggle = initializeThemeToggle;
 

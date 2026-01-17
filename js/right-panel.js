@@ -1607,12 +1607,12 @@ const RightPanel = {
                             `<div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${safeName.charAt(0).toUpperCase()}</div>`
                         }
                         <div style="flex: 1; min-width: 0;">
-                            <h2 class="profile-name" data-pubkey="${pubkey}" style="color: #fff; font-size: 18px; margin: 0 0 4px 0; word-wrap: break-word;">${safeName}</h2>
-                            <p style="margin: 0; color: #888; font-family: monospace; font-size: 12px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
+                            <h2 class="profile-name" data-pubkey="${pubkey}" style="color: var(--text-primary); font-size: 18px; margin: 0 0 4px 0; word-wrap: break-word;">${safeName}</h2>
+                            <p style="margin: 0; color: var(--text-muted); font-family: monospace; font-size: 12px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
                             ${safeNip05 ? `<div style="color: #10B981; font-size: 12px; margin-top: 4px;">✅ ${safeNip05}</div>` : ''}
                         </div>
                     </div>
-                    ${userProfile.about ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 12px; word-wrap: break-word;">${this.escapeHtml(userProfile.about)}</div>` : ''}
+                    ${userProfile.about ? `<div style="color: var(--text-secondary); font-size: 14px; line-height: 1.4; margin-bottom: 12px; word-wrap: break-word;">${this.escapeHtml(userProfile.about)}</div>` : ''}
                     ${safeWebsiteHref ? `<div style="margin-bottom: 8px;"><a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 13px;">🔗 ${safeWebsiteDisplay}</a></div>` : ''}
                     <div id="panelProfileMoneroAddress"></div>
                     <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">

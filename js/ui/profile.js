@@ -569,7 +569,7 @@ export async function viewUserProfilePage(pubkey) {
         const profileAvatarPlaceholder = userProfile.picture ? window.ThumbHashLoader?.getPlaceholder(userProfile.picture) : null;
         profilePage.innerHTML = `
             <div style="max-width: 800px; margin: 0 auto; padding: 20px; word-wrap: break-word; overflow-wrap: break-word;">
-                <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid #333; border-radius: 16px; padding: 24px; margin-bottom: 24px;">
+                <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid var(--border-primary); border-radius: 16px; padding: 24px; margin-bottom: 24px;">
                     <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 16px;">
                         ${userProfile.picture ?
                             `<img src="${profileAvatarPlaceholder || userProfile.picture}" data-thumbhash-src="${userProfile.picture}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;${profileAvatarPlaceholder ? ' filter: blur(4px); transition: filter 0.3s;' : ''}"
@@ -578,21 +578,21 @@ export async function viewUserProfilePage(pubkey) {
                             `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${safeName.charAt(0).toUpperCase()}</div>`
                         }
                         <div style="flex: 1; min-width: 0; word-wrap: break-word; overflow-wrap: break-word;">
-                            <h1 class="profile-name" data-pubkey="${pubkey}" style="color: #fff; font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${safeName}</h1>
-                            <p style="margin: 0 0 8px 0; color: #888; font-family: monospace; font-size: 14px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
+                            <h1 class="profile-name" data-pubkey="${pubkey}" style="color: var(--text-primary); font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${safeName}</h1>
+                            <p style="margin: 0 0 8px 0; color: var(--text-muted); font-family: monospace; font-size: 14px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
                             ${safeNip05 ? `<div style="color: #10B981; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;">✅ ${safeNip05}</div>` : ''}
-                            ${safeAbout ? `<div style="color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 8px; word-wrap: break-word;">${safeAbout}</div>` : ''}
+                            ${safeAbout ? `<div style="color: var(--text-secondary); font-size: 14px; line-height: 1.4; margin-bottom: 8px; word-wrap: break-word;">${safeAbout}</div>` : ''}
                             ${safeWebsiteHref ? `<div style="margin-bottom: 8px; word-wrap: break-word;"><a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 14px; word-break: break-all;">🔗 ${safeWebsiteDisplay}</a></div>` : ''}
                             ${safeLud16 ? `<div style="color: #FFDF00; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;"><span style="margin-right: 6px;">⚡</span>Lightning: <span style="word-break: break-all;">${safeLud16}</span></div>` : ''}
                             <div id="uiProfileMoneroAddress" style="margin-bottom: 8px;"></div>
                         </div>
                     </div>
                     <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                        <div id="followingCount_${pubkey}" onclick="showFollowingList('${pubkey}')" style="cursor: pointer; text-align: center; color: #fff; padding: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 8px; min-width: 80px;">
+                        <div id="followingCount_${pubkey}" onclick="showFollowingList('${pubkey}')" style="cursor: pointer; text-align: center; color: var(--text-primary); padding: 8px; background: var(--card-bg); border-radius: 8px; min-width: 80px;">
                             <div style="font-size: 18px; font-weight: bold;">-</div>
                             <div style="font-size: 12px; opacity: 0.8;">Following</div>
                         </div>
-                        <div id="followersCount_${pubkey}" onclick="showFollowersList('${pubkey}')" style="cursor: pointer; text-align: center; color: #fff; padding: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 8px; min-width: 80px;">
+                        <div id="followersCount_${pubkey}" onclick="showFollowersList('${pubkey}')" style="cursor: pointer; text-align: center; color: var(--text-primary); padding: 8px; background: var(--card-bg); border-radius: 8px; min-width: 80px;">
                             <div style="font-size: 18px; font-weight: bold;">-</div>
                             <div style="font-size: 12px; opacity: 0.8;">Followers</div>
                         </div>
@@ -678,7 +678,7 @@ async function loadAndDisplayMoneroAddress(pubkey, userProfile) {
                             Copy
                         </button>
                     </div>
-                    <div style="color: #fff; font-family: monospace; font-size: 14px; word-break: break-all; line-height: 1.4;">
+                    <div style="color: var(--text-primary); font-family: monospace; font-size: 14px; word-break: break-all; line-height: 1.4;">
                         ${shortAddress}
                     </div>
                 </div>

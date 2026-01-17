@@ -958,29 +958,23 @@ export async function loadNotifications() {
                     <h2 style="margin-bottom: 20px; color: #FF6600;">🔔 Notifications</h2>
                     
                     <!-- Notification Filter Tabs -->
-                    <div style="display: flex; gap: 8px; margin-bottom: 20px;">
-                        <button id="notifTypeAll" class="notif-type-btn active" onclick="setNotificationType('all')" 
-                                style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; cursor: pointer; font-size: 14px;">
+                    <div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;">
+                        <button id="notifTypeAll" class="notif-type-btn active" onclick="setNotificationType('all')">
                             All
                         </button>
-                        <button id="notifTypeMentions" class="notif-type-btn" onclick="setNotificationType('mentions')" 
-                                style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
+                        <button id="notifTypeMentions" class="notif-type-btn" onclick="setNotificationType('mentions')">
                             Mentions
                         </button>
-                        <button id="notifTypeReplies" class="notif-type-btn" onclick="setNotificationType('replies')" 
-                                style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
+                        <button id="notifTypeReplies" class="notif-type-btn" onclick="setNotificationType('replies')">
                             Replies
                         </button>
-                        <button id="notifTypeLikes" class="notif-type-btn" onclick="setNotificationType('likes')" 
-                                style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
+                        <button id="notifTypeLikes" class="notif-type-btn" onclick="setNotificationType('likes')">
                             Likes
                         </button>
-                        <button id="notifTypeReposts" class="notif-type-btn" onclick="setNotificationType('reposts')"
-                                style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
+                        <button id="notifTypeReposts" class="notif-type-btn" onclick="setNotificationType('reposts')">
                             Reposts
                         </button>
-                        <button id="notifTypeFollows" class="notif-type-btn" onclick="setNotificationType('follows')"
-                                style="padding: 8px 16px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer; font-size: 14px;">
+                        <button id="notifTypeFollows" class="notif-type-btn" onclick="setNotificationType('follows')">
                             Follows
                         </button>
                     </div>
@@ -1614,10 +1608,10 @@ export function renderNotifications(notificationItems = []) {
         }
 
         return `
-            <div class="notification-item" data-type="${notification.type}" data-has-note="${hasOriginalNote}" style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 16px; margin-bottom: 12px; ${onclickHandler ? 'cursor: pointer;' : ''}"
+            <div class="notification-item" data-type="${notification.type}" data-has-note="${hasOriginalNote}" style="background: var(--card-bg); border: 1px solid var(--border-primary); border-radius: 12px; padding: 16px; margin-bottom: 12px; ${onclickHandler ? 'cursor: pointer;' : ''}"
                  ${onclickHandler ? `onclick="${onclickHandler}"` : ''}
-                 onmouseover="this.style.background='rgba(255, 255, 255, 0.05)'"
-                 onmouseout="this.style.background='rgba(255, 255, 255, 0.02)'">
+                 onmouseover="this.style.background='var(--card-hover)'"
+                 onmouseout="this.style.background='var(--card-bg)'">
 
                 <!-- User info row -->
                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: ${isFollow ? '0' : '12px'};">
@@ -1633,18 +1627,18 @@ export function renderNotifications(notificationItems = []) {
                             <span style="font-size: 18px;">${actionIcon}</span>
                             <span style="color: #FF6600; font-weight: bold; cursor: pointer;"
                                   onclick="event.stopPropagation(); viewUserProfilePage('${notification.pubkey}')">${displayName}</span>
-                            <span style="color: #ccc; font-size: 14px;">${actionText}</span>
+                            <span style="color: var(--text-secondary); font-size: 14px;">${actionText}</span>
                         </div>
                     </div>
 
                     <!-- Timestamp (hidden for follows until historical lookup implemented) -->
-                    ${time ? `<div style="color: #666; font-size: 12px; white-space: nowrap;">${time}</div>` : ''}
+                    ${time ? `<div style="color: var(--text-muted); font-size: 12px; white-space: nowrap;">${time}</div>` : ''}
                 </div>
 
                 ${hasOriginalNote ? `
                     <!-- Original note preview -->
-                    <div style="background: rgba(0, 0, 0, 0.2); padding: 12px; border-radius: 8px; border-left: 3px solid #333; margin-top: 8px;">
-                        <div class="post-content" style="color: #999; font-size: 14px; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">
+                    <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; border-left: 3px solid var(--border-primary); margin-top: 8px;">
+                        <div class="post-content" style="color: var(--text-secondary); font-size: 14px; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">
                             ${parseContent(originalContent)}
                         </div>
                     </div>
@@ -1653,7 +1647,7 @@ export function renderNotifications(notificationItems = []) {
                 ${notification.type === 'reply' && notification.content ? `
                     <!-- Reply content -->
                     <div style="background: rgba(69, 183, 209, 0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #45b7d1; margin-top: 8px;">
-                        <div class="post-content" style="color: #ccc; font-size: 14px; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">
+                        <div class="post-content" style="color: var(--text-secondary); font-size: 14px; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">
                             ${parseContent(notification.content)}
                         </div>
                     </div>
@@ -1662,7 +1656,7 @@ export function renderNotifications(notificationItems = []) {
                 ${notification.type === 'tip' && notification.message ? `
                     <!-- Tip message -->
                     <div style="background: rgba(255, 102, 0, 0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #FF6600; margin-top: 8px;">
-                        <div style="color: #ccc; font-size: 14px; line-height: 1.4;">${parseContent(notification.message)}</div>
+                        <div style="color: var(--text-secondary); font-size: 14px; line-height: 1.4;">${parseContent(notification.message)}</div>
                     </div>
                 ` : ''}
             </div>

@@ -23,6 +23,57 @@
             --purple: #9B59B6;
             --warning: #F59E0B;
             --info: #3B82F6;
+
+            /* Backgrounds */
+            --bg-primary: #000;
+            --bg-secondary: #0a0a0a;
+            --bg-tertiary: #1a1a1a;
+            --bg-elevated: #1a1a1a;
+            --bg-input: #1a1a1a;
+            --bg-hover: #2a2a2a;
+            --bg-modal: #1a1a1a;
+
+            /* Text (update existing if needed) */
+            --text-inverse: #000000;
+
+            /* Borders */
+            --border-primary: #333;
+            --border-secondary: #444;
+            --border-focus: #666;
+
+            /* Header */
+            --header-bg: rgba(10, 10, 10, 0.95);
+
+            /* Skeleton */
+            --skeleton-base: #222;
+            --skeleton-highlight: #333;
+        }
+
+        [data-theme="light"] {
+          --dark-bg: #ffffff;
+          --darker-bg: #f5f5f5;
+          --card-bg: rgba(0, 0, 0, 0.03);
+          --card-hover: rgba(0, 0, 0, 0.05);
+          --text-primary: #000000;
+          --text-secondary: #333333;
+          --text-muted: #666666;
+          --border-color: rgba(0, 0, 0, 0.1);
+          --border-hover: rgba(0, 0, 0, 0.2);
+
+          --bg-primary: #ffffff;
+          --bg-secondary: #f5f5f5;
+          --bg-tertiary: #e8e8e8;
+          --bg-elevated: #ffffff;
+          --bg-input: #ffffff;
+          --bg-hover: #f0f0f0;
+          --bg-modal: #ffffff;
+          --text-inverse: #ffffff;
+          --border-primary: #d0d0d0;
+          --border-secondary: #e0e0e0;
+          --border-focus: #999999;
+          --header-bg: rgba(255, 255, 255, 0.95);
+          --skeleton-base: #e0e0e0;
+          --skeleton-highlight: #f0f0f0;
         }
 
         /* Main body styling - Dark theme with flexible layout */
@@ -38,8 +89,8 @@
         /* Left navigation sidebar - Fixed position with scrolling */
         .sidebar {
             width: 260px;
-            background: #000;
-            border-right: 1px solid #333;
+            background: var(--bg-primary);
+            border-right: 1px solid var(--border-primary);
             padding: 20px;
             position: fixed;
             height: 100vh;
@@ -71,7 +122,7 @@
         }
 
         .nav-item:hover {
-            background: #1a1a1a;
+            background: var(--bg-tertiary);
         }
 
         .nav-item.active {
@@ -113,7 +164,7 @@
             top: 0;
             left: 0;
             right: 0;
-            background: rgba(10, 10, 10, 0.95);
+            background: var(--header-bg);
             backdrop-filter: blur(20px);
             border-bottom: 1px solid var(--border-color);
             z-index: 100;
@@ -580,10 +631,10 @@
         /* Sticky header with blur effect for feed sections */
         .header {
             padding: 16px 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-primary);
             position: sticky;
             top: 0;
-            background: rgba(0, 0, 0, 0.8);
+            background: var(--header-bg);
             backdrop-filter: blur(10px); /* Glass effect */
         }
 
@@ -704,29 +755,30 @@
 
         /* Parent post styling for replies */
         .parent-post {
-            background: rgba(255, 255, 255, 0.03);
+            background: var(--card-bg);
             border-radius: 8px;
             padding: 8px 12px;
             margin-bottom: 12px;
             transition: background 0.2s;
         }
-        
+
         .parent-post:hover {
-            background: rgba(255, 255, 255, 0.05);
+            background: var(--card-hover);
         }
-        
+
         .parent-post .post-header {
             margin-bottom: 6px;
         }
-        
+
         .parent-post .avatar {
             width: 28px;
             height: 28px;
             font-size: 13px;
         }
-        
+
         .parent-post .post-content {
-            color: rgba(255, 255, 255, 0.8);
+            color: var(--text-primary);
+            opacity: 0.85;
             line-height: 1.4;
         }
         
@@ -914,7 +966,7 @@
 
         /* Quoted/embedded notes (nevent links) display */
         .embedded-note {
-            border: 1px solid #333;
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
             padding: 12px;
             margin: 8px 0;
@@ -1090,7 +1142,7 @@
         }
 
         .modal-content {
-            background: #1a1a1a;
+            background: var(--bg-modal);
             border-radius: 16px;
             padding: 24px;
             max-width: 400px;
@@ -1120,7 +1172,7 @@
         }
 
         .close-btn {
-            background: #333;
+            background: var(--bg-hover);
             border: 1px solid #666;
             color: #FFFFFF;
             padding: 14px 24px;
@@ -1137,8 +1189,8 @@
         }
 
         .login-option-btn {
-            background: #1a1a1a;
-            border: 1px solid #333;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
             color: #fff;
             padding: 16px 20px;
             border-radius: 12px;
@@ -1154,8 +1206,8 @@
         }
 
         .nostr-option-btn {
-            background: #1a1a1a;
-            border: 1px solid #333;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
             color: #ccc;
             padding: 10px 14px;
             border-radius: 8px;
@@ -1204,7 +1256,7 @@
         /* New post composition area */
         .compose-area {
             padding: 16px 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-primary);
         }
 
         .compose-textarea {
@@ -1212,7 +1264,7 @@
             background: transparent !important;
             border: none;
             outline: none;
-            color: #fff !important;
+            color: var(--text-primary) !important;
             caret-color: #FF6600 !important; /* Use brand orange for better visibility */
             font-size: 16px;
             resize: vertical;
@@ -1232,7 +1284,7 @@
         
         .compose-textarea:focus {
             caret-color: #FF6600 !important;
-            color: #fff !important;
+            color: var(--text-primary) !important;
             outline: none;
             /* Add subtle glow to show focus */
             box-shadow: 0 0 0 2px rgba(255, 102, 0, 0.2);
@@ -1290,8 +1342,8 @@
 
         /* Emoji Picker */
         .emoji-picker {
-            background: #1a1a1a;
-            border: 1px solid #444;
+            background: var(--bg-modal);
+            border: 1px solid var(--border-secondary);
             border-radius: 8px;
             padding: 12px;
             margin-bottom: 8px;
@@ -1434,9 +1486,9 @@
 
         /* Monero address input field in compose area */
         .xmr-address-input {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            color: #fff;
+            background: var(--bg-input);
+            border: 1px solid var(--border-primary);
+            color: var(--text-primary);
             padding: 8px 12px;
             border-radius: 8px;
             font-size: 12px;
@@ -1459,7 +1511,7 @@
         }
 
         .cancel-btn {
-            background: #333;
+            background: var(--bg-hover);
             border: 1px solid #666;
             color: #FFFFFF;
             padding: 8px 16px;
@@ -1515,9 +1567,9 @@
         }
 
         .notif-type-btn {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            color: #ccc;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
+            color: var(--text-secondary);
             padding: 8px 16px;
             border-radius: 16px;
             cursor: pointer;
@@ -1532,12 +1584,12 @@
         }
 
         .notif-type-btn:hover:not(.active) {
-            background: #2a2a2a;
-            border-color: #666;
+            background: var(--bg-hover);
+            border-color: var(--border-secondary);
         }
 
         .notification-item {
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-primary);
             padding: 16px 20px;
             transition: background 0.2s;
             cursor: pointer;
@@ -1602,7 +1654,7 @@
 
         .notification-preview {
             background: #0a0a0a;
-            border: 1px solid #333;
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
             padding: 12px;
             margin-top: 8px;
@@ -1668,7 +1720,7 @@
             width: 100%;
             height: 100vh;
             display: none;
-            background: #000;
+            background: var(--bg-primary);
         }
         
         .messages-container {
@@ -1679,7 +1731,7 @@
         
         .conversations-list {
             width: 320px;
-            border-right: 1px solid #333;
+            border-right: 1px solid var(--border-primary);
             display: flex;
             flex-direction: column;
             background: #0a0a0a;
@@ -1687,7 +1739,7 @@
         
         .conversations-header {
             padding: 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-primary);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1790,7 +1842,7 @@
         
         .message-header {
             padding: 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-primary);
             background: #0a0a0a;
             font-weight: bold;
         }
@@ -1821,7 +1873,7 @@
         
         .message-bubble.received {
             align-self: flex-start;
-            background: #333;
+            background: var(--bg-hover);
             color: white;
         }
 
@@ -1841,7 +1893,7 @@
         
         .message-composer {
             padding: 20px;
-            border-top: 1px solid #333;
+            border-top: 1px solid var(--border-primary);
             background: #0a0a0a;
             display: flex;
             gap: 10px;
@@ -1850,8 +1902,8 @@
         
         #messageInput {
             flex: 1;
-            background: #1a1a1a;
-            border: 1px solid #333;
+            background: var(--bg-input);
+            border: 1px solid var(--border-primary);
             color: white;
             padding: 10px;
             border-radius: 20px;
@@ -1885,7 +1937,7 @@
         }
         
         .media-btn {
-            background: #333;
+            background: var(--bg-hover);
             border: 1px solid #555;
             color: #fff;
             padding: 8px 16px;
@@ -1894,18 +1946,18 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        
+
         .media-btn:hover {
             background: #444;
             border-color: #666;
         }
-        
+
         .media-preview {
             margin-top: 12px;
-            border: 1px solid #333;
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
             padding: 12px;
-            background: #1a1a1a;
+            background: var(--bg-tertiary);
         }
         
         .media-preview img {
@@ -1971,8 +2023,8 @@
 
         /* Post Context Menu */
         .post-menu {
-            background: #1a1a1a;
-            border: 1px solid #333;
+            background: var(--bg-modal);
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
             min-width: 180px;
@@ -2006,19 +2058,19 @@
 
         /* Thread Page */
         .thread-page {
-            background: #000;
-            color: #fff;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             min-height: 100vh;
         }
 
         .thread-header {
             padding: 16px 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-primary);
             display: flex;
             align-items: center;
             position: sticky;
             top: 0;
-            background: rgba(0, 0, 0, 0.9);
+            background: var(--header-bg);
             backdrop-filter: blur(10px);
         }
 
@@ -2034,8 +2086,8 @@
 
         /* Settings Page */
         .settings-page {
-            background: #000;
-            color: #fff;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             position: fixed;
             top: 0;
             left: 0;
@@ -2051,10 +2103,10 @@
 
         .settings-header {
             padding: 16px 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-primary);
             display: flex;
             align-items: center;
-            background: rgba(0, 0, 0, 0.9);
+            background: var(--header-bg);
             backdrop-filter: blur(10px);
             z-index: 10;
             flex-shrink: 0;
@@ -2171,7 +2223,7 @@
                 width: 260px;
                 height: 100vh;
                 background: #000;
-                border-right: 1px solid #333;
+                border-right: 1px solid var(--border-primary);
                 transition: left 0.3s ease;
                 z-index: 1000;
                 overflow-y: auto;
@@ -2294,9 +2346,9 @@
         .media-upload-section {
             margin-top: 12px;
         }
-        
+
         .media-btn {
-            background: #333;
+            background: var(--bg-hover);
             border: 1px solid #555;
             color: #fff;
             padding: 8px 16px;
@@ -2306,18 +2358,18 @@
             transition: all 0.2s;
             margin-right: 8px;
         }
-        
+
         .media-btn:hover {
             background: #444;
             border-color: #666;
         }
-        
+
         .media-preview {
             margin-top: 12px;
-            border: 1px solid #333;
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
             padding: 12px;
-            background: #1a1a1a;
+            background: var(--bg-tertiary);
         }
         
         .media-preview img {
@@ -2484,7 +2536,7 @@
 }
 
 .skeleton-post {
-    border-bottom: 1px solid #333;
+    border-bottom: 1px solid var(--border-primary);
     padding: 16px 20px;
     margin-bottom: 0;
 }
@@ -2500,7 +2552,7 @@
     height: 40px;
     border-radius: 50%;
     margin-right: 12px;
-    background: linear-gradient(to right, #222 0%, #333 50%, #222 100%);
+    background: linear-gradient(to right, var(--skeleton-base) 0%, var(--skeleton-highlight) 50%, var(--skeleton-base) 100%);
     background-size: 468px 104px;
     animation: shimmer 1.2s ease-in-out infinite;
 }
@@ -2515,7 +2567,7 @@
 .skeleton-line {
     height: 12px;
     border-radius: 4px;
-    background: linear-gradient(to right, #222 0%, #333 50%, #222 100%);
+    background: linear-gradient(to right, var(--skeleton-base) 0%, var(--skeleton-highlight) 50%, var(--skeleton-base) 100%);
     background-size: 468px 104px;
     animation: shimmer 1.2s ease-in-out infinite;
 }
@@ -2550,7 +2602,7 @@
     width: 60px;
     height: 16px;
     border-radius: 4px;
-    background: linear-gradient(to right, #222 0%, #333 50%, #222 100%);
+    background: linear-gradient(to right, var(--skeleton-base) 0%, var(--skeleton-highlight) 50%, var(--skeleton-base) 100%);
     background-size: 468px 104px;
     animation: shimmer 1.2s ease-in-out infinite;
 }
@@ -2572,7 +2624,7 @@
 
 /* Individual toast message */
 .toast {
-    background: #1a1a1a;
+    background: var(--bg-modal);
     border-left: 4px solid;
     border-radius: 8px;
     padding: 16px 20px;
@@ -2622,7 +2674,7 @@
 /* Toast content */
 .toast-content {
     flex: 1;
-    color: #fff;
+    color: var(--text-primary);
 }
 
 .toast-title {
@@ -2806,15 +2858,15 @@
 .trust-score-details {
     display: none;
     position: absolute;
-    background: rgba(0, 0, 0, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: var(--header-bg);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 12px;
     z-index: 1000;
     font-size: 13px;
     line-height: 1.5;
     min-width: 200px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .trust-score-details.visible {
@@ -3758,7 +3810,7 @@
     justify-content: space-between;
     padding: 16px 20px;
     border-bottom: 1px solid var(--border-color);
-    background: rgba(10, 10, 10, 0.95);
+    background: var(--header-bg);
     backdrop-filter: blur(10px);
     flex-shrink: 0;
 }
@@ -4107,4 +4159,25 @@
         max-width: none;
         margin: 0;
     }
+}
+
+/* Settings Page Theme Classes */
+.settings-section-card {
+    background: var(--bg-secondary);
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid var(--border-primary);
+}
+
+.theme-input {
+    padding: 10px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
+.theme-input:focus {
+    border-color: #FF6600;
+    outline: none;
 }
