@@ -1143,6 +1143,7 @@
 
         .modal-content {
             background: var(--bg-modal);
+            color: var(--text-primary);
             border-radius: 16px;
             padding: 24px;
             max-width: 400px;
@@ -1173,8 +1174,8 @@
 
         .close-btn {
             background: var(--bg-hover);
-            border: 1px solid #666;
-            color: #FFFFFF;
+            border: 1px solid var(--border-secondary);
+            color: var(--text-primary);
             padding: 14px 24px;
             min-height: 48px;
             border-radius: 8px;
@@ -1184,14 +1185,14 @@
         }
 
         .close-btn:hover {
-            background: #444;
-            border-color: #888;
+            background: var(--bg-tertiary);
+            border-color: var(--border-focus);
         }
 
         .login-option-btn {
             background: var(--bg-tertiary);
             border: 1px solid var(--border-primary);
-            color: #fff;
+            color: var(--text-primary);
             padding: 16px 20px;
             border-radius: 12px;
             cursor: pointer;
@@ -1201,14 +1202,14 @@
         }
 
         .login-option-btn:hover {
-            background: #2a2a2a;
+            background: var(--bg-hover);
             border-color: #FF6600;
         }
 
         .nostr-option-btn {
             background: var(--bg-tertiary);
             border: 1px solid var(--border-primary);
-            color: #ccc;
+            color: var(--text-secondary);
             padding: 10px 14px;
             border-radius: 8px;
             cursor: pointer;
@@ -1219,9 +1220,9 @@
         }
 
         .nostr-option-btn:hover {
-            background: #2a2a2a;
+            background: var(--bg-hover);
             border-color: #8B5CF6;
-            color: #fff;
+            color: var(--text-primary);
         }
 
         .text-btn {

@@ -1073,27 +1073,27 @@
         <div class="modal-content" style="max-width: 400px;">
             <div class="modal-header">🔐 Secure Your Account</div>
             <div style="padding: 20px;">
-                <p id="pinModalMessage" style="margin-bottom: 20px; color: #ccc;">Create a PIN to encrypt your private key</p>
+                <p id="pinModalMessage" style="margin-bottom: 20px; color: var(--text-secondary);">Create a PIN to encrypt your private key</p>
 
                 <div style="margin-bottom: 20px;">
-                    <label style="display: block; margin-bottom: 8px; color: #999;">Enter PIN (4-8 digits)</label>
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-muted);">Enter PIN (4-8 digits)</label>
                     <input type="password" id="pinInput"
                            placeholder="Enter PIN..."
                            maxlength="8"
-                           style="width: 100%; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 4px;">
+                           style="width: 100%; padding: 12px; background: var(--bg-input); border: 1px solid var(--border-primary); border-radius: 6px; color: var(--text-primary); font-size: 16px; text-align: center; letter-spacing: 4px;">
                 </div>
 
                 <div id="pinConfirmSection" style="margin-bottom: 20px; display: none;">
-                    <label style="display: block; margin-bottom: 8px; color: #999;">Confirm PIN</label>
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-muted);">Confirm PIN</label>
                     <input type="password" id="pinConfirmInput"
                            placeholder="Confirm PIN..."
                            maxlength="8"
-                           style="width: 100%; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 4px;">
+                           style="width: 100%; padding: 12px; background: var(--bg-input); border: 1px solid var(--border-primary); border-radius: 6px; color: var(--text-primary); font-size: 16px; text-align: center; letter-spacing: 4px;">
                 </div>
 
                 <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 6px; padding: 12px; margin-top: 16px;">
                     <div style="color: #FF6600; font-weight: bold; margin-bottom: 4px;">⚠️ Important</div>
-                    <div style="color: #999; font-size: 13px;">
+                    <div style="color: var(--text-muted); font-size: 13px;">
                         Your PIN encrypts your private key in browser storage. Don't forget it - we cannot recover it!
                     </div>
                 </div>
