@@ -1465,15 +1465,15 @@
         /* Webkit-specific cursor fixes */
         @media screen and (-webkit-min-device-pixel-ratio:0) {
             .compose-textarea {
-                -webkit-text-fill-color: #fff !important;
+                -webkit-text-fill-color: var(--text-primary) !important;
                 caret-color: #FF6600 !important;
             }
         }
-        
+
         /* Firefox-specific fixes */
         @-moz-document url-prefix() {
             .compose-textarea {
-                color: #fff !important;
+                color: var(--text-primary) !important;
                 caret-color: #FF6600 !important;
             }
         }
