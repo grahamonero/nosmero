@@ -2696,19 +2696,28 @@ async function loadZapSettingsFromRelays() {
 async function getUserMoneroAddress(pubkey) {
     console.log('🔍 getUserMoneroAddress called for:', pubkey.slice(0, 8), 'isCurrentUser:', pubkey === State.publicKey);
 
-    // For current user, check NIP-78 first, then fallback to localStorage
+    // For current user, check localStorage first (immediately up-to-date after rotation)
+    // Only query NIP-78 if localStorage is empty (for cross-device sync)
     if (pubkey === State.publicKey) {
+        const localAddress = localStorage.getItem('user-monero-address');
+        if (localAddress) {
+            return localAddress;
+        }
+
+        // Fallback to NIP-78 relay query (cross-device sync)
         try {
             const relayAddress = await loadMoneroAddressFromRelays(pubkey);
             if (relayAddress) {
+                // Sync to localStorage for future use
+                localStorage.setItem('user-monero-address', relayAddress);
+                State.setUserMoneroAddress(relayAddress);
                 return relayAddress;
             }
         } catch (error) {
             console.warn('Could not load current user Monero address from relays:', error);
         }
 
-        // Fallback to localStorage for current user
-        return localStorage.getItem('user-monero-address') || null;
+        return null;
     }
 
     // For other users, check their profile cache first
@@ -4541,6 +4550,69 @@ async function removeWriteRelayFromModal(relayUrl) {
         Utils.showNotification(`Failed to remove relay: ${error.message}`, 'error');
     }
 }
+
+// Show primary (permanent) Monero address for external sharing
+async function showPrimaryAddress() {
+    if (!window.Wallet?.getPrimaryAddress) {
+        Utils.showNotification('Tip Jar not available', 'error');
+        return;
+    }
+
+    try {
+        const address = await window.Wallet.getPrimaryAddress();
+        if (!address) {
+            Utils.showNotification('No Tip Jar found. Create one first.', 'error');
+            return;
+        }
+
+        // Create modal
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.id = 'primaryAddressModal';
+        modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+        modal.innerHTML = `
+            <div style="background: #1a1a1a; border-radius: 16px; padding: 24px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto;">
+                <h3 style="margin: 0 0 16px; color: #FF6600;">Primary Address</h3>
+                <p style="color: #999; font-size: 14px; margin-bottom: 16px;">This is your permanent Monero address. Use it for:</p>
+                <ul style="color: #ccc; font-size: 14px; margin-bottom: 16px; padding-left: 20px;">
+                    <li>Printed QR codes</li>
+                    <li>Donation pages</li>
+                    <li>Any place you want a stable address</li>
+                </ul>
+                <div style="background: #000; padding: 12px; border-radius: 8px; word-break: break-all; font-family: monospace; font-size: 12px; color: #fff; margin-bottom: 16px;">${address}</div>
+                <div style="display: flex; gap: 12px;">
+                    <button data-action="copy-primary" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: #fff; font-weight: bold; cursor: pointer;">Copy Address</button>
+                    <button data-action="close-primary" style="padding: 12px 24px; background: #333; border: none; border-radius: 8px; color: #fff; cursor: pointer;">Close</button>
+                </div>
+            </div>
+        `;
+
+        // Event delegation for buttons
+        modal.addEventListener('click', async (e) => {
+            const action = e.target.dataset.action;
+            if (action === 'copy-primary') {
+                try {
+                    await navigator.clipboard.writeText(address);
+                    e.target.textContent = 'Copied!';
+                    setTimeout(() => { e.target.textContent = 'Copy Address'; }, 2000);
+                } catch (err) {
+                    Utils.showNotification('Failed to copy', 'error');
+                }
+            } else if (action === 'close-primary' || e.target === modal) {
+                modal.remove();
+            }
+        });
+
+        document.body.appendChild(modal);
+    } catch (error) {
+        console.error('Failed to get primary address:', error);
+        Utils.showNotification('Failed to get address: ' + error.message, 'error');
+    }
+}
+window.showPrimaryAddress = showPrimaryAddress;
+
+// Export saveMoneroAddressToRelays for wallet-modal subaddress rotation
+window.saveMoneroAddressToRelays = saveMoneroAddressToRelays;
 
 // Override loadSettings to use modal approach
 window.loadSettings = loadSettings;

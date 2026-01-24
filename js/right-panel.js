@@ -114,6 +114,15 @@ const RightPanel = {
         // Listen for wallet state changes to update dashboard wallet section
         window.addEventListener('nosmero:wallet-changed', () => this.refreshWalletSection());
 
+        // Listen for address rotation to update profile Monero address display
+        window.addEventListener('nosmero:address-rotated', (e) => {
+            const container = document.getElementById('panelProfileMoneroAddress');
+            if (container && window.NostrState?.publicKey) {
+                // Refresh the Monero address display for current user's profile
+                this.loadPanelMoneroAddress(window.NostrState.publicKey);
+            }
+        });
+
         if (DEBUG) console.log('Right panel initialized');
     },
 
@@ -2449,9 +2458,24 @@ const RightPanel = {
 
         const priceXmr = parseFloat(priceInput?.value) || 0.00015;
         const customPreview = previewInput?.value?.trim() || null;
-        const paymentAddress = addressInput?.value?.trim();
+        let paymentAddress = addressInput?.value?.trim();
 
-        if (!paymentAddress?.startsWith('4')) {
+        // If no manual address and per-note subaddress enabled, generate one
+        if (!paymentAddress && window.NostrState?.subaddressSettings?.perNote && window.Wallet?.isWalletUnlocked?.()) {
+            try {
+                const { address, index } = await window.Wallet.getNextSubaddress();
+                paymentAddress = address;
+                console.log(`[RightPanel] Paywall using subaddress #${index}: ${address.slice(0, 10)}...`);
+            } catch (e) {
+                console.warn('[RightPanel] Could not generate subaddress for paywall:', e);
+                paymentAddress = window.NostrState?.userMoneroAddress;
+            }
+        } else if (!paymentAddress) {
+            paymentAddress = window.NostrState?.userMoneroAddress;
+        }
+
+        // Accept both primary addresses (4...) and subaddresses (8...)
+        if (!paymentAddress?.match(/^[48]/)) {
             window.NostrUtils?.showNotification?.('Please enter a valid Monero address', 'error');
             throw new Error('No Monero address set');
         }

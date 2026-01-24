@@ -23,6 +23,104 @@ let xmrPriceUSD = null;
 let priceLastFetched = 0;
 const PRICE_CACHE_MS = 5 * 60 * 1000;
 
+// Tip-to-note mapping cache: subaddressAddress -> { noteId, noteContent, createdAt }
+let tipToNoteMap = new Map();
+let tipMapLastScanned = 0;
+const TIP_MAP_CACHE_MS = 60 * 1000; // Re-scan every minute
+
+/**
+ * Scan user's notes and build mapping of monero addresses to note IDs
+ * @returns {Promise<Map>} Map of address -> { noteId, noteContent, createdAt }
+ */
+async function scanTipsToNotes() {
+    // Return cached if fresh
+    if (tipToNoteMap.size > 0 && Date.now() - tipMapLastScanned < TIP_MAP_CACHE_MS) {
+        return tipToNoteMap;
+    }
+
+    const pubkey = State.publicKey;
+    if (!pubkey || !State.pool) {
+        return tipToNoteMap;
+    }
+
+    try {
+        // Dynamically import Relays
+        const Relays = await import('./relays.js');
+        const relays = Relays.getActiveRelays();
+
+        // Fetch user's recent notes (kind 1) that have monero_address tag
+        const notes = [];
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => resolve(), 10000); // 10s timeout
+
+            const sub = State.pool.subscribeMany(relays, [{
+                kinds: [1],
+                authors: [pubkey],
+                limit: 200
+            }], {
+                onevent: (event) => {
+                    // Check if note has monero_address tag
+                    const addrTag = event.tags.find(t => t[0] === 'monero_address');
+                    if (addrTag && addrTag[1]) {
+                        notes.push({
+                            id: event.id,
+                            content: event.content,
+                            createdAt: event.created_at,
+                            address: addrTag[1]
+                        });
+                    }
+                },
+                oneose: () => {
+                    clearTimeout(timeout);
+                    sub.close();
+                    resolve();
+                }
+            });
+        });
+
+        // Build the map: address -> note info
+        tipToNoteMap = new Map();
+        for (const note of notes) {
+            tipToNoteMap.set(note.address, {
+                noteId: note.id,
+                noteContent: note.content.slice(0, 50) + (note.content.length > 50 ? '...' : ''),
+                createdAt: note.createdAt
+            });
+        }
+
+        tipMapLastScanned = Date.now();
+        console.log(`[WalletModal] Scanned ${notes.length} notes with XMR addresses`);
+
+        return tipToNoteMap;
+    } catch (err) {
+        console.error('[WalletModal] Failed to scan tips to notes:', err);
+        return tipToNoteMap;
+    }
+}
+
+/**
+ * Get note info for a transaction by regenerating its subaddress
+ * @param {number} subaddressIndex - The subaddress index from the transaction
+ * @returns {Promise<{noteId, noteContent}|null>}
+ */
+async function getNoteForSubaddress(subaddressIndex) {
+    if (subaddressIndex === null || subaddressIndex === undefined) {
+        return null;
+    }
+
+    try {
+        // Regenerate the address for this index
+        const address = await Wallet.getSubaddressAtIndex(subaddressIndex);
+
+        // Look up in our map
+        const noteInfo = tipToNoteMap.get(address);
+        return noteInfo || null;
+    } catch (err) {
+        console.warn('[WalletModal] Could not get note for subaddress:', err);
+        return null;
+    }
+}
+
 /**
  * Load the Monero wallet library on demand
  */
@@ -50,6 +148,7 @@ async function loadWalletLibrary() {
 
         // Import the wallet module
         Wallet = await import('./wallet/index.js');
+        window.Wallet = Wallet; // Expose to window for posts.js subaddress generation
         walletLibraryLoaded = true;
         return true;
     } catch (err) {
@@ -112,6 +211,36 @@ function showToast(message, type = 'info') {
         console.log(`[Toast] ${type}: ${message}`);
     }
 }
+
+/**
+ * Show privacy help modal with explanation
+ */
+function showPrivacyHelp(title, text) {
+    // Remove any existing help modal
+    const existing = document.getElementById('privacyHelpModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'privacyHelpModal';
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10001; padding: 20px;';
+    modal.innerHTML = `
+        <div style="background: #1a1a1a; border-radius: 12px; padding: 20px; max-width: 320px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
+            <div style="color: #fff; font-size: 14px; font-weight: 600; margin-bottom: 12px;">${title}</div>
+            <div style="color: #aaa; font-size: 13px; line-height: 1.5; margin-bottom: 16px;">${text}</div>
+            <button onclick="document.getElementById('privacyHelpModal').remove()" style="width: 100%; padding: 10px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px;">Got it</button>
+        </div>
+    `;
+
+    // Close on background click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+
+    document.body.appendChild(modal);
+}
+
+// Expose showPrivacyHelp to window for onclick handlers
+window.showPrivacyHelp = showPrivacyHelp;
 
 /**
  * Get the modal content container
@@ -358,6 +487,54 @@ export async function unlockWallet() {
 
     try {
         await Wallet.unlock(pin);
+
+        // Rotate profile subaddress if enabled
+        if (State.subaddressSettings?.rotateProfile) {
+            try {
+                const { address } = await Wallet.getNextSubaddress();
+
+                // Update NIP-78 with new subaddress
+                if (window.saveMoneroAddressToRelays) {
+                    await window.saveMoneroAddressToRelays(address);
+                }
+
+                // Update local state
+                State.setUserMoneroAddress(address);
+                localStorage.setItem('user-monero-address', address);
+
+                // Update profile cache so profile view shows new address
+                if (State.profileCache && State.publicKey) {
+                    if (State.profileCache[State.publicKey]) {
+                        State.profileCache[State.publicKey].monero_address = address;
+                    } else {
+                        State.profileCache[State.publicKey] = { pubkey: State.publicKey, monero_address: address };
+                    }
+                }
+
+                // Dispatch event so profile views can refresh
+                window.dispatchEvent(new CustomEvent('nosmero:address-rotated', { detail: { address } }));
+
+                console.log('[Wallet] Profile rotated to subaddress:', address.slice(0, 10) + '...');
+            } catch (e) {
+                console.warn('[Wallet] Failed to rotate subaddress:', e);
+                // Non-fatal - continue with existing address
+            }
+        }
+
+        // Ensure State.userMoneroAddress is always set after unlock (even without rotation)
+        if (!State.userMoneroAddress) {
+            try {
+                const primaryAddress = await Wallet.getPrimaryAddress();
+                if (primaryAddress) {
+                    State.setUserMoneroAddress(primaryAddress);
+                    localStorage.setItem('user-monero-address', primaryAddress);
+                    console.log('[Wallet] Set primary address:', primaryAddress.slice(0, 10) + '...');
+                }
+            } catch (e) {
+                console.warn('[Wallet] Failed to get primary address:', e);
+            }
+        }
+
         await initWalletView();
     } catch (err) {
         if (errorEl) {
@@ -378,73 +555,115 @@ async function renderDashboard() {
     const address = await Wallet.getPrimaryAddress();
     const shortAddress = address ? `${address.slice(0, 10)}...${address.slice(-10)}` : '...';
 
+    // Get current privacy settings
+    const perNoteEnabled = State.subaddressSettings?.perNote ?? true;
+    const rotateProfileEnabled = State.subaddressSettings?.rotateProfile ?? true;
+
     getContentEl().innerHTML = `
         <!-- Balance Card -->
-        <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; margin-bottom: 20px; border: 1px solid var(--border-color);">
-            <div style="margin-bottom: 16px;">
-                <div style="color: #999; font-size: 13px; margin-bottom: 4px;">Available Balance</div>
-                <div style="color: #FF6600; font-size: 28px; font-weight: 700; font-family: monospace;">
-                    <span id="walletAvailableBalance">0</span> <span style="font-size: 14px; color: #888;">XMR</span>
+        <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border-color);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                    <div style="color: #999; font-size: 12px; margin-bottom: 4px;">Available Balance</div>
+                    <div style="color: #FF6600; font-size: 26px; font-weight: 700; font-family: monospace;">
+                        <span id="walletAvailableBalance">0</span> <span style="font-size: 13px; color: #888;">XMR</span>
+                    </div>
+                    <div id="walletAvailableBalanceUSD" style="color: #888; font-size: 13px; margin-top: 2px;"></div>
                 </div>
-                <div id="walletAvailableBalanceUSD" style="color: #888; font-size: 14px; margin-top: 2px;"></div>
-            </div>
-            <div style="margin-bottom: 8px;">
-                <span style="color: #666; font-size: 11px;">Total: </span>
-                <span style="color: #888; font-size: 14px; font-family: monospace;"><span id="walletTotalBalance">0</span> XMR</span>
-            </div>
-            <div id="walletLockedInfo" style="background: rgba(255, 193, 7, 0.1); color: #ffc107; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-top: 12px; display: none;">
-                🔒 <span id="walletLockedAmount">0</span> XMR locked (awaiting confirmations)
-            </div>
-            <div style="border-top: 1px solid #333; padding-top: 16px; margin-top: 16px;">
-                <div style="color: #666; font-size: 12px; margin-bottom: 8px;">Your Address</div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-family: monospace; font-size: 11px; color: #aaa; flex: 1; overflow: hidden; text-overflow: ellipsis;">${shortAddress}</span>
-                    <button onclick="window.WalletModal.copyAddress()" style="background: #333; border: none; color: #fff; padding: 10px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;">📋</button>
+                <div style="text-align: right;">
+                    <div style="color: #666; font-size: 11px;">Total</div>
+                    <div style="color: #888; font-size: 14px; font-family: monospace;"><span id="walletTotalBalance">0</span> XMR</div>
                 </div>
+            </div>
+            <div id="walletLockedInfo" style="background: rgba(255, 193, 7, 0.1); color: #ffc107; padding: 8px 10px; border-radius: 6px; font-size: 12px; margin-top: 12px; display: none;">
+                🔒 <span id="walletLockedAmount">0</span> XMR locked
             </div>
         </div>
 
         <!-- Action Buttons -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
-            <button onclick="window.WalletModal.showSendView()" style="padding: 16px; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; background: linear-gradient(135deg, #FF6600, #cc5200); color: #000; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+            <button onclick="window.WalletModal.showSendView()" style="padding: 14px; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; background: linear-gradient(135deg, #FF6600, #cc5200); color: #000; display: flex; align-items: center; justify-content: center; gap: 6px;">
                 📤 Send
             </button>
-            <button onclick="window.WalletModal.showReceiveView()" style="padding: 16px; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; background: linear-gradient(135deg, #8B5CF6, #6b21a8); color: #fff; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button onclick="window.WalletModal.showReceiveView()" style="padding: 14px; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; background: linear-gradient(135deg, #8B5CF6, #6b21a8); color: #fff; display: flex; align-items: center; justify-content: center; gap: 6px;">
                 📥 Receive
             </button>
         </div>
 
-        <!-- Sync Status -->
-        <div style="background: #1a1a1a; border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-            <div id="walletSyncSpinner" style="width: 16px; height: 16px; border: 2px solid #333; border-top-color: #FF6600; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-            <div style="flex: 1;">
-                <div id="walletSyncStatus" style="color: #ccc; font-size: 13px;">Syncing...</div>
-                <div id="walletSyncProgress" style="color: #666; font-size: 11px;">Connecting...</div>
+        <!-- Settings & Actions Grid -->
+        <div style="background: #1a1a1a; border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+            <!-- Privacy Settings -->
+            <div style="margin-bottom: 16px;">
+                <div style="color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Privacy</div>
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="walletPerNoteToggle" ${perNoteEnabled ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; accent-color: #FF6600;">
+                        <span style="color: #ccc; font-size: 13px;">Unique address per note</span>
+                        <button type="button" onclick="event.preventDefault(); event.stopPropagation(); window.showPrivacyHelp('Unique Address Per Note', 'Each note you publish gets a unique subaddress for tips. This prevents observers from linking your tips across different notes, improving your financial privacy. All subaddresses receive to the same wallet balance.')" style="width: 16px; height: 16px; border-radius: 50%; background: #444; border: none; color: #888; font-size: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 2px;" onmouseover="this.style.background='#555'" onmouseout="this.style.background='#444'">?</button>
+                    </label>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="walletRotateProfileToggle" ${rotateProfileEnabled ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; accent-color: #FF6600;">
+                        <span style="color: #ccc; font-size: 13px;">Rotate profile address on unlock</span>
+                        <button type="button" onclick="event.preventDefault(); event.stopPropagation(); window.showPrivacyHelp('Rotate Profile Address', 'Your profile&#39;s tip address is rotated to a new subaddress each time you unlock your Tip Jar. This makes it harder to track your total tip income over time.')" style="width: 16px; height: 16px; border-radius: 50%; background: #444; border: none; color: #888; font-size: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 2px;" onmouseover="this.style.background='#555'" onmouseout="this.style.background='#444'">?</button>
+                    </label>
+                </div>
             </div>
-            <button onclick="window.WalletModal.syncWallet()" style="background: #333; border: none; color: #fff; padding: 10px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;">↻</button>
+
+            <!-- Quick Actions -->
+            <div style="border-top: 1px solid #333; padding-top: 12px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <button onclick="window.showPrimaryAddress()" style="padding: 10px; background: #252525; border: none; border-radius: 6px; color: #aaa; cursor: pointer; font-size: 12px; position: relative;">🏠 Primary Address<span onclick="event.stopPropagation(); window.showPrivacyHelp('Primary Address', 'Your primary address (starts with 4) is the permanent, unchanging address for your wallet. Use this for QR codes, donation pages, or anywhere you want a consistent address. Subaddresses (starting with 8) all deposit to this same wallet.')" style="position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; border-radius: 50%; background: #333; border: none; color: #888; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center;" onmouseover="this.style.background='#444'" onmouseout="this.style.background='#333'">?</span></button>
+                    <button onclick="window.WalletModal.showSeedView()" style="padding: 10px; background: #252525; border: none; border-radius: 6px; color: #aaa; cursor: pointer; font-size: 12px;">🔑 Seed Phrase</button>
+                    <button onclick="window.WalletModal.showChangePinView()" style="padding: 10px; background: #252525; border: none; border-radius: 6px; color: #aaa; cursor: pointer; font-size: 12px;">🔐 Change PIN</button>
+                    <button onclick="window.WalletModal.deleteWallet()" style="padding: 10px; background: #252525; border: none; border-radius: 6px; color: #ff6b6b; cursor: pointer; font-size: 12px;">🗑️ Delete</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sync Status -->
+        <div style="background: #1a1a1a; border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+            <div id="walletSyncSpinner" style="width: 14px; height: 14px; border: 2px solid #333; border-top-color: #FF6600; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <div style="flex: 1;">
+                <div id="walletSyncStatus" style="color: #ccc; font-size: 12px;">Syncing...</div>
+                <div id="walletSyncProgress" style="color: #666; font-size: 10px;">Connecting...</div>
+            </div>
+            <button onclick="window.WalletModal.syncWallet()" style="background: #333; border: none; color: #fff; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">↻</button>
         </div>
         <!-- Node Info (shown after sync) -->
-        <div id="walletNodeInfo" style="background: #1a1a1a; border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; display: none;">
+        <div id="walletNodeInfo" style="background: #1a1a1a; border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; display: none;">
             <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="color: #666; font-size: 11px;">Via:</span>
-                <span id="walletNodeAddress" style="color: #888; font-size: 11px; font-family: monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
-                <span id="walletNodeBadge" style="background: rgba(139, 92, 246, 0.2); color: #8B5CF6; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;"></span>
+                <span style="color: #666; font-size: 10px;">Via:</span>
+                <span id="walletNodeAddress" style="color: #888; font-size: 10px; font-family: monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
+                <span id="walletNodeBadge" style="background: rgba(139, 92, 246, 0.2); color: #8B5CF6; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 600;"></span>
             </div>
         </div>
 
         <!-- Transaction History -->
-        <div style="color: #ccc; font-size: 15px; font-weight: 600; margin-bottom: 12px;">📜 Transactions</div>
-        <div id="walletTxHistory" style="background: #1a1a1a; border-radius: 12px; overflow: hidden;">
-            <div style="text-align: center; padding: 30px 16px; color: #666;">Loading transactions...</div>
-        </div>
-
-        <!-- Quick Actions -->
-        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
-            <button onclick="window.WalletModal.showSeedView()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #333; border-radius: 8px; color: #999; cursor: pointer; font-size: 14px; margin-bottom: 10px;">🔑 View Seed Phrase</button>
-            <button onclick="window.WalletModal.showChangePinView()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #333; border-radius: 8px; color: #999; cursor: pointer; font-size: 14px; margin-bottom: 10px;">🔐 Change PIN</button>
-            <button onclick="window.WalletModal.deleteWallet()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #ff6b6b33; border-radius: 8px; color: #ff6b6b; cursor: pointer; font-size: 14px;">🗑️ Delete Tip Jar</button>
+        <div style="color: #ccc; font-size: 14px; font-weight: 600; margin-bottom: 10px;">📜 Transactions</div>
+        <div id="walletTxHistory" style="background: #1a1a1a; border-radius: 10px; overflow: hidden;">
+            <div style="text-align: center; padding: 24px 16px; color: #666;">Loading transactions...</div>
         </div>
     `;
+
+    // Add event listeners for privacy toggles
+    const perNoteToggle = document.getElementById('walletPerNoteToggle');
+    const rotateProfileToggle = document.getElementById('walletRotateProfileToggle');
+
+    if (perNoteToggle) {
+        perNoteToggle.addEventListener('change', () => {
+            State.setSubaddressSettings({ perNote: perNoteToggle.checked });
+            console.log('[Wallet] Per-note subaddress:', perNoteToggle.checked);
+        });
+    }
+
+    if (rotateProfileToggle) {
+        rotateProfileToggle.addEventListener('change', () => {
+            State.setSubaddressSettings({ rotateProfile: rotateProfileToggle.checked });
+            console.log('[Wallet] Rotate profile:', rotateProfileToggle.checked);
+        });
+    }
 
     // Start sync and update balance
     syncWallet();
@@ -603,41 +822,81 @@ async function updateTransactions() {
             return;
         }
 
-        historyEl.innerHTML = txs.map(tx => {
-            const isIncoming = tx.isIncoming;
-            const amountXMR = Wallet.formatXMR(tx.amount || 0n);
-            const confirmations = tx.confirmations || 0;
-            const isConfirmed = confirmations >= 10;
+        // Scan for tip-to-note mappings (cached after first scan)
+        try {
+            await scanTipsToNotes();
+        } catch (scanErr) {
+            console.warn('[WalletModal] Failed to scan tips to notes:', scanErr);
+            // Continue without note links
+        }
 
-            let dateStr = 'Pending...';
-            if (tx.timestamp) {
-                const date = new Date(tx.timestamp * 1000);
-                dateStr = date.toLocaleDateString();
-            }
+        // Build transaction HTML with note links for incoming tips
+        const txHtmlPromises = txs.map(async (tx) => {
+            try {
+                const isIncoming = tx.isIncoming;
+                const amountXMR = Wallet.formatXMR(tx.amount || 0n);
+                const confirmations = tx.confirmations || 0;
+                const isConfirmed = confirmations >= 10;
 
-            const shortTxid = tx.txid ? `${escapeHtml(tx.txid.slice(0, 6))}...` : '';
-            const escapedTxid = escapeAttribute(tx.txid);
+                let dateStr = 'Pending...';
+                if (tx.timestamp) {
+                    const date = new Date(tx.timestamp * 1000);
+                    dateStr = date.toLocaleDateString();
+                }
 
-            return `
-                <div data-txid="${escapedTxid}" data-action="show-tx-detail" style="padding: 14px; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px; cursor: pointer;">
-                    <div style="width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; background: ${isIncoming ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 102, 0, 0.2)'};">
-                        ${isIncoming ? '📥' : '📤'}
-                    </div>
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="font-weight: 600; font-size: 14px; font-family: monospace; color: ${isIncoming ? '#4ade80' : '#FF6600'};">
-                            ${isIncoming ? '+' : '-'}${escapeHtml(amountXMR)} XMR
+                const shortTxid = tx.txid ? `${escapeHtml(tx.txid.slice(0, 6))}...` : '';
+                const escapedTxid = escapeAttribute(tx.txid || '');
+
+                // Check if this incoming tx matches a note
+                let noteLink = '';
+                if (isIncoming && typeof tx.subaddressIndex === 'number' && tx.subaddressIndex >= 0) {
+                    try {
+                        const noteInfo = await getNoteForSubaddress(tx.subaddressIndex);
+                        if (noteInfo) {
+                            const notePreview = escapeHtml(noteInfo.noteContent);
+                            noteLink = `
+                                <div data-action="navigate-to-note" data-note-id="${escapeAttribute(noteInfo.noteId)}"
+                                     style="margin-top: 6px; padding: 6px 8px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 12px;">📝</span>
+                                    <span style="font-size: 11px; color: #a78bfa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Tip for: ${notePreview}</span>
+                                </div>
+                            `;
+                        }
+                    } catch (noteErr) {
+                        console.warn('[WalletModal] Failed to get note for tx:', tx.txid, noteErr);
+                    }
+                }
+
+                return `
+                <div style="border-bottom: 1px solid #333;">
+                    <div data-txid="${escapedTxid}" data-action="show-tx-detail" style="padding: 14px; display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                        <div style="width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; background: ${isIncoming ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 102, 0, 0.2)'};">
+                            ${isIncoming ? '📥' : '📤'}
                         </div>
-                        <div style="display: flex; justify-content: space-between; margin-top: 4px;">
-                            <span style="color: #666; font-size: 11px;">${escapeHtml(dateStr)}</span>
-                            <span style="color: #555; font-size: 10px; font-family: monospace;">${shortTxid}</span>
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-weight: 600; font-size: 14px; font-family: monospace; color: ${isIncoming ? '#4ade80' : '#FF6600'};">
+                                ${isIncoming ? '+' : '-'}${escapeHtml(amountXMR)} XMR
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                                <span style="color: #666; font-size: 11px;">${escapeHtml(dateStr)}</span>
+                                <span style="color: #555; font-size: 10px; font-family: monospace;">${shortTxid}</span>
+                            </div>
+                        </div>
+                        <div style="padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background: ${isConfirmed ? 'rgba(74, 222, 128, 0.1)' : 'rgba(255, 193, 7, 0.1)'}; color: ${isConfirmed ? '#4ade80' : '#ffc107'};">
+                            ${isConfirmed ? '✓' : escapeHtml(confirmations) + '/10'}
                         </div>
                     </div>
-                    <div style="padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background: ${isConfirmed ? 'rgba(74, 222, 128, 0.1)' : 'rgba(255, 193, 7, 0.1)'}; color: ${isConfirmed ? '#4ade80' : '#ffc107'};">
-                        ${isConfirmed ? '✓' : escapeHtml(confirmations) + '/10'}
-                    </div>
+                    ${noteLink ? `<div style="padding: 0 14px 14px 62px;">${noteLink}</div>` : ''}
                 </div>
             `;
-        }).join('');
+            } catch (txErr) {
+                console.warn('[WalletModal] Failed to render tx:', tx?.txid, txErr);
+                return ''; // Skip this transaction
+            }
+        });
+
+        const txHtmlArray = await Promise.all(txHtmlPromises);
+        historyEl.innerHTML = txHtmlArray.join('');
     } catch (err) {
         console.error('[WalletModal] Transaction update failed:', err);
         historyEl.innerHTML = '<div style="text-align: center; padding: 30px 16px; color: #666;">Unable to load transactions</div>';
@@ -1771,6 +2030,25 @@ export async function createWallet() {
 
     try {
         const result = await Wallet.create(pin);
+
+        // Generate a subaddress for the profile (privacy: don't expose primary address)
+        const { address: profileAddress } = await Wallet.getNextSubaddress();
+
+        // Save the subaddress to state, localStorage, and relays
+        State.setUserMoneroAddress(profileAddress);
+        localStorage.setItem('user-monero-address', profileAddress);
+
+        // Save to relays for cross-device sync
+        if (window.saveMoneroAddressToRelays) {
+            try {
+                await window.saveMoneroAddressToRelays(profileAddress);
+            } catch (e) {
+                console.warn('[WalletModal] Failed to save address to relays:', e);
+            }
+        }
+
+        console.log('[Wallet] Created wallet, profile subaddress:', profileAddress.slice(0, 10) + '...');
+
         showBackupSeedView(result.seed, result.restoreHeight);
     } catch (err) {
         console.error('[WalletModal] Create wallet failed:', err);
@@ -2168,8 +2446,8 @@ document.addEventListener('click', (event) => {
             const noteId = target.getAttribute('data-note-id');
             if (noteId) {
                 window.WalletModal.closeWalletModal();
-                if (window.navigateToNote) {
-                    window.navigateToNote(noteId);
+                if (window.openThreadView) {
+                    window.openThreadView(noteId);
                 }
             }
             event.preventDefault();

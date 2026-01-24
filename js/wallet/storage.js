@@ -118,6 +118,7 @@ export async function saveWallet(walletData) {
             salt: walletData.salt,
             primary_address: walletData.primary_address,
             restore_height: walletData.restore_height || 0,
+            nextSubaddressIndex: walletData.nextSubaddressIndex || 1, // Start at 1, index 0 is primary
             owner_pubkey: walletData.owner_pubkey,
             created_at: Date.now(),
             updated_at: Date.now()
@@ -351,7 +352,7 @@ export async function updateWalletMeta(pubkey, updates) {
     }
 
     // Whitelist allowed fields to prevent overwriting critical data
-    const ALLOWED_META_FIELDS = ['restore_height', 'primary_address'];
+    const ALLOWED_META_FIELDS = ['restore_height', 'primary_address', 'nextSubaddressIndex'];
     const safeUpdates = {};
     for (const field of ALLOWED_META_FIELDS) {
         if (field in updates) {

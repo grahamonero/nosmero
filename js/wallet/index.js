@@ -65,6 +65,11 @@ export {
     // Daemon info
     getCurrentDaemonUri,
 
+    // Subaddress functions
+    getSubaddressIndex,
+    getNextSubaddress,
+    getSubaddressAtIndex,
+
     // Constants
     UNLOCK_TIMEOUT_MS
 } from './monero-client.js';
