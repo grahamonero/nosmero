@@ -27,6 +27,104 @@ let xmrPriceUSD = null;
 let priceLastFetched = 0;
 const PRICE_CACHE_MS = 5 * 60 * 1000;
 
+// Tip-to-note mapping cache: subaddressAddress -> { noteId, noteContent, createdAt }
+let tipToNoteMap = new Map();
+let tipMapLastScanned = 0;
+const TIP_MAP_CACHE_MS = 60 * 1000; // Re-scan every minute
+
+/**
+ * Scan user's notes and build mapping of monero addresses to note IDs
+ * @returns {Promise<Map>} Map of address -> { noteId, noteContent, createdAt }
+ */
+async function scanTipsToNotes() {
+    // Return cached if fresh
+    if (tipToNoteMap.size > 0 && Date.now() - tipMapLastScanned < TIP_MAP_CACHE_MS) {
+        return tipToNoteMap;
+    }
+
+    const pubkey = State.publicKey;
+    if (!pubkey || !State.pool) {
+        return tipToNoteMap;
+    }
+
+    try {
+        // Dynamically import Relays
+        const Relays = await import('./relays.js');
+        const relays = Relays.getActiveRelays();
+
+        // Fetch user's recent notes (kind 1) that have monero_address tag
+        const notes = [];
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => resolve(), 10000); // 10s timeout
+
+            const sub = State.pool.subscribeMany(relays, [{
+                kinds: [1],
+                authors: [pubkey],
+                limit: 200
+            }], {
+                onevent: (event) => {
+                    // Check if note has monero_address tag
+                    const addrTag = event.tags.find(t => t[0] === 'monero_address');
+                    if (addrTag && addrTag[1]) {
+                        notes.push({
+                            id: event.id,
+                            content: event.content,
+                            createdAt: event.created_at,
+                            address: addrTag[1]
+                        });
+                    }
+                },
+                oneose: () => {
+                    clearTimeout(timeout);
+                    sub.close();
+                    resolve();
+                }
+            });
+        });
+
+        // Build the map: address -> note info
+        tipToNoteMap = new Map();
+        for (const note of notes) {
+            tipToNoteMap.set(note.address, {
+                noteId: note.id,
+                noteContent: note.content.slice(0, 50) + (note.content.length > 50 ? '...' : ''),
+                createdAt: note.createdAt
+            });
+        }
+
+        tipMapLastScanned = Date.now();
+        console.log(`[WalletModal] Scanned ${notes.length} notes with XMR addresses`);
+
+        return tipToNoteMap;
+    } catch (err) {
+        console.error('[WalletModal] Failed to scan tips to notes:', err);
+        return tipToNoteMap;
+    }
+}
+
+/**
+ * Get note info for a transaction by regenerating its subaddress
+ * @param {number} subaddressIndex - The subaddress index from the transaction
+ * @returns {Promise<{noteId, noteContent}|null>}
+ */
+async function getNoteForSubaddress(subaddressIndex) {
+    if (subaddressIndex === null || subaddressIndex === undefined) {
+        return null;
+    }
+
+    try {
+        // Regenerate the address for this index
+        const address = await Wallet.getSubaddressAtIndex(subaddressIndex);
+
+        // Look up in our map
+        const noteInfo = tipToNoteMap.get(address);
+        return noteInfo || null;
+    } catch (err) {
+        console.warn('[WalletModal] Could not get note for subaddress:', err);
+        return null;
+    }
+}
+
 /**
  * Load the Monero wallet library on demand
  */
@@ -55,6 +153,7 @@ async function loadWalletLibrary() {
 
         // Import the wallet module
         Wallet = await import('./wallet/index.js');
+        window.Wallet = Wallet; // Expose to window for posts.js subaddress generation
         walletLibraryLoaded = true;
         console.log('[WalletModal] Wallet library loaded');
         return true;
@@ -118,6 +217,36 @@ function showToast(message, type = 'info') {
         console.log(`[Toast] ${type}: ${message}`);
     }
 }
+
+/**
+ * Show privacy help modal
+ */
+function showPrivacyHelp(title, text) {
+    // Remove any existing help modal
+    const existing = document.getElementById('privacyHelpModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'privacyHelpModal';
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10001; padding: 20px;';
+    modal.innerHTML = `
+        <div style="background: #1a1a1a; border-radius: 12px; padding: 20px; max-width: 320px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
+            <div style="color: #fff; font-size: 14px; font-weight: 600; margin-bottom: 12px;">${title}</div>
+            <div style="color: #aaa; font-size: 13px; line-height: 1.5; margin-bottom: 16px;">${text}</div>
+            <button onclick="document.getElementById('privacyHelpModal').remove()" style="width: 100%; padding: 10px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px;">Got it</button>
+        </div>
+    `;
+
+    // Close on background click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+
+    document.body.appendChild(modal);
+}
+
+// Expose showPrivacyHelp to window for onclick handlers
+window.showPrivacyHelp = showPrivacyHelp;
 
 /**
  * Get the modal content container
@@ -358,6 +487,38 @@ export async function unlockWallet() {
 
     try {
         await Wallet.unlock(pin);
+
+        // Rotate profile subaddress if enabled
+        if (State.subaddressSettings?.rotateProfile) {
+            try {
+                const { address } = await Wallet.getNextSubaddress();
+
+                // Update NIP-78 with new subaddress
+                State.userMoneroAddress = address;
+                localStorage.setItem('user-monero-address', address);
+
+                // Publish to relays
+                if (window.saveMoneroAddressToRelays) {
+                    await window.saveMoneroAddressToRelays(address);
+                }
+
+                // Dispatch event for UI updates
+                window.dispatchEvent(new CustomEvent('nosmero:address-rotated', { detail: { address } }));
+                console.log('[Wallet] Profile address rotated on unlock');
+            } catch (rotateErr) {
+                console.error('[Wallet] Failed to rotate profile address:', rotateErr);
+                // Non-fatal - continue with unlock
+            }
+        } else {
+            // Ensure address is set even if rotation disabled
+            const currentAddress = State.userMoneroAddress || localStorage.getItem('user-monero-address');
+            if (!currentAddress) {
+                const primaryAddress = await Wallet.getPrimaryAddress();
+                State.userMoneroAddress = primaryAddress;
+                localStorage.setItem('user-monero-address', primaryAddress);
+            }
+        }
+
         await initWalletView();
     } catch (err) {
         if (errorEl) {
@@ -378,6 +539,10 @@ async function renderDashboard() {
     const address = await Wallet.getPrimaryAddress();
     const shortAddress = address ? `${address.slice(0, 10)}...${address.slice(-10)}` : '...';
 
+    // Get current privacy settings
+    const perNoteEnabled = State.subaddressSettings?.perNote ?? true;
+    const rotateProfileEnabled = State.subaddressSettings?.rotateProfile ?? true;
+
     getContentEl().innerHTML = `
         <!-- Balance Card -->
         <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; margin-bottom: 20px; border: 1px solid var(--border-color);">
@@ -394,13 +559,6 @@ async function renderDashboard() {
             </div>
             <div id="walletLockedInfo" style="background: rgba(255, 193, 7, 0.1); color: #ffc107; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-top: 12px; display: none;">
                 🔒 <span id="walletLockedAmount">0</span> XMR locked (awaiting confirmations)
-            </div>
-            <div style="border-top: 1px solid #333; padding-top: 16px; margin-top: 16px;">
-                <div style="color: #666; font-size: 12px; margin-bottom: 8px;">Your Address</div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-family: monospace; font-size: 11px; color: #aaa; flex: 1; overflow: hidden; text-overflow: ellipsis;">${shortAddress}</span>
-                    <button onclick="window.WalletModal.copyAddress()" style="background: #333; border: none; color: #fff; padding: 10px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;">📋</button>
-                </div>
             </div>
         </div>
 
@@ -432,6 +590,25 @@ async function renderDashboard() {
             </div>
         </div>
 
+        <!-- Privacy Settings -->
+        <div style="background: #1a1a1a; border-radius: 12px; padding: 16px; margin-bottom: 20px;">
+            <div style="color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">Privacy Settings</div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="walletPerNoteToggle" ${perNoteEnabled ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer; accent-color: #FF6600;">
+                    <span style="color: #ccc; font-size: 14px;">Unique address per note</span>
+                    <button type="button" onclick="event.preventDefault(); event.stopPropagation(); window.showPrivacyHelp('Unique Address Per Note', 'Each note you publish gets a unique subaddress for tips. This prevents observers from linking your tips across different notes, improving your financial privacy. All subaddresses receive to the same wallet balance.')" style="width: 18px; height: 18px; border-radius: 50%; background: #444; border: none; color: #888; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 4px;" onmouseover="this.style.background='#555'" onmouseout="this.style.background='#444'">?</button>
+                </label>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="walletRotateProfileToggle" ${rotateProfileEnabled ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer; accent-color: #FF6600;">
+                    <span style="color: #ccc; font-size: 14px;">Rotate profile address on unlock</span>
+                    <button type="button" onclick="event.preventDefault(); event.stopPropagation(); window.showPrivacyHelp('Rotate Profile Address', 'Your profile&#39;s tip address is rotated to a new subaddress each time you unlock your Tip Jar. This makes it harder to track your total tip income over time.')" style="width: 18px; height: 18px; border-radius: 50%; background: #444; border: none; color: #888; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 4px;" onmouseover="this.style.background='#555'" onmouseout="this.style.background='#444'">?</button>
+                </label>
+            </div>
+        </div>
+
         <!-- Transaction History -->
         <div style="color: #ccc; font-size: 15px; font-weight: 600; margin-bottom: 12px;">📜 Transactions</div>
         <div id="walletTxHistory" style="background: #1a1a1a; border-radius: 12px; overflow: hidden;">
@@ -440,10 +617,34 @@ async function renderDashboard() {
 
         <!-- Quick Actions -->
         <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
-            <button onclick="window.WalletModal.showSeedView()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #333; border-radius: 8px; color: #999; cursor: pointer; font-size: 14px; margin-bottom: 10px;">🔑 View Seed Phrase</button>
-            <button onclick="window.WalletModal.deleteWallet()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #ff6b6b33; border-radius: 8px; color: #ff6b6b; cursor: pointer; font-size: 14px;">🗑️ Delete Tip Jar</button>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                <button onclick="window.showPrimaryAddress()" style="padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #999; cursor: pointer; font-size: 13px; position: relative;">🏠 Primary Address<span onclick="event.stopPropagation(); window.showPrivacyHelp('Primary Address', 'Your primary address (starts with 4) is the permanent, unchanging address for your wallet. Use this for QR codes, donation pages, or anywhere you want a consistent address. Subaddresses (starting with 8) all deposit to this same wallet.')" style="position: absolute; top: 4px; right: 4px; width: 16px; height: 16px; border-radius: 50%; background: #333; border: none; color: #888; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center;" onmouseover="this.style.background='#444'" onmouseout="this.style.background='#333'">?</span></button>
+                <button onclick="window.WalletModal.showSeedView()" style="padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #999; cursor: pointer; font-size: 13px;">🔑 Seed Phrase</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <button onclick="window.WalletModal.showChangePinView()" style="padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #999; cursor: pointer; font-size: 13px;">🔐 Change PIN</button>
+                <button onclick="window.WalletModal.deleteWallet()" style="padding: 12px; background: #1a1a1a; border: 1px solid #ff6b6b33; border-radius: 8px; color: #ff6b6b; cursor: pointer; font-size: 13px;">🗑️ Delete</button>
+            </div>
         </div>
     `;
+
+    // Add event listeners for privacy toggles
+    const perNoteToggle = document.getElementById('walletPerNoteToggle');
+    const rotateProfileToggle = document.getElementById('walletRotateProfileToggle');
+
+    if (perNoteToggle) {
+        perNoteToggle.addEventListener('change', () => {
+            State.setSubaddressSettings({ perNote: perNoteToggle.checked });
+            console.log('[Wallet] Per-note subaddress:', perNoteToggle.checked);
+        });
+    }
+
+    if (rotateProfileToggle) {
+        rotateProfileToggle.addEventListener('change', () => {
+            State.setSubaddressSettings({ rotateProfile: rotateProfileToggle.checked });
+            console.log('[Wallet] Rotate profile:', rotateProfileToggle.checked);
+        });
+    }
 
     // Start sync and update balance
     syncWallet();
@@ -602,41 +803,81 @@ async function updateTransactions() {
             return;
         }
 
-        historyEl.innerHTML = txs.map(tx => {
-            const isIncoming = tx.isIncoming;
-            const amountXMR = Wallet.formatXMR(tx.amount || 0n);
-            const confirmations = tx.confirmations || 0;
-            const isConfirmed = confirmations >= 10;
+        // Scan for tip-to-note mappings (cached after first scan)
+        try {
+            await scanTipsToNotes();
+        } catch (scanErr) {
+            console.warn('[WalletModal] Failed to scan tips to notes:', scanErr);
+            // Continue without note links
+        }
 
-            let dateStr = 'Pending...';
-            if (tx.timestamp) {
-                const date = new Date(tx.timestamp * 1000);
-                dateStr = date.toLocaleDateString();
-            }
+        // Build transaction HTML with note links for incoming tips
+        const txHtmlPromises = txs.map(async (tx) => {
+            try {
+                const isIncoming = tx.isIncoming;
+                const amountXMR = Wallet.formatXMR(tx.amount || 0n);
+                const confirmations = tx.confirmations || 0;
+                const isConfirmed = confirmations >= 10;
 
-            const shortTxid = tx.txid ? `${escapeHtml(tx.txid.slice(0, 6))}...` : '';
-            const escapedTxid = escapeAttribute(tx.txid);
+                let dateStr = 'Pending...';
+                if (tx.timestamp) {
+                    const date = new Date(tx.timestamp * 1000);
+                    dateStr = date.toLocaleDateString();
+                }
 
-            return `
-                <div data-txid="${escapedTxid}" data-action="show-tx-detail" style="padding: 14px; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px; cursor: pointer;">
-                    <div style="width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; background: ${isIncoming ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 102, 0, 0.2)'};">
-                        ${isIncoming ? '📥' : '📤'}
-                    </div>
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="font-weight: 600; font-size: 14px; font-family: monospace; color: ${isIncoming ? '#4ade80' : '#FF6600'};">
-                            ${isIncoming ? '+' : '-'}${escapeHtml(amountXMR)} XMR
+                const shortTxid = tx.txid ? `${escapeHtml(tx.txid.slice(0, 6))}...` : '';
+                const escapedTxid = escapeAttribute(tx.txid || '');
+
+                // Check if this incoming tx matches a note
+                let noteLink = '';
+                if (isIncoming && typeof tx.subaddressIndex === 'number' && tx.subaddressIndex >= 0) {
+                    try {
+                        const noteInfo = await getNoteForSubaddress(tx.subaddressIndex);
+                        if (noteInfo) {
+                            const notePreview = escapeHtml(noteInfo.noteContent);
+                            noteLink = `
+                                <div data-action="navigate-to-note" data-note-id="${escapeAttribute(noteInfo.noteId)}"
+                                     style="margin-top: 6px; padding: 6px 8px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 12px;">📝</span>
+                                    <span style="font-size: 11px; color: #a78bfa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Tip for: ${notePreview}</span>
+                                </div>
+                            `;
+                        }
+                    } catch (noteErr) {
+                        console.warn('[WalletModal] Failed to get note for tx:', tx.txid, noteErr);
+                    }
+                }
+
+                return `
+                <div style="border-bottom: 1px solid #333;">
+                    <div data-txid="${escapedTxid}" data-action="show-tx-detail" style="padding: 14px; display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                        <div style="width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; background: ${isIncoming ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 102, 0, 0.2)'};">
+                            ${isIncoming ? '📥' : '📤'}
                         </div>
-                        <div style="display: flex; justify-content: space-between; margin-top: 4px;">
-                            <span style="color: #666; font-size: 11px;">${escapeHtml(dateStr)}</span>
-                            <span style="color: #555; font-size: 10px; font-family: monospace;">${shortTxid}</span>
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-weight: 600; font-size: 14px; font-family: monospace; color: ${isIncoming ? '#4ade80' : '#FF6600'};">
+                                ${isIncoming ? '+' : '-'}${escapeHtml(amountXMR)} XMR
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                                <span style="color: #666; font-size: 11px;">${escapeHtml(dateStr)}</span>
+                                <span style="color: #555; font-size: 10px; font-family: monospace;">${shortTxid}</span>
+                            </div>
+                        </div>
+                        <div style="padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background: ${isConfirmed ? 'rgba(74, 222, 128, 0.1)' : 'rgba(255, 193, 7, 0.1)'}; color: ${isConfirmed ? '#4ade80' : '#ffc107'};">
+                            ${isConfirmed ? '✓' : escapeHtml(confirmations) + '/10'}
                         </div>
                     </div>
-                    <div style="padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background: ${isConfirmed ? 'rgba(74, 222, 128, 0.1)' : 'rgba(255, 193, 7, 0.1)'}; color: ${isConfirmed ? '#4ade80' : '#ffc107'};">
-                        ${isConfirmed ? '✓' : escapeHtml(confirmations) + '/10'}
-                    </div>
+                    ${noteLink ? `<div style="padding: 0 14px 14px 62px;">${noteLink}</div>` : ''}
                 </div>
             `;
-        }).join('');
+            } catch (txErr) {
+                console.warn('[WalletModal] Failed to render tx:', tx?.txid, txErr);
+                return ''; // Skip this transaction
+            }
+        });
+
+        const txHtmlArray = await Promise.all(txHtmlPromises);
+        historyEl.innerHTML = txHtmlArray.join('');
     } catch (err) {
         console.error('[WalletModal] Transaction update failed:', err);
         historyEl.innerHTML = '<div style="text-align: center; padding: 30px 16px; color: #666;">Unable to load transactions</div>';
@@ -1569,6 +1810,130 @@ export async function deleteWallet() {
 }
 
 /**
+ * Show change PIN view
+ */
+export function showChangePinView() {
+    currentView = 'changePin';
+    setTitle('🔐 Change PIN');
+
+    getContentEl().innerHTML = `
+        <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; border: 1px solid var(--border-color); text-align: center;">
+            <p style="color: #999; margin-bottom: 20px;">Enter your current PIN, then choose a new one.</p>
+
+            <div style="margin-bottom: 16px;">
+                <label style="color: #666; font-size: 12px; display: block; margin-bottom: 8px;">Current PIN</label>
+                <input type="password" id="walletCurrentPin" placeholder="••••••" maxlength="20" style="width: 100%; max-width: 200px; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 20px; text-align: center; letter-spacing: 8px;">
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label style="color: #666; font-size: 12px; display: block; margin-bottom: 8px;">New PIN</label>
+                <input type="password" id="walletNewPin" placeholder="••••••" maxlength="20" style="width: 100%; max-width: 200px; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 20px; text-align: center; letter-spacing: 8px;">
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <label style="color: #666; font-size: 12px; display: block; margin-bottom: 8px;">Confirm New PIN</label>
+                <input type="password" id="walletConfirmNewPin" placeholder="••••••" maxlength="20" style="width: 100%; max-width: 200px; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 20px; text-align: center; letter-spacing: 8px;">
+            </div>
+
+            <div id="changePinError" style="color: #ff6b6b; font-size: 13px; margin-bottom: 12px; display: none;"></div>
+
+            <button onclick="window.WalletModal.changePin()" style="width: 100%; max-width: 200px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 16px; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 12px;">Change PIN</button>
+            <button onclick="window.WalletModal.backToDashboard()" style="width: 100%; max-width: 200px; background: #333; border: none; color: #fff; padding: 14px; border-radius: 8px; font-size: 14px; cursor: pointer;">← Back</button>
+        </div>
+    `;
+
+    // Focus first input
+    setTimeout(() => {
+        document.getElementById('walletCurrentPin')?.focus();
+    }, 100);
+}
+
+/**
+ * Change PIN - verify current, re-encrypt with new
+ */
+export async function changePin() {
+    const currentPin = document.getElementById('walletCurrentPin')?.value;
+    const newPin = document.getElementById('walletNewPin')?.value;
+    const confirmPin = document.getElementById('walletConfirmNewPin')?.value;
+    const errorEl = document.getElementById('changePinError');
+
+    // Validate inputs
+    if (!currentPin) {
+        errorEl.textContent = 'Enter your current PIN';
+        errorEl.style.display = 'block';
+        return;
+    }
+    if (!newPin || newPin.length < 4) {
+        errorEl.textContent = 'New PIN must be at least 4 characters';
+        errorEl.style.display = 'block';
+        return;
+    }
+    if (newPin !== confirmPin) {
+        errorEl.textContent = 'New PINs do not match';
+        errorEl.style.display = 'block';
+        return;
+    }
+    if (currentPin === newPin) {
+        errorEl.textContent = 'New PIN must be different from current';
+        errorEl.style.display = 'block';
+        return;
+    }
+
+    errorEl.style.display = 'none';
+
+    try {
+        // Verify current PIN by attempting to get seed
+        const seed = await Wallet.getSeed();
+        if (!seed) {
+            errorEl.textContent = 'Current PIN is incorrect';
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        // Get all wallet data needed for re-encryption
+        const pubkey = localStorage.getItem('nostr-pubkey');
+        const walletData = await Wallet.storage.loadWallet(pubkey);
+
+        // Re-encrypt with new PIN
+        const keys = {
+            seed: seed,
+            privateSpendKey: walletData.privateSpendKey || '',
+            privateViewKey: walletData.privateViewKey || '',
+            publicSpendKey: walletData.publicSpendKey || '',
+            publicViewKey: walletData.publicViewKey || ''
+        };
+
+        // Get fresh keys from current unlocked state
+        const fullWallet = await Wallet.getFullWallet();
+        keys.privateSpendKey = await fullWallet.getPrivateSpendKey();
+        keys.privateViewKey = await fullWallet.getPrivateViewKey();
+        keys.publicSpendKey = await fullWallet.getPublicSpendKey();
+        keys.publicViewKey = await fullWallet.getPublicViewKey();
+
+        // Encrypt with new PIN
+        const encrypted = await Wallet.crypto.encryptWalletKeys(newPin, keys);
+
+        // Save with new encryption
+        await Wallet.storage.saveWallet(pubkey, {
+            address: walletData.address,
+            restore_height: walletData.restore_height,
+            encrypted_keys: Wallet.crypto.bytesToBase64(encrypted.encrypted_keys),
+            iv: Wallet.crypto.bytesToBase64(encrypted.iv),
+            salt: Wallet.crypto.bytesToBase64(encrypted.salt),
+            created_at: walletData.created_at
+        });
+
+        showToast('PIN changed successfully', 'success');
+        backToDashboard();
+
+    } catch (err) {
+        console.error('[WalletModal] Change PIN failed:', err);
+        errorEl.textContent = err.message || 'Failed to change PIN';
+        errorEl.style.display = 'block';
+    }
+}
+
+/**
  * Show create PIN view
  */
 export function showCreatePinView() {
@@ -1617,6 +1982,25 @@ export async function createWallet() {
 
     try {
         const result = await Wallet.create(pin);
+
+        // Generate a subaddress for the profile (privacy: don't expose primary address)
+        const { address: profileAddress } = await Wallet.getNextSubaddress();
+
+        // Save the subaddress to state, localStorage, and relays
+        State.setUserMoneroAddress(profileAddress);
+        localStorage.setItem('user-monero-address', profileAddress);
+
+        // Save to relays for cross-device sync
+        if (window.saveMoneroAddressToRelays) {
+            try {
+                await window.saveMoneroAddressToRelays(profileAddress);
+            } catch (e) {
+                console.warn('[WalletModal] Failed to save address to relays:', e);
+            }
+        }
+
+        console.log('[Wallet] Created wallet, profile subaddress:', profileAddress.slice(0, 10) + '...');
+
         showBackupSeedView(result.seed, result.restoreHeight);
     } catch (err) {
         console.error('[WalletModal] Create wallet failed:', err);
@@ -1962,6 +2346,8 @@ window.WalletModal = {
     showSeedView,
     copySeed,
     deleteWallet,
+    showChangePinView,
+    changePin,
     showCreatePinView,
     showNoWalletView,
     createWallet,
@@ -2003,8 +2389,8 @@ document.addEventListener('click', (event) => {
             const noteId = target.getAttribute('data-note-id');
             if (noteId) {
                 window.WalletModal.closeWalletModal();
-                if (window.navigateToNote) {
-                    window.navigateToNote(noteId);
+                if (window.openThreadView) {
+                    window.openThreadView(noteId);
                 }
             }
             event.preventDefault();

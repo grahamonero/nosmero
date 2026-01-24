@@ -3059,10 +3059,10 @@ export function getAuthorInfo(post) {
 
 // Extract Monero address from a post's tags for zap functionality
 export function getMoneroAddress(post) {
-    // First check post tags (old NIP-01 approach)
+    // First check post tags for monero_address (per-note subaddress)
     if (post.tags) {
         for (const tag of post.tags) {
-            if (tag[0] === 'monero' && tag[1]) {
+            if (tag[0] === 'monero_address' && tag[1]) {
                 return tag[1];
             }
         }
@@ -3370,6 +3370,27 @@ async function doQuoteRepost() {
     // Get relay hint for the author (NIP-65 outbox model)
     const relayHint = await Relays.getPrimaryRelayHint(currentRepostPost.pubkey);
 
+    // Determine Monero address - use subaddress if enabled and wallet unlocked
+    let moneroAddress = State.userMoneroAddress;
+    if (State.subaddressSettings?.perNote) {
+        try {
+            if (window.Wallet?.isWalletUnlocked?.()) {
+                const { address, index } = await window.Wallet.getNextSubaddress();
+                moneroAddress = address;
+                console.log(`[Posts] Quote repost using subaddress #${index}: ${address.slice(0, 10)}...`);
+            } else {
+                const MoneroClient = await import('./wallet/monero-client.js');
+                if (MoneroClient.isWalletUnlocked()) {
+                    const { address, index } = await MoneroClient.getNextSubaddress();
+                    moneroAddress = address;
+                    console.log(`[Posts] Quote repost using subaddress #${index} (direct): ${address.slice(0, 10)}...`);
+                }
+            }
+        } catch (e) {
+            console.warn('[Posts] Could not generate subaddress for quote repost, using profile address:', e);
+        }
+    }
+
     // Create note content with user comment and embedded note reference
     const noteContent = `${userComment}\n\nnostr:${window.NostrTools.nip19.noteEncode(currentRepostPost.id)}`;
 
@@ -3384,6 +3405,11 @@ async function doQuoteRepost() {
         ],
         content: noteContent
     };
+
+    // Add Monero address if set
+    if (moneroAddress) {
+        eventTemplate.tags.push(['monero_address', moneroAddress]);
+    }
 
     const signedEvent = await Utils.signEvent(eventTemplate);
 
@@ -3504,6 +3530,27 @@ export async function sendReply(replyToId) {
         // Get relay hint for the recipient (NIP-65 outbox model)
         const relayHint = await Relays.getPrimaryRelayHint(originalPost.pubkey);
 
+        // Determine Monero address - use subaddress if enabled and wallet unlocked
+        let moneroAddress = State.userMoneroAddress;
+        if (State.subaddressSettings?.perNote) {
+            try {
+                if (window.Wallet?.isWalletUnlocked?.()) {
+                    const { address, index } = await window.Wallet.getNextSubaddress();
+                    moneroAddress = address;
+                    console.log(`[Posts] Reply using subaddress #${index}: ${address.slice(0, 10)}...`);
+                } else {
+                    const MoneroClient = await import('./wallet/monero-client.js');
+                    if (MoneroClient.isWalletUnlocked()) {
+                        const { address, index } = await MoneroClient.getNextSubaddress();
+                        moneroAddress = address;
+                        console.log(`[Posts] Reply using subaddress #${index} (direct): ${address.slice(0, 10)}...`);
+                    }
+                }
+            } catch (e) {
+                console.warn('[Posts] Could not generate subaddress for reply, using profile address:', e);
+            }
+        }
+
         // Create reply event
         const eventTemplate = {
             kind: 1,
@@ -3517,8 +3564,8 @@ export async function sendReply(replyToId) {
         };
 
         // Add Monero address if set
-        if (State.userMoneroAddress) {
-            eventTemplate.tags.push(['monero', State.userMoneroAddress]);
+        if (moneroAddress) {
+            eventTemplate.tags.push(['monero_address', moneroAddress]);
         }
 
         const signedEvent = await Utils.signEvent(eventTemplate);
@@ -4636,6 +4683,29 @@ export async function sendPost() {
             }
         }
 
+        // Determine Monero address for this post - use subaddress if enabled and wallet unlocked
+        let postMoneroAddress = State.userMoneroAddress;
+        if (State.subaddressSettings?.perNote) {
+            try {
+                // Try window.Wallet first (if wallet modal was opened)
+                if (window.Wallet?.isWalletUnlocked?.()) {
+                    const { address, index } = await window.Wallet.getNextSubaddress();
+                    postMoneroAddress = address;
+                    console.log(`[Posts] Post using subaddress #${index}: ${address.slice(0, 10)}...`);
+                } else {
+                    // Fallback: direct import of monero-client (if page refreshed but wallet still unlocked)
+                    const MoneroClient = await import('./wallet/monero-client.js');
+                    if (MoneroClient.isWalletUnlocked()) {
+                        const { address, index } = await MoneroClient.getNextSubaddress();
+                        postMoneroAddress = address;
+                        console.log(`[Posts] Post using subaddress #${index} (direct): ${address.slice(0, 10)}...`);
+                    }
+                }
+            } catch (e) {
+                console.warn('[Posts] Could not generate subaddress for post, using profile address:', e);
+            }
+        }
+
         // Create Nostr event
         const event = {
             kind: 1,
@@ -4647,8 +4717,8 @@ export async function sendPost() {
         };
 
         // Add Monero address tag if set
-        if (State.userMoneroAddress) {
-            event.tags.push(['monero_address', State.userMoneroAddress]);
+        if (postMoneroAddress) {
+            event.tags.push(['monero_address', postMoneroAddress]);
         }
 
         // Add paywall tags if enabled
@@ -5327,16 +5397,16 @@ async function uploadMediaToBlossom() {
 // Publish new post with optional media
 export async function publishNewPost() {
     const content = document.getElementById('newPostContent').value.trim();
-    const moneroAddress = document.getElementById('modalMoneroAddress').value.trim();
-    
+    const inputMoneroAddress = document.getElementById('modalMoneroAddress').value.trim();
+
     if (!content && !currentMediaFile) {
         alert('Please enter content or select media');
         return;
     }
-    
+
     try {
         let mediaUrl = null;
-        
+
         // Upload media if attached
         if (currentMediaFile) {
             Utils.showNotification('Uploading media...', 'info');
@@ -5348,13 +5418,34 @@ export async function publishNewPost() {
                 return;
             }
         }
-        
+
         // Create the post content with media URL if uploaded
         let postContent = content;
         if (mediaUrl) {
             postContent = content ? `${content}\n\n${mediaUrl}` : mediaUrl;
         }
-        
+
+        // Determine Monero address - use subaddress if enabled and wallet unlocked
+        let moneroAddress = inputMoneroAddress || State.userMoneroAddress;
+        if (State.subaddressSettings?.perNote) {
+            try {
+                if (window.Wallet?.isWalletUnlocked?.()) {
+                    const { address, index } = await window.Wallet.getNextSubaddress();
+                    moneroAddress = address;
+                    console.log(`[Posts] Modal post using subaddress #${index}: ${address.slice(0, 10)}...`);
+                } else {
+                    const MoneroClient = await import('./wallet/monero-client.js');
+                    if (MoneroClient.isWalletUnlocked()) {
+                        const { address, index } = await MoneroClient.getNextSubaddress();
+                        moneroAddress = address;
+                        console.log(`[Posts] Modal post using subaddress #${index} (direct): ${address.slice(0, 10)}...`);
+                    }
+                }
+            } catch (e) {
+                console.warn('[Posts] Could not generate subaddress for modal post, using profile address:', e);
+            }
+        }
+
         // Create post event
         const eventTemplate = {
             kind: 1,
@@ -5367,7 +5458,7 @@ export async function publishNewPost() {
 
         // Add Monero address if provided
         if (moneroAddress) {
-            eventTemplate.tags.push(['monero', moneroAddress]);
+            eventTemplate.tags.push(['monero_address', moneroAddress]);
         }
 
         // Sign and publish event
@@ -5469,7 +5560,7 @@ export async function showDisclosedTipDetails(postId, event) {
                         <div onclick="closeDisclosedTipsModal(); showUserProfile('${tip.tipper}');" style="font-weight: bold; color: ${textColor}; cursor: pointer; text-decoration: underline;">${tipperName}</div>
                         <div style="font-size: 12px; color: #999;">${tipperHandle}</div>
                         ${tip.verified ? `
-                            <span style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10B981; color: #10B981; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold;" title="Verified by Nosmero. Transaction details sent to recipient via encrypted DM.">
+                            <span style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10B981; color: #10B981; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold;" title="Verified by Nosmero">
                                 ✓ VERIFIED
                             </span>
                         ` : ''}
@@ -5489,7 +5580,7 @@ export async function showDisclosedTipDetails(postId, event) {
                 ${tip.message ? `<div style="color: ${isMuted ? '#555' : '#ccc'}; font-size: 13px; margin-bottom: 4px;">${tip.message}</div>` : ''}
                 ${tip.verified ? `
                     <div style="margin-top: 6px; font-size: 11px; color: #10B981; font-style: italic;">
-                        🔐 Cryptographically verified. Transaction details sent to recipient via encrypted DM.
+                        🔐 Cryptographically verified
                     </div>
                 ` : ''}
                 <div style="color: #666; font-size: 11px; margin-top: 4px;">${timeAgo}</div>

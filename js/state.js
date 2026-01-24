@@ -69,6 +69,46 @@ try {
 }
 export { notificationSettings };
 
+// Subaddress privacy settings (for tip privacy)
+let subaddressSettings = {
+    perNote: true,      // Use unique subaddress for each published note
+    rotateProfile: true // Rotate profile address on wallet unlock
+};
+// Initialize subaddress settings from localStorage with safe fallback
+try {
+    subaddressSettings = {
+        perNote: JSON.parse(localStorage.getItem('subaddress_per_note') ?? 'true'),
+        rotateProfile: JSON.parse(localStorage.getItem('subaddress_rotate_profile') ?? 'true')
+    };
+} catch (e) {
+    console.error('Failed to read subaddress settings from localStorage:', e);
+}
+export { subaddressSettings };
+
+/**
+ * Update subaddress privacy settings
+ * @param {Object} settings - Settings to update
+ * @param {boolean} [settings.perNote] - Use unique address for each note
+ * @param {boolean} [settings.rotateProfile] - Rotate profile address on unlock
+ */
+export function setSubaddressSettings(settings) {
+    if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) {
+        throw new Error('Subaddress settings must be an object');
+    }
+    try {
+        if (settings.perNote !== undefined) {
+            subaddressSettings.perNote = Boolean(settings.perNote);
+            localStorage.setItem('subaddress_per_note', JSON.stringify(subaddressSettings.perNote));
+        }
+        if (settings.rotateProfile !== undefined) {
+            subaddressSettings.rotateProfile = Boolean(settings.rotateProfile);
+            localStorage.setItem('subaddress_rotate_profile', JSON.stringify(subaddressSettings.rotateProfile));
+        }
+    } catch (e) {
+        console.error('Failed to save subaddress settings to localStorage:', e);
+    }
+}
+
 // Feed caching and performance optimization
 export let homeFeedCache = { posts: [], timestamp: 0, isLoading: false };  // Cached home feed with metadata
 export let trendingFeedCache = { posts: [], timestamp: 0, isLoading: false };  // Cached trending feed with metadata

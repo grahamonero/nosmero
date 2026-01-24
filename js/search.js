@@ -2520,10 +2520,15 @@ function getAuthorInfo(post) {
     return result;
 }
 
-// Get monero address (placeholder - would use actual function)
+// Get monero address from post tags or profile cache
 function getMoneroAddress(post) {
-    const moneroTag = post.tags.find(tag => tag[0] === 'monero');
-    return moneroTag ? moneroTag[1] : null;
+    // First check post tags for per-note subaddress
+    const moneroTag = post.tags?.find(tag => tag[0] === 'monero_address');
+    if (moneroTag) return moneroTag[1];
+
+    // Fall back to author's profile address
+    const profile = window.State?.profileCache?.[post.pubkey];
+    return profile?.monero_address || null;
 }
 
 // Get lightning address from user's profile for BTC zap functionality

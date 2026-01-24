@@ -821,6 +821,70 @@ export async function getReceiveAddress(newSubaddress = false) {
     return getPrimaryAddress();
 }
 
+/**
+ * Get current subaddress index for this wallet
+ * @returns {Promise<number>}
+ */
+export async function getSubaddressIndex() {
+    const currentPubkey = await getNostrPubkey();
+    const walletData = await storage.loadWallet(currentPubkey);
+    return walletData?.nextSubaddressIndex || 1;
+}
+
+/**
+ * Generate next subaddress and increment index
+ * Requires wallet to be unlocked
+ * @returns {Promise<{address: string, index: number}>}
+ */
+export async function getNextSubaddress() {
+    if (!isUnlocked) {
+        throw new Error('Wallet must be unlocked to generate subaddress');
+    }
+
+    const currentPubkey = await getNostrPubkey();
+    const wallet = await getFullWallet();
+    const currentIndex = await getSubaddressIndex();
+
+    // Create subaddress at the current index (account 0)
+    const subaddress = await wallet.createSubaddress(0);
+    const address = subaddress.getAddress();
+
+    // Increment and save the index
+    await storage.updateWalletMeta(currentPubkey, {
+        nextSubaddressIndex: currentIndex + 1
+    });
+
+    return { address, index: currentIndex };
+}
+
+/**
+ * Get subaddress at specific index (for regeneration/lookup)
+ * @param {number} index - Subaddress index
+ * @returns {Promise<string>}
+ */
+export async function getSubaddressAtIndex(index) {
+    if (!isUnlocked) {
+        throw new Error('Wallet must be unlocked');
+    }
+
+    if (typeof index !== 'number' || index < 0) {
+        throw new Error('Invalid subaddress index');
+    }
+
+    const wallet = await getFullWallet();
+    // Generate subaddresses up to the requested index
+    const subaddresses = await wallet.getSubaddresses(0);
+
+    // Create subaddresses up to the requested index if needed
+    while (subaddresses.length <= index) {
+        await wallet.createSubaddress(0);
+    }
+
+    // Fetch again to get the full list
+    const allSubaddresses = await wallet.getSubaddresses(0);
+    return allSubaddresses[index].getAddress();
+}
+
 // Store pending transaction for two-step send (create then relay)
 let pendingTx = null;
 
@@ -1434,6 +1498,13 @@ export async function getTransactions(limit = 50) {
         const isIncoming = incomingTransfers && incomingTransfers.length > 0;
         const isOutgoing = outgoingTransfer !== undefined && outgoingTransfer !== null;
 
+        // Get subaddress index for incoming transactions
+        let subaddressIndex = null;
+        if (isIncoming && incomingTransfers.length > 0) {
+            const transfer = incomingTransfers[0];
+            subaddressIndex = getValue(transfer, 'getSubaddressIndex', 'subaddressIndex');
+        }
+
         // Get amount
         let amount = 0n;
         if (isIncoming) {
@@ -1450,7 +1521,8 @@ export async function getTransactions(limit = 50) {
             isOutgoing,
             amount,
             fee,
-            confirmations
+            confirmations,
+            subaddressIndex
         };
     });
 

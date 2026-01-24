@@ -118,6 +118,7 @@ export async function saveWallet(walletData) {
             salt: walletData.salt,
             primary_address: walletData.primary_address,
             restore_height: walletData.restore_height || 0,
+            nextSubaddressIndex: walletData.nextSubaddressIndex || 1, // Start at 1, index 0 is primary
             owner_pubkey: walletData.owner_pubkey,
             created_at: Date.now(),
             updated_at: Date.now()
@@ -342,13 +343,22 @@ export async function updateWalletMeta(pubkey, updates) {
         throw new Error('No wallet found to update');
     }
 
+    // Security: Only allow specific metadata fields to be updated
+    const ALLOWED_META_FIELDS = ['restore_height', 'primary_address', 'nextSubaddressIndex'];
+    const safeUpdates = {};
+    for (const field of ALLOWED_META_FIELDS) {
+        if (field in updates) {
+            safeUpdates[field] = updates[field];
+        }
+    }
+
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORES.WALLET, 'readwrite');
         const store = tx.objectStore(STORES.WALLET);
 
         const record = {
             ...existing,
-            ...updates,
+            ...safeUpdates,
             updated_at: Date.now()
         };
 

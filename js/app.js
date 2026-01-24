@@ -4707,3 +4707,61 @@ document.addEventListener('DOMContentLoaded', () => {
         observer.observe(settingsPage, { attributes: true, attributeFilter: ['style'] });
     }
 });
+
+// Show Primary Address modal (for wallet modal Quick Actions)
+async function showPrimaryAddress() {
+    if (!window.Wallet?.getPrimaryAddress) {
+        Utils.showNotification('Tip Jar not available', 'error');
+        return;
+    }
+
+    try {
+        const address = await window.Wallet.getPrimaryAddress();
+        if (!address) {
+            Utils.showNotification('No Tip Jar found. Create one first.', 'error');
+            return;
+        }
+
+        // Create modal
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10002; padding: 20px;';
+        modal.innerHTML = `
+            <div style="background: #1a1a1a; border-radius: 16px; padding: 24px; max-width: 400px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
+                <h3 style="color: #fff; font-size: 18px; margin: 0 0 16px 0; text-align: center;">🏠 Primary Address</h3>
+                <p style="color: #888; font-size: 13px; margin: 0 0 16px 0; text-align: center; line-height: 1.5;">
+                    This is your permanent wallet address. Use it for QR codes, donation pages, or anywhere you want a consistent address.
+                </p>
+                <div style="background: #0a0a0a; border-radius: 8px; padding: 12px; margin-bottom: 16px; word-break: break-all;">
+                    <code style="color: #FF6600; font-size: 12px; line-height: 1.4;">${address}</code>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <button id="copyPrimaryAddr" style="padding: 12px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: #000; font-weight: 600; cursor: pointer;">📋 Copy</button>
+                    <button id="closePrimaryAddr" style="padding: 12px; background: #333; border: none; border-radius: 8px; color: #fff; cursor: pointer;">Close</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Event handlers
+        modal.querySelector('#copyPrimaryAddr').onclick = async () => {
+            try {
+                await navigator.clipboard.writeText(address);
+                Utils.showNotification('Primary address copied!', 'success');
+            } catch (e) {
+                Utils.showNotification('Failed to copy', 'error');
+            }
+        };
+
+        modal.querySelector('#closePrimaryAddr').onclick = () => modal.remove();
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+    } catch (err) {
+        console.error('Failed to show primary address:', err);
+        Utils.showNotification('Failed to get address', 'error');
+    }
+}
+
+window.showPrimaryAddress = showPrimaryAddress;
+window.saveMoneroAddressToRelays = saveMoneroAddressToRelays;
