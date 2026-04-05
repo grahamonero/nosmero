@@ -691,7 +691,17 @@ export async function getFullWallet() {
             currentWallet = await MoneroTS.MoneroWalletFull.openWalletData(walletConfig);
         } else {
             // No cache - create from keys with restoreHeight
-            const restoreHeight = walletData.restore_height || 0;
+            // Check for a sync checkpoint (saved when WASM crashed after partial progress)
+            let restoreHeight = walletData.restore_height || 0;
+            try {
+                const checkpoint = await storage.loadSyncCheckpoint(currentPubkey);
+                if (checkpoint && checkpoint.resume_height > restoreHeight) {
+                    console.log(`[MoneroClient] Using sync checkpoint: ${checkpoint.resume_height} (original: ${restoreHeight})`);
+                    restoreHeight = checkpoint.resume_height;
+                }
+            } catch (e) {
+                console.warn('[MoneroClient] Failed to load sync checkpoint:', e.message);
+            }
             const walletConfig = {
                 networkType: MoneroTS.MoneroNetworkType.MAINNET,
                 primaryAddress: walletData.primary_address,
@@ -1566,26 +1576,92 @@ export async function getTransactions(limit = 50) {
 }
 
 /**
- * Sync wallet with blockchain
+ * Race a promise against a timeout. Rejects if the promise doesn't
+ * settle within the given ms.
+ */
+function withTimeout(promise, ms, label = 'operation') {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Save wallet cache to IndexedDB for delta sync on next unlock.
+ * @param {Object} wallet - MoneroWalletFull instance
+ * @param {string} pubkey - Nostr public key
+ * @returns {Promise<number>} Saved height
+ */
+async function saveWalletCache(wallet, pubkey) {
+    const height = await wallet.getHeight();
+
+    console.log('[MoneroClient] Saving wallet cache for delta sync...');
+    const walletDataArrays = await wallet.getData();
+
+    // getData() returns [keysData, cacheData] - two Uint8Arrays
+    // Serialize into single buffer: [4 bytes: keys length] [keys data] [cache data]
+    let walletDataBytes;
+    if (Array.isArray(walletDataArrays) && walletDataArrays.length === 2) {
+        const keysData = walletDataArrays[0];
+        const cacheData = walletDataArrays[1];
+        console.log('[MoneroClient] Keys data:', keysData.length, 'bytes, Cache data:', cacheData.length, 'bytes');
+
+        walletDataBytes = new Uint8Array(4 + keysData.length + cacheData.length);
+        const view = new DataView(walletDataBytes.buffer);
+        view.setUint32(0, keysData.length, true); // little-endian
+        walletDataBytes.set(keysData, 4);
+        walletDataBytes.set(cacheData, 4 + keysData.length);
+    } else if (walletDataArrays instanceof Uint8Array) {
+        walletDataBytes = walletDataArrays;
+    } else {
+        throw new Error('Unexpected getData() format: ' + typeof walletDataArrays);
+    }
+
+    console.log('[MoneroClient] Total wallet data size:', walletDataBytes.length, 'bytes');
+
+    const encryptedCache = await walletCrypto.encryptWalletCache(
+        decryptedKeys.privateViewKey,
+        walletDataBytes
+    );
+
+    await storage.saveWalletCache(pubkey, {
+        encrypted_data: encryptedCache.encrypted_data,
+        iv: encryptedCache.iv,
+        salt: encryptedCache.salt,
+        height: height
+    });
+
+    console.log('[MoneroClient] Wallet cache saved at height:', height);
+    return height;
+}
+
+/**
+ * Sync wallet with blockchain.
+ * Uses auto-recovery: if sync fails due to WASM memory limits but made progress,
+ * saves the cache, closes the wallet to free WASM memory, reopens from cache,
+ * and retries. This allows large initial syncs to complete across multiple passes.
+ *
+ * Also manually manages the sync listener to work around a monero-ts bug where
+ * removeListener() in the error cleanup path can throw "Listener is not registered
+ * with wallet", masking the real sync error.
+ *
  * @param {Function} [onProgress] - Progress callback with progress object
  * @returns {Promise<{height: number}>} Final sync height
  */
 export async function sync(onProgress) {
-    const wallet = await getFullWallet();
     const currentPubkey = await getNostrPubkey();
-
-    // Ensure daemon connection before sync (Tor mode may have lost it)
-    await ensureDaemonConnection(wallet);
-
-    // Delta sync is now supported via wallet cache:
-    // - On first sync (or if cache is missing), wallet syncs from restoreHeight
-    // - After sync, we save wallet state via getData() to IndexedDB
-    // - On next unlock, we restore from cache and only sync new blocks
-    // The wallet's internal state knows where it left off when restored from cache.
-
-    // Create a proper listener that extends MoneroWalletListener
-    // monero-ts checks instanceof MoneroWalletListener, so plain objects don't work
     const MoneroTS = getMoneroTS();
+    const MAX_RETRIES = 10;
+    // If no progress callback fires for this long, assume WASM is frozen
+    const STALL_TIMEOUT_MS = 90_000; // 90 seconds
+
+    // Track overall progress across retries for the UI
+    let overallStartHeight = null;
+    let overallEndHeight = null;
+    // Track last progress timestamp for stall detection
+    let lastProgressTime = Date.now();
+    let lastProgressHeight = 0;
 
     class SyncListener extends MoneroTS.MoneroWalletListener {
         constructor(progressCallback) {
@@ -1594,84 +1670,194 @@ export async function sync(onProgress) {
         }
 
         async onSyncProgress(height, listenerStartHeight, endHeight, percentDone, message) {
+            // Update stall detector
+            lastProgressTime = Date.now();
+            lastProgressHeight = height;
+
+            // Keep wallet unlocked while sync is actively progressing
+            resetUnlockTimeout();
+
+            // On first callback, capture the overall range
+            if (overallStartHeight === null) overallStartHeight = listenerStartHeight;
+            overallEndHeight = endHeight;
+
             if (this.progressCallback) {
+                // Calculate overall progress across all retry attempts
+                const totalBlocks = overallEndHeight - overallStartHeight;
+                const blocksDone = height - overallStartHeight;
+                const overallPercent = totalBlocks > 0 ? blocksDone / totalBlocks : percentDone;
+
                 this.progressCallback({
                     currentHeight: height,
-                    numBlocksDone: height - listenerStartHeight,
-                    numBlocksTotal: endHeight - listenerStartHeight,
-                    percentDone,
+                    numBlocksDone: blocksDone,
+                    numBlocksTotal: totalBlocks,
+                    percentDone: overallPercent,
                     message: message || `Syncing block ${height}...`
                 });
             }
         }
     }
 
-    const listener = new SyncListener(onProgress);
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        // Prevent auto-lock from firing during sync/recovery
+        resetUnlockTimeout();
 
-    try {
-        // Wallet syncs from its internal state (restored from cache) or restoreHeight (first sync)
-        // monero-ts sync() signature: sync(listenerOrStartHeight?, startHeight?, allowConcurrentCalls?)
-        await wallet.sync(listener);
-    } catch (e) {
-        console.error('[MoneroClient] Sync error:', e);
-        throw e;
-    }
+        let wallet = await getFullWallet();
 
-    const height = await wallet.getHeight();
+        // Ensure daemon connection before sync
+        await ensureDaemonConnection(wallet);
 
-    // Save wallet state for delta sync on next unlock
-    // getData() exports full wallet state including transaction cache
-    if (currentPubkey && decryptedKeys) {
+        const walletHeight = await wallet.getHeight();
+        const restoreHeight = await wallet.getRestoreHeight();
+        // monero-ts sync() uses Math.max(walletHeight, restoreHeight) as actual start
+        const effectiveStart = Math.max(walletHeight, restoreHeight);
+        let daemonHeight;
         try {
-            console.log('[MoneroClient] Saving wallet cache for delta sync...');
-            const walletDataArrays = await wallet.getData();
+            daemonHeight = await wallet.getDaemonHeight();
+        } catch (e) {
+            throw new Error('Cannot sync: unable to reach Monero daemon');
+        }
 
-            // getData() returns [keysData, cacheData] - two Uint8Arrays
-            // We need to serialize them into a single buffer for storage
-            // Format: [4 bytes: keys length] [keys data] [cache data]
-            let walletDataBytes;
-            if (Array.isArray(walletDataArrays) && walletDataArrays.length === 2) {
-                const keysData = walletDataArrays[0];
-                const cacheData = walletDataArrays[1];
-                console.log('[MoneroClient] Keys data:', keysData.length, 'bytes, Cache data:', cacheData.length, 'bytes');
+        // Already synced (within 1 block)
+        if (effectiveStart >= daemonHeight - 1) {
+            // Save cache on final success
+            if (currentPubkey && decryptedKeys) {
+                try { await saveWalletCache(wallet, currentPubkey); } catch (e) {
+                    console.warn('[MoneroClient] Failed to save wallet cache:', e.message);
+                }
+            }
+            return { height: effectiveStart };
+        }
 
-                // Combine into single buffer with length prefix
-                walletDataBytes = new Uint8Array(4 + keysData.length + cacheData.length);
-                const view = new DataView(walletDataBytes.buffer);
-                view.setUint32(0, keysData.length, true); // little-endian
-                walletDataBytes.set(keysData, 4);
-                walletDataBytes.set(cacheData, 4 + keysData.length);
-            } else if (walletDataArrays instanceof Uint8Array) {
-                // Single Uint8Array (unexpected but handle it)
-                walletDataBytes = walletDataArrays;
-            } else {
-                throw new Error('Unexpected getData() format: ' + typeof walletDataArrays);
+        const blocksRemaining = daemonHeight - effectiveStart;
+        if (attempt === 0) {
+            console.log(`[MoneroClient] Sync: wallet height ${walletHeight}, restore height ${restoreHeight}, starting from ${effectiveStart}, daemon at ${daemonHeight}, ${blocksRemaining} blocks to sync`);
+        } else {
+            console.log(`[MoneroClient] Sync retry ${attempt + 1}/${MAX_RETRIES}: starting from ${effectiveStart}, ${blocksRemaining} blocks remaining`);
+        }
+
+        // Set overall start on first attempt so progress bar is accurate
+        if (overallStartHeight === null) overallStartHeight = effectiveStart;
+
+        // Create listener - manually managed to avoid monero-ts removeListener bug
+        const listener = new SyncListener(onProgress);
+        lastProgressTime = Date.now();
+        lastProgressHeight = effectiveStart;
+
+        // Manually add listener instead of passing to wallet.sync()
+        await wallet.addListener(listener);
+
+        // Stall detector: if WASM freezes, wallet.sync() hangs forever without
+        // throwing. Race it against a watchdog that checks for progress.
+        let stallTimer = null;
+        const stallPromise = new Promise((_, reject) => {
+            stallTimer = setInterval(() => {
+                const elapsed = Date.now() - lastProgressTime;
+                if (elapsed > STALL_TIMEOUT_MS) {
+                    reject(new Error(`WASM stalled: no progress for ${Math.round(elapsed / 1000)}s (last block: ${lastProgressHeight})`));
+                }
+            }, 5000); // check every 5s
+        });
+
+        let syncError = null;
+        try {
+            await Promise.race([wallet.sync(), stallPromise]);
+        } catch (e) {
+            syncError = e;
+            console.error(`[MoneroClient] Sync error on attempt ${attempt + 1}:`, e.message || e);
+        } finally {
+            clearInterval(stallTimer);
+        }
+
+        // Safely remove listener - timeout because worker may be frozen
+        try {
+            await withTimeout(wallet.removeListener(listener), 5_000, 'removeListener');
+        } catch (e) {
+            console.warn('[MoneroClient] Listener removal failed (non-fatal):', e.message);
+        }
+
+        if (!syncError) {
+            // Sync succeeded - save cache and return
+            const height = await wallet.getHeight();
+            if (currentPubkey && decryptedKeys) {
+                try { await saveWalletCache(wallet, currentPubkey); } catch (e) {
+                    console.warn('[MoneroClient] Failed to save wallet cache:', e.message);
+                }
+            }
+            // Clear any sync checkpoint since we've fully caught up
+            try {
+                await storage.clearSyncCheckpoint(currentPubkey);
+            } catch (e) { /* non-critical */ }
+            return { height };
+        }
+
+        // Sync failed or stalled - check if we made progress.
+        // Use timeouts on all worker calls since the worker may be frozen.
+        let newHeight;
+        try {
+            newHeight = await withTimeout(wallet.getHeight(), 10_000, 'getHeight');
+        } catch (e) {
+            // Can't even read height - wallet/worker is dead, use last known
+            console.error('[MoneroClient] Cannot read wallet height after failure:', e.message);
+            newHeight = lastProgressHeight > walletHeight ? lastProgressHeight : walletHeight;
+        }
+
+        // Use effective start for comparison since walletHeight may be 1 for fresh wallets
+        const madeProgress = newHeight > effectiveStart || lastProgressHeight > effectiveStart;
+        const progressHeight = Math.max(newHeight, lastProgressHeight);
+
+        if (madeProgress) {
+            console.log(`[MoneroClient] Sync made progress: ${effectiveStart} -> ${progressHeight} (${progressHeight - effectiveStart} blocks). Saving and retrying...`);
+
+            // Try to save cache, but with a timeout - getData() can hang on frozen workers
+            let cacheSaved = false;
+            if (currentPubkey && decryptedKeys) {
+                try {
+                    await withTimeout(saveWalletCache(wallet, currentPubkey), 30_000, 'saveWalletCache');
+                    cacheSaved = true;
+                } catch (cacheErr) {
+                    console.warn('[MoneroClient] Failed to save partial cache (will resync):', cacheErr.message);
+                }
             }
 
-            console.log('[MoneroClient] Total wallet data size:', walletDataBytes.length, 'bytes');
+            // Save checkpoint directly to IndexedDB (no Worker needed).
+            // If cache was saved, the checkpoint is a belt-and-suspenders backup.
+            // If cache save failed (Worker is dead), this is the only way to
+            // make forward progress on the next retry.
+            if (currentPubkey) {
+                try {
+                    await storage.saveSyncCheckpoint(currentPubkey, progressHeight);
+                    console.log('[MoneroClient] Saved sync checkpoint at height:', progressHeight);
+                } catch (cpErr) {
+                    console.warn('[MoneroClient] Failed to save sync checkpoint:', cpErr.message);
+                }
+            }
 
-            // Encrypt with privateViewKey
-            const encryptedCache = await walletCrypto.encryptWalletCache(
-                decryptedKeys.privateViewKey,
-                walletDataBytes
-            );
+            // If cache was saved successfully, checkpoint is redundant - clear it
+            if (cacheSaved && currentPubkey) {
+                try {
+                    await storage.clearSyncCheckpoint(currentPubkey);
+                } catch (e) { /* non-critical */ }
+            }
 
-            // Save to IndexedDB
-            await storage.saveWalletCache(currentPubkey, {
-                encrypted_data: encryptedCache.encrypted_data,
-                iv: encryptedCache.iv,
-                salt: encryptedCache.salt,
-                height: height
-            });
+            // Close wallet to free WASM memory. Timeout because close() also
+            // talks to the worker and can hang.
+            try {
+                await withTimeout(wallet.close(), 5_000, 'wallet.close');
+            } catch (e) {
+                console.warn('[MoneroClient] Wallet close timed out, abandoning worker');
+            }
+            currentWallet = null;
 
-            console.log('[MoneroClient] Wallet cache saved at height:', height);
-        } catch (e) {
-            // Non-fatal - delta sync just won't work next time
-            console.warn('[MoneroClient] Failed to save wallet cache:', e.message);
+            // Next iteration will reopen from saved cache (or from keys with checkpoint if save failed)
+            continue;
         }
+
+        // No progress made - throw the real error
+        throw new Error(`Sync failed: ${syncError.message || syncError}`);
     }
 
-    return { height };
+    throw new Error('Sync failed after maximum retries - try again later');
 }
 
 /**

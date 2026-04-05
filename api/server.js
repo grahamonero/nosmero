@@ -889,10 +889,11 @@ const ALLOWED_OTHER_ENDPOINTS = [
   '/get_output_distribution.bin'
 ];
 
-// Rate limiter for RPC proxy (stricter)
+// Rate limiter for RPC proxy
+// Increased from 100 to 500 for wallet sync performance (sync makes many RPC calls)
 const moneroRpcLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 100, // 100 requests per minute per IP
+  max: 500, // 500 requests per minute per IP
   message: { success: false, error: 'Rate limited - too many RPC requests' }
 });
 

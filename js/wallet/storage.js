@@ -455,5 +455,79 @@ export async function deleteWalletCache(pubkey) {
     });
 }
 
+/**
+ * Save a sync checkpoint height directly to IndexedDB.
+ * Used when the WASM Worker crashes mid-sync and cache save fails.
+ * On retry, this checkpoint lets the wallet skip already-scanned blocks.
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @param {number} height - Last known progress height
+ * @returns {Promise<void>}
+ */
+export async function saveSyncCheckpoint(pubkey, height) {
+    if (!pubkey) {
+        throw new Error('pubkey is required to save sync checkpoint');
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.SYNC, 'readwrite');
+        const store = tx.objectStore(STORES.SYNC);
+
+        const record = {
+            id: `checkpoint:${pubkey}`,
+            resume_height: height,
+            saved_at: Date.now()
+        };
+
+        const request = store.put(record);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Load a sync checkpoint for a wallet.
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @returns {Promise<Object|null>} Checkpoint record or null if not found
+ */
+export async function loadSyncCheckpoint(pubkey) {
+    if (!pubkey) {
+        return null;
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.SYNC, 'readonly');
+        const store = tx.objectStore(STORES.SYNC);
+        const request = store.get(`checkpoint:${pubkey}`);
+
+        request.onsuccess = () => {
+            resolve(request.result || null);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Clear a sync checkpoint after successful full sync.
+ * @param {string} pubkey - Nostr pubkey of wallet owner
+ * @returns {Promise<void>}
+ */
+export async function clearSyncCheckpoint(pubkey) {
+    if (!pubkey) {
+        return;
+    }
+
+    await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.SYNC, 'readwrite');
+        const store = tx.objectStore(STORES.SYNC);
+        const request = store.delete(`checkpoint:${pubkey}`);
+
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
 // Export store names for direct access if needed
 export { STORES, DB_NAME };
