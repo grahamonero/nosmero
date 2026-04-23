@@ -629,7 +629,7 @@ async function renderDashboard() {
                 <div id="walletSyncStatus" style="color: #ccc; font-size: 12px;">Syncing...</div>
                 <div id="walletSyncProgress" style="color: #666; font-size: 10px;">Connecting...</div>
             </div>
-            <button onclick="window.WalletModal.syncWallet()" style="background: #333; border: none; color: #fff; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">↻</button>
+            <button onclick="window.WalletModal.syncWallet()" style="background: #FF6600; border: none; color: #000; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap;">↻ Sync Now</button>
         </div>
         <!-- Node Info (shown after sync) -->
         <div id="walletNodeInfo" style="background: #1a1a1a; border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; display: none;">
@@ -679,6 +679,8 @@ export async function syncWallet() {
 
     if (spinner) spinner.style.display = 'block';
     if (statusEl) statusEl.textContent = 'Syncing...';
+    // Reset progress so stale "86% - Block X" text from a previous sync doesn't persist.
+    if (progressEl) progressEl.textContent = 'Connecting...';
 
     let syncSucceeded = false;
     try {
@@ -689,6 +691,8 @@ export async function syncWallet() {
 
         if (spinner) spinner.style.display = 'none';
         if (statusEl) statusEl.textContent = '✓ Synced';
+        // Clear partial-progress text so the status line reads cleanly when done.
+        if (progressEl) progressEl.textContent = 'Up to date';
         syncSucceeded = true;
     } catch (err) {
         console.error('[WalletModal] Sync failed:', err);
