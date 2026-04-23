@@ -764,59 +764,40 @@ async function loadUserProfileData() {
                     });
                 }
 
-                // Process collected profile events to find the best one
+                // Process collected profile events.
+                // Kind 0 is a replaceable event — pick the newest; do not merge across older copies.
                 if (profileEvents.length > 0) {
                     console.log('Processing', profileEvents.length, 'profile events');
-                    
-                    // Find the most complete profile (most fields) or the most recent
-                    let bestProfile = null;
-                    let bestScore = -1;
-                    
-                    for (const { event, profile, timestamp } of profileEvents) {
-                        // Score based on completeness (number of non-empty fields)
-                        const score = Object.keys(profile).filter(key => 
-                            profile[key] && profile[key] !== '' && 
-                            !['monero_address'].includes(key) // Don't count monero_address for completeness
-                        ).length;
-                        
-                        // Prefer more complete profiles, or more recent if same completeness
-                        if (score > bestScore || (score === bestScore && timestamp > (bestProfile?.timestamp || 0))) {
-                            bestProfile = { event, profile, timestamp };
-                            bestScore = score;
-                        }
+
+                    const cachedTimestamp = State.profileCache[State.publicKey]?.created_at || 0;
+                    const freshEvents = profileEvents.filter(({ timestamp }) => timestamp >= cachedTimestamp);
+                    if (freshEvents.length < profileEvents.length) {
+                        console.log(`⏭️ Ignoring ${profileEvents.length - freshEvents.length} stale relay profile(s) older than cached (${cachedTimestamp})`);
                     }
-                    
+
+                    const bestProfile = freshEvents.reduce(
+                        (best, cur) => (!best || cur.timestamp > best.timestamp ? cur : best),
+                        null
+                    );
+
                     if (bestProfile) {
-                        const { event, profile } = bestProfile;
-                        console.log('Selected best profile with score', bestScore, ':', profile);
-                        console.log('Profile fields breakdown:', {
-                            nip05: profile.nip05,
-                            lud16: profile.lud16,
-                            lud06: profile.lud06
-                        });
-                        
-                        // Merge with existing cached profile to preserve existing data
-                        const existingProfile = State.profileCache[State.publicKey] || {};
-                        
+                        const { event, profile, timestamp } = bestProfile;
+                        console.log(`Selected newest profile (created_at=${timestamp}):`, profile);
+
                         userProfile = {
-                            ...existingProfile,
                             ...profile,
                             pubkey: event.pubkey,
-                            // Only use fallbacks if both existing and new profile don't have the field
-                            name: profile.name || profile.display_name || existingProfile.name || `User ${State.publicKey.substring(0, 8)}`,
-                            picture: profile.picture || existingProfile.picture || null,
-                            about: profile.about || existingProfile.about || 'No bio available',
-                            nip05: profile.nip05 || existingProfile.nip05 || null,
-                            website: profile.website || existingProfile.website || null,
-                            monero_address: profile.monero_address || existingProfile.monero_address || null,
-                            lud16: profile.lud16 || existingProfile.lud16 || null,
-                            lud06: profile.lud06 || existingProfile.lud06 || null
+                            created_at: timestamp,
+                            name: profile.name || profile.display_name || `User ${State.publicKey.substring(0, 8)}`
                         };
 
                         saveProfileToCache(State.publicKey, userProfile);
                         profileFound = true;
                         console.log('Updated profile cache with:', userProfile);
                         displayProfileHeader(userProfile);
+                    } else if (cachedTimestamp > 0) {
+                        console.log('✅ All relay profiles were stale — keeping locally saved version');
+                        profileFound = true;
                     }
                 }
                 
@@ -3634,17 +3615,25 @@ async function saveProfile(event) {
             State.pool.publish(writeRelays, signedEvent);
         }
         
-        // Update local profile cache
+        // Update local profile cache + localStorage with the published event's timestamp.
+        // created_at lets loadUserProfileData/forceFreshProfileFetch reject older relay copies.
         const updatedProfile = {
             ...State.profileCache[State.publicKey],
             ...profileData,
-            pubkey: State.publicKey
+            pubkey: State.publicKey,
+            created_at: signedEvent.created_at
         };
-        State.profileCache[State.publicKey] = updatedProfile;
-        
+        saveProfileToCache(State.publicKey, updatedProfile);
+        console.log('✅ Profile persisted with created_at=' + signedEvent.created_at, updatedProfile);
+
         // Refresh profile display
         displayProfileHeader(updatedProfile);
-        
+
+        // If the About tab is currently rendered, re-render it so bio/website/nip05 updates show.
+        if (document.getElementById('profileTabAbout')?.style.background?.includes('gradient')) {
+            switchProfileTab('about');
+        }
+
         // Close modal and show success
         closeEditProfileModal();
         Utils.showNotification('Profile updated successfully!', 'success');
@@ -3732,54 +3721,39 @@ async function forceFreshProfileFetch() {
                 console.log('✓ Profile fetch complete');
                 subscription.close();
 
-                // Process collected profile events to find the best one
+                // Process collected profile events.
+                // Kind 0 is a replaceable event — pick the newest; do not merge across older copies.
                 if (profileEvents.length > 0) {
                     console.log('Processing', profileEvents.length, 'profile events');
 
-                    // Find the most complete profile (most fields) or the most recent
-                    let bestProfile = null;
-                    let bestScore = -1;
-
-                    for (const { event, profile, timestamp } of profileEvents) {
-                        // Score based on completeness (number of non-empty fields)
-                        const score = Object.keys(profile).filter(key =>
-                            profile[key] && profile[key] !== '' &&
-                            !['monero_address'].includes(key) // Don't count monero_address for completeness
-                        ).length;
-
-                        // Prefer more complete profiles, or more recent if same completeness
-                        if (score > bestScore || (score === bestScore && timestamp > (bestProfile?.timestamp || 0))) {
-                            bestProfile = { event, profile, timestamp };
-                            bestScore = score;
-                        }
+                    const cachedTimestamp = State.profileCache[State.publicKey]?.created_at || 0;
+                    const freshEvents = profileEvents.filter(({ timestamp }) => timestamp >= cachedTimestamp);
+                    if (freshEvents.length < profileEvents.length) {
+                        console.log(`⏭️ Ignoring ${profileEvents.length - freshEvents.length} stale relay profile(s) older than cached (${cachedTimestamp})`);
                     }
 
-                    if (bestProfile) {
-                        const { event, profile } = bestProfile;
-                        console.log('Selected best profile with score', bestScore, ':', profile);
+                    const bestProfile = freshEvents.reduce(
+                        (best, cur) => (!best || cur.timestamp > best.timestamp ? cur : best),
+                        null
+                    );
 
-                        // Merge with existing cached profile to preserve existing data
-                        const existingProfile = State.profileCache[State.publicKey] || {};
+                    if (bestProfile) {
+                        const { event, profile, timestamp } = bestProfile;
+                        console.log(`Selected newest profile (created_at=${timestamp}):`, profile);
 
                         const userProfile = {
-                            ...existingProfile,
                             ...profile,
                             pubkey: event.pubkey,
-                            // Only use fallbacks if both existing and new profile don't have the field
-                            name: profile.name || profile.display_name || existingProfile.name || `User ${State.publicKey.substring(0, 8)}`,
-                            picture: profile.picture || existingProfile.picture || null,
-                            about: profile.about || existingProfile.about || 'No bio available',
-                            nip05: profile.nip05 || existingProfile.nip05 || null,
-                            website: profile.website || existingProfile.website || null,
-                            banner: profile.banner || existingProfile.banner || null,
-                            monero_address: profile.monero_address || existingProfile.monero_address || null,
-                            lud16: profile.lud16 || existingProfile.lud16 || null,
-                            lud06: profile.lud06 || existingProfile.lud06 || null
+                            created_at: timestamp,
+                            name: profile.name || profile.display_name || `User ${State.publicKey.substring(0, 8)}`
                         };
 
-                        State.profileCache[State.publicKey] = userProfile;
+                        saveProfileToCache(State.publicKey, userProfile);
                         profileFound = true;
                         console.log('✅ Profile cache updated:', userProfile);
+                    } else if (cachedTimestamp > 0) {
+                        console.log('✅ All relay profiles were stale — keeping locally saved version');
+                        profileFound = true;
                     }
                 }
 
