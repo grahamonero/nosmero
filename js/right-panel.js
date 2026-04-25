@@ -2041,6 +2041,7 @@ const RightPanel = {
                 <button type="button" data-format="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
                 <button type="button" data-format="italic" title="Italic (Ctrl+I)"><em>I</em></button>
                 <button type="button" data-format="link" title="Link (Ctrl+K)">🔗</button>
+                <button type="button" data-format="mention" title="Mention (paste npub)">@</button>
                 <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
                 <button type="button" data-format="quote" title="Quote">"</button>
                 <button type="button" data-format="list" title="Bullet list">•</button>
@@ -2293,8 +2294,8 @@ const RightPanel = {
     async uploadPanelMedia() {
         if (!this.currentPanelMedia) return null;
 
-        const file = this.currentPanelMedia;
-        console.log('Uploading media:', file.name, file.size, file.type);
+        const file = await (window.NostrUtils?.stripImageMetadata?.(this.currentPanelMedia) ?? this.currentPanelMedia);
+        console.log('Uploading media:', file.name, file.size, file.type, '(metadata stripped:', file !== this.currentPanelMedia, ')');
 
         const errors = [];
 
@@ -2516,6 +2517,7 @@ const RightPanel = {
         event.tags.push(...paywallTags);
 
         // Sign the event
+        window.NostrUtils?.addMentionTags?.(event, event.content);
         const signedEvent = await window.NostrUtils?.signEvent?.(event);
         if (!signedEvent) {
             throw new Error('Failed to sign event');

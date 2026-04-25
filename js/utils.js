@@ -314,6 +314,15 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     // Convert single line breaks
     parsed = parsed.replace(/(\r\n|\r|\n)/g, '<br>');
 
+    // Stash generated media tags behind placeholders so the mention regexes
+    // below cannot match npub/nprofile strings inside URLs (e.g. Blossom
+    // subdomains like https://npub1xxx.blossom.band/<hash>.jpg)
+    const mediaTags = [];
+    const stashMedia = (tag) => {
+        const idx = mediaTags.push(tag) - 1;
+        return `\x00MEDIA_${idx}\x00`;
+    };
+
     // Parse image URLs (stop at whitespace or < to avoid grabbing <br> tags)
     // Uses ThumbHash for progressive loading if available
     const imageRegex = /(https?:\/\/[^\s<]+\.(jpg|jpeg|png|gif|webp|svg)(\?[^\s<]*)?)/gi;
@@ -325,9 +334,9 @@ export function parseContent(content, skipEmbeddedNotes = false) {
         const escapedUrl = escapeHtml(url);
         const placeholder = window.ThumbHashLoader?.getPlaceholder(url);
         if (placeholder) {
-            return `<img src="${escapeHtml(placeholder)}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`;
+            return stashMedia(`<img src="${escapeHtml(placeholder)}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`);
         }
-        return `<img src="${escapedUrl}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`;
+        return stashMedia(`<img src="${escapedUrl}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`);
     });
 
     // Parse video URLs (stop at whitespace or < to avoid grabbing <br> tags)
@@ -337,7 +346,7 @@ export function parseContent(content, skipEmbeddedNotes = false) {
         if (!isValidUrlScheme(url)) {
             return escapeHtml(match);
         }
-        return `<video controls><source src="${escapeHtml(url)}" /></video>`;
+        return stashMedia(`<video controls><source src="${escapeHtml(url)}" /></video>`);
     });
     
     // Parse nostr npub mentions - show as user names
@@ -412,7 +421,10 @@ export function parseContent(content, skipEmbeddedNotes = false) {
         }
         return `<a href="${escapeHtml(match)}" target="_blank" rel="noopener">${escapeHtml(match)}</a>`;
     });
-    
+
+    // Restore stashed media tags now that mention/URL processing is done
+    parsed = parsed.replace(/\x00MEDIA_(\d+)\x00/g, (m, idx) => mediaTags[parseInt(idx, 10)] || '');
+
     // Sanitize with DOMPurify to prevent XSS
     if (typeof DOMPurify !== 'undefined') {
         parsed = DOMPurify.sanitize(parsed, {
@@ -709,5 +721,193 @@ if (typeof document !== 'undefined') {
         document.addEventListener('DOMContentLoaded', initGlobalEventDelegation);
     } else {
         initGlobalEventDelegation();
+    }
+}
+
+// Scans `content` for Nostr profile mentions (nostr:npub1..., nostr:nprofile1...,
+// or bare bech32 forms) and adds ['p', pubkey, relayHint?] tags to event.tags
+// for each unique pubkey not already present. NIP-27 / NIP-10. Without these
+// tags, mentioned users do not receive notifications since notification
+// subscriptions filter on '#p'.
+export function addMentionTags(event, content) {
+    if (!content || !window.NostrTools?.nip19) return;
+    if (!Array.isArray(event.tags)) event.tags = [];
+
+    const existing = new Set(
+        event.tags
+            .filter(t => Array.isArray(t) && t[0] === 'p' && typeof t[1] === 'string')
+            .map(t => t[1].toLowerCase())
+    );
+
+    const re = /(?:nostr:)?(npub1[a-z0-9]{58}|nprofile1[a-z0-9]+)/gi;
+    for (const m of content.matchAll(re)) {
+        const bech32 = m[1].toLowerCase();
+        try {
+            const decoded = window.NostrTools.nip19.decode(bech32);
+            let pubkey = null;
+            let relayHint = null;
+            if (decoded.type === 'npub') {
+                pubkey = decoded.data;
+            } else if (decoded.type === 'nprofile') {
+                pubkey = decoded.data.pubkey;
+                relayHint = decoded.data.relays?.[0] || null;
+            }
+            if (!pubkey || existing.has(pubkey)) continue;
+            existing.add(pubkey);
+            event.tags.push(relayHint ? ['p', pubkey, relayHint] : ['p', pubkey]);
+        } catch (err) {
+            // Invalid bech32 — skip
+        }
+    }
+}
+
+// Lazy resolution of mention placeholders that landed in the DOM with a
+// truncated bech32 fallback (because the kind-0 wasn't in profileCache when
+// parseContent ran). A MutationObserver watches for any new
+// .mention[data-pubkey] elements; we debounce, batch-fetch the missing
+// kind-0 events from broader relays, and update the chip text in place.
+// Mirrors the pattern in search.js but runs globally so feeds, threads,
+// profiles, embedded notes, etc. all resolve without per-call wiring.
+const MENTION_RESOLVE_DEBOUNCE = 300;
+const MENTION_RESOLVE_TIMEOUT = 10000;
+const MENTION_RETRY_RELAYS = [
+    'wss://relay.damus.io',
+    'wss://nos.lol',
+    'wss://relay.primal.net',
+    'wss://purplepag.es'
+];
+let _mentionResolveTimer = null;
+
+export function scheduleMentionResolve() {
+    if (_mentionResolveTimer) clearTimeout(_mentionResolveTimer);
+    _mentionResolveTimer = setTimeout(_resolveUnresolvedMentions, MENTION_RESOLVE_DEBOUNCE);
+}
+
+async function _resolveUnresolvedMentions() {
+    _mentionResolveTimer = null;
+
+    const elements = document.querySelectorAll('.mention[data-pubkey]');
+    if (elements.length === 0) return;
+
+    const elementsByPubkey = new Map();
+    for (const el of elements) {
+        const text = el.textContent;
+        if (!/^@(npub1|nprofile1).+\.\.\.$/.test(text)) continue;
+        const pubkey = el.getAttribute('data-pubkey');
+        if (!pubkey) continue;
+        const cached = profileCache[pubkey];
+        const cachedName = cached?.name || cached?.display_name;
+        if (cachedName) {
+            el.textContent = `@${cachedName}`;
+            continue;
+        }
+        if (!elementsByPubkey.has(pubkey)) elementsByPubkey.set(pubkey, []);
+        elementsByPubkey.get(pubkey).push(el);
+    }
+
+    if (elementsByPubkey.size === 0 || !State.pool) return;
+
+    const pubkeys = [...elementsByPubkey.keys()];
+    try {
+        await new Promise((resolve) => {
+            const found = new Set();
+            const sub = State.pool.subscribeMany(MENTION_RETRY_RELAYS, [{
+                kinds: [0],
+                authors: pubkeys
+            }], {
+                onevent(event) {
+                    if (found.has(event.pubkey)) return;
+                    try {
+                        const profile = JSON.parse(event.content);
+                        profileCache[event.pubkey] = {
+                            ...profile,
+                            pubkey: event.pubkey,
+                            created_at: event.created_at
+                        };
+                        found.add(event.pubkey);
+                        const name = profile.name || profile.display_name;
+                        if (name) {
+                            (elementsByPubkey.get(event.pubkey) || []).forEach(el => {
+                                el.textContent = `@${name}`;
+                            });
+                        }
+                        if (found.size >= pubkeys.length) {
+                            sub.close();
+                            resolve();
+                        }
+                    } catch {}
+                },
+                oneose() {
+                    sub.close();
+                    resolve();
+                }
+            });
+            setTimeout(() => { try { sub.close(); } catch {} resolve(); }, MENTION_RESOLVE_TIMEOUT);
+        });
+    } catch (e) {
+        console.warn('[utils] mention resolve failed:', e);
+    }
+}
+
+function _startMentionObserver() {
+    const observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+            for (const node of m.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                if (node.classList?.contains('mention') ||
+                    node.querySelector?.('.mention[data-pubkey]')) {
+                    scheduleMentionResolve();
+                    return;
+                }
+            }
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+}
+
+if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _startMentionObserver);
+    } else {
+        _startMentionObserver();
+    }
+}
+
+// Re-encodes an image File through a canvas to drop EXIF/GPS/IPTC/XMP/comments
+// and the original filename. Pixel data preserved; metadata gone.
+// Pass-through (no strip): non-images, GIF (animation), HEIC/HEIF (decode), SVG.
+// Fail-open: returns the original File on any error so the user is never blocked.
+export async function stripImageMetadata(file) {
+    if (!file || !file.type || !file.type.startsWith('image/')) return file;
+
+    const passthrough = ['image/gif', 'image/heic', 'image/heif', 'image/svg+xml'];
+    if (passthrough.includes(file.type)) return file;
+
+    try {
+        const bitmap = await createImageBitmap(file);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('canvas 2d context unavailable');
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close?.();
+
+        const outType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const quality = outType === 'image/jpeg' ? 0.92 : undefined;
+
+        const blob = await new Promise((resolve, reject) => {
+            canvas.toBlob(
+                b => b ? resolve(b) : reject(new Error('canvas.toBlob returned null')),
+                outType,
+                quality
+            );
+        });
+
+        const ext = outType === 'image/png' ? 'png' : 'jpg';
+        return new File([blob], `image.${ext}`, { type: outType });
+    } catch (err) {
+        console.warn('[utils] stripImageMetadata failed, uploading original:', err);
+        return file;
     }
 }
