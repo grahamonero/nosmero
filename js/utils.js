@@ -642,7 +642,7 @@ function renderEmbeddedNote(event, State) {
     const profile = State?.profileCache?.[event.pubkey];
     const authorName = profile?.name || profile?.display_name || event.pubkey.slice(0, 8) + '...';
     const authorPicture = profile?.picture;
-    const content = event.content ? event.content.slice(0, 200) + (event.content.length > 200 ? '...' : '') : '';
+    const content = event.content || '';
     const timeAgo = formatTimeAgo(event.created_at * 1000);
 
     // Validate author picture URL
