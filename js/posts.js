@@ -3411,6 +3411,7 @@ async function doQuoteRepost() {
         eventTemplate.tags.push(['monero_address', moneroAddress]);
     }
 
+    Utils.addMentionTags(eventTemplate, eventTemplate.content);
     const signedEvent = await Utils.signEvent(eventTemplate);
 
     // Publish to your write relays + author's read relays (inbox)
@@ -3568,6 +3569,7 @@ export async function sendReply(replyToId) {
             eventTemplate.tags.push(['monero_address', moneroAddress]);
         }
 
+        Utils.addMentionTags(eventTemplate, eventTemplate.content);
         const signedEvent = await Utils.signEvent(eventTemplate);
 
         // Publish to your write relays + recipient's read relays (inbox)
@@ -4733,6 +4735,7 @@ export async function sendPost() {
         }
 
         // Sign the event using helper function
+        Utils.addMentionTags(event, event.content);
         const signedEvent = await Utils.signEvent(event);
 
         // If paywalled, register with backend before publishing
@@ -4873,6 +4876,36 @@ export function formatText(textarea, format) {
                 cursorOffset = replacement.length - 1; // Position after https://
             }
             break;
+        case 'mention': {
+            let bech32;
+            const sel = selectedText.trim().replace(/^nostr:/i, '');
+            if (/^(?:npub1[a-z0-9]{58}|nprofile1[a-z0-9]+)$/i.test(sel)) {
+                bech32 = sel.toLowerCase();
+            } else {
+                const input = prompt('Paste an npub or nprofile to mention:');
+                if (!input) return;
+                bech32 = input.trim().replace(/^nostr:/i, '').toLowerCase();
+            }
+            try {
+                const decoded = window.NostrTools.nip19.decode(bech32);
+                if (decoded.type !== 'npub' && decoded.type !== 'nprofile') {
+                    Utils.showNotification('Not an npub or nprofile', 'error');
+                    return;
+                }
+                replacement = `nostr:${bech32}`;
+                cursorOffset = replacement.length;
+                const pubkey = decoded.type === 'npub' ? decoded.data : decoded.data.pubkey;
+                fetchProfiles([pubkey]).then(() => {
+                    const profile = State.profileCache[pubkey];
+                    const name = profile?.name || profile?.display_name || bech32.slice(0, 12) + '...';
+                    Utils.showNotification(`Added mention: @${name}`, 'success');
+                }).catch(() => {});
+            } catch (err) {
+                Utils.showNotification('Invalid npub or nprofile', 'error');
+                return;
+            }
+            break;
+        }
         case 'code':
             if (selectedText.includes('\n')) {
                 // Multi-line: use code block
@@ -4943,14 +4976,32 @@ export function toggleComposePreview(composeArea) {
         // Switch to preview mode
         const content = textarea.value;
 
-        // Parse markdown with marked.js and sanitize with DOMPurify
-        if (window.marked && window.DOMPurify) {
-            const html = window.marked.parse(content);
-            preview.innerHTML = window.DOMPurify.sanitize(html);
-        } else {
-            // Fallback: escape HTML and show as plain text
-            preview.textContent = content;
+        // Pre-fetch any mentioned profiles so they render as @username
+        // instead of falling back to truncated bech32. Fire-and-forget;
+        // we render now and re-render once profiles land.
+        if (window.NostrTools?.nip19) {
+            const pubkeys = [];
+            for (const m of content.matchAll(/(?:nostr:)?(npub1[a-z0-9]{58}|nprofile1[a-z0-9]+)/gi)) {
+                try {
+                    const d = window.NostrTools.nip19.decode(m[1]);
+                    const pk = d.type === 'npub' ? d.data
+                            : d.type === 'nprofile' ? d.data.pubkey : null;
+                    if (pk && !State.profileCache[pk]) pubkeys.push(pk);
+                } catch {}
+            }
+            if (pubkeys.length > 0) {
+                fetchProfiles(pubkeys).then(() => {
+                    if (preview.style.display !== 'none') {
+                        preview.innerHTML = Utils.parseContent(textarea.value, true);
+                    }
+                }).catch(() => {});
+            }
         }
+
+        // Render through the same parseContent the feed uses, so npubs become
+        // @username chips, links/images/videos are rendered, etc.
+        // skipEmbeddedNotes=true avoids fetching nested events in compose.
+        preview.innerHTML = Utils.parseContent(content, true);
 
         textarea.style.display = 'none';
         preview.style.display = '';
@@ -5371,14 +5422,15 @@ async function createNIP98AuthEvent(url) {
 async function uploadMediaToBlossom() {
     if (!currentMediaFile) return null;
 
-    console.log('Starting media upload for file:', currentMediaFile.name, 'Size:', currentMediaFile.size, 'Type:', currentMediaFile.type);
+    const fileToUpload = await Utils.stripImageMetadata(currentMediaFile);
+    console.log('Starting media upload for file:', fileToUpload.name, 'Size:', fileToUpload.size, 'Type:', fileToUpload.type, '(metadata stripped:', fileToUpload !== currentMediaFile, ')');
 
     const errors = [];
 
     for (const provider of mediaProviders) {
         try {
             console.log(`Trying ${provider.name}...`);
-            const url = await provider.upload(currentMediaFile);
+            const url = await provider.upload(fileToUpload);
             console.log(`Success with ${provider.name}:`, url);
             currentMediaUrl = url;
             return url;
@@ -5462,6 +5514,7 @@ export async function publishNewPost() {
         }
 
         // Sign and publish event
+        Utils.addMentionTags(eventTemplate, eventTemplate.content);
         const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
 
