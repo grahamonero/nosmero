@@ -75,13 +75,64 @@ app.use('/api/verify-and-publish', limiter);
 const RELATR_BASE_URL = process.env.RELATR_API_URL || 'http://localhost:3001';
 const RELATR_TIMEOUT = 10000; // 10 second timeout
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
+// Health check endpoint - probes critical dependencies. Cached 30s so
+// external uptime monitors don't hammer the underlying services.
+let _healthCache = { result: null, ts: 0 };
+const HEALTH_CACHE_TTL_MS = 30_000;
+
+async function _probeWithTimeout(promise, ms = 2500) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+  ]);
+}
+
+async function _probeMonerod() {
+  try {
+    const resp = await _probeWithTimeout(fetch('http://127.0.0.1:18081/get_height', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: '0', method: 'get_height' })
+    }));
+    const json = await resp.json();
+    return json && json.status === 'OK' && typeof json.height === 'number' ? 'ok' : 'fail';
+  } catch { return 'fail'; }
+}
+
+async function _probeStrfry() {
+  try {
+    const resp = await _probeWithTimeout(fetch('http://127.0.0.1:7777', {
+      headers: { 'Accept': 'application/nostr+json' }
+    }));
+    const json = await resp.json();
+    return json && json.name ? 'ok' : 'fail';
+  } catch { return 'fail'; }
+}
+
+async function _probeRelatr() {
+  try {
+    const url = (process.env.RELATR_API_URL || 'http://localhost:3002') + '/stats';
+    const resp = await _probeWithTimeout(fetch(url));
+    return resp.status === 200 ? 'ok' : 'fail';
+  } catch { return 'fail'; }
+}
+
+app.get('/api/health', async (req, res) => {
+  if (_healthCache.result && Date.now() - _healthCache.ts < HEALTH_CACHE_TTL_MS) {
+    return res.json(_healthCache.result);
+  }
+  const [monerod, strfry, relatr] = await Promise.all([
+    _probeMonerod(), _probeStrfry(), _probeRelatr()
+  ]);
+  const allOk = monerod === 'ok' && strfry === 'ok' && relatr === 'ok';
+  const result = {
+    status: allOk ? 'ok' : 'degraded',
+    monerod, strfry, relatr,
     timestamp: new Date().toISOString(),
     environment: config.nodeEnv
-  });
+  };
+  _healthCache = { result, ts: Date.now() };
+  res.json(result);
 });
 
 // Relatr: Trust score endpoint
