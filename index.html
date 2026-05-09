@@ -265,6 +265,7 @@
                 <button type="button" data-format="italic" title="Italic (Ctrl+I)"><em>I</em></button>
                 <button type="button" data-format="link" title="Link (Ctrl+K)">🔗</button>
                 <button type="button" data-format="mention" title="Mention (paste npub)">@</button>
+                <button type="button" data-format="ipfs" title="Embed IPFS media (paste CID)">📦</button>
                 <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
                 <button type="button" data-format="quote" title="Quote">"</button>
                 <button type="button" data-format="list" title="Bullet list">•</button>
@@ -1004,6 +1005,7 @@
                     <button type="button" data-format="italic" title="Italic (Ctrl+I)"><em>I</em></button>
                     <button type="button" data-format="link" title="Link (Ctrl+K)">🔗</button>
                     <button type="button" data-format="mention" title="Mention (paste npub)">@</button>
+                    <button type="button" data-format="ipfs" title="Embed IPFS media (paste CID)">📦</button>
                     <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
                     <button type="button" data-format="quote" title="Quote">"</button>
                     <button type="button" data-format="list" title="Bullet list">•</button>
@@ -1272,6 +1274,22 @@
     <!-- Monero wallet library (client-side WebAssembly) -->
     <!-- SRI hash protects against supply chain attacks on the WASM bundle -->
     <script src="/lib/monero-wallet.iife.js" integrity="sha384-gNGdgKHQok1SRL9i3qj4OuKW4FXf10WXAOiIqym1kzo7WLwIaXoRGCNOcxK5wLfe" crossorigin="anonymous"></script>
+
+    <!-- IPFS Embed Modal -->
+    <dialog id="ipfsEmbedModal" class="ipfs-embed-modal">
+        <form method="dialog">
+            <h3 class="ipfs-embed-title">Embed IPFS media</h3>
+            <input type="text" id="ipfsCidInput" placeholder="CID or gateway URL" autocomplete="off" spellcheck="false" class="ipfs-embed-input">
+            <div class="ipfs-error"></div>
+            <div class="ipfs-embed-label">Please select the file type for the CID:</div>
+            <div class="ipfs-embed-actions">
+                <button type="submit" value="image" class="ipfs-embed-btn">🖼️ Image</button>
+                <button type="submit" value="video" class="ipfs-embed-btn">🎬 Video</button>
+                <button type="submit" value="file" class="ipfs-embed-btn">📄 File</button>
+                <button type="submit" value="cancel" class="ipfs-embed-btn ipfs-embed-cancel">Cancel</button>
+            </div>
+        </form>
+    </dialog>
 
     <!-- Load the modular v2 application (UI modules consolidated into /js/ui/) -->
     <script type="module" src="/js/app.js?v=3.1.3-profile"></script>

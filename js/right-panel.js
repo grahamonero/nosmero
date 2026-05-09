@@ -2042,6 +2042,7 @@ const RightPanel = {
                 <button type="button" data-format="italic" title="Italic (Ctrl+I)"><em>I</em></button>
                 <button type="button" data-format="link" title="Link (Ctrl+K)">🔗</button>
                 <button type="button" data-format="mention" title="Mention (paste npub)">@</button>
+                <button type="button" data-format="ipfs" title="Embed IPFS media (paste CID)">📦</button>
                 <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
                 <button type="button" data-format="quote" title="Quote">"</button>
                 <button type="button" data-format="list" title="Bullet list">•</button>
