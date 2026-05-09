@@ -605,6 +605,7 @@ export async function viewUserProfilePage(pubkey) {
                         <button onclick="copyUserNpub('${pubkey}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 8px 16px; cursor: pointer; font-size: 14px;">📋 Copy npub</button>
                     </div>
                 </div>
+                <div id="ipfsPinsContainer"></div>
                 <div id="userPostsContainer" style="word-break: break-word; overflow-wrap: break-word; max-width: 100%;">
                     <div style="text-align: center; color: #666; padding: 40px;">
                         <p>Loading user posts...</p>
@@ -612,6 +613,19 @@ export async function viewUserProfilePage(pubkey) {
                 </div>
             </div>
         `;
+
+        // Render IPFS Pins section (own profile only — gated inside the helper)
+        try {
+            const StateModule = await import('../state.js');
+            const IpfsPins = await import('../ipfs-pins.js');
+            IpfsPins.renderIpfsPinsSection(
+                document.getElementById('ipfsPinsContainer'),
+                pubkey,
+                StateModule.publicKey
+            );
+        } catch (e) {
+            console.warn('[Profile] Could not render IPFS pins section:', e);
+        }
 
         // Update follow button state
         await updateFollowButton(pubkey);
