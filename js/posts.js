@@ -3493,7 +3493,15 @@ async function doQuoteRepost() {
     }
 
     // Create note content with user comment and embedded note reference
-    const noteContent = `${userComment}\n\nnostr:${window.NostrTools.nip19.noteEncode(currentRepostPost.id)}`;
+    let noteContent = `${userComment}\n\nnostr:${window.NostrTools.nip19.noteEncode(currentRepostPost.id)}`;
+
+    // Resolve any IPFS upload placeholders (uploads happen now, on publish)
+    try {
+        noteContent = await IpfsPins.resolveOrThrow(noteContent);
+    } catch (e) {
+        Utils.showNotification(e.message, 'error');
+        return;
+    }
 
     const eventTemplate = {
         kind: 1,
@@ -3651,6 +3659,14 @@ export async function sendReply(replyToId) {
             } catch (e) {
                 console.warn('[Posts] Could not generate subaddress for reply, using profile address:', e);
             }
+        }
+
+        // Resolve any IPFS upload placeholders (uploads happen now, on publish)
+        try {
+            replyContent = await IpfsPins.resolveOrThrow(replyContent);
+        } catch (e) {
+            Utils.showNotification(e.message, 'error');
+            return;
         }
 
         // Create reply event
@@ -4808,6 +4824,14 @@ export async function sendPost() {
             }
         }
 
+        // Resolve any IPFS upload placeholders (uploads happen now, on publish)
+        try {
+            content = await IpfsPins.resolveOrThrow(content);
+        } catch (e) {
+            UI.showErrorToast(e.message);
+            return;
+        }
+
         // Check if paywall is enabled
         const paywallSettings = window.NostrPaywall?.getPaywallSettings?.();
         let paywallData = null;
@@ -5207,14 +5231,21 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
             const data = await IpfsPins.getCachedQuota();
             quotaUsed = data.quotaUsedBytes;
             quotaTotal = data.quotaTotalBytes;
-            const pct = quotaTotal > 0 ? Math.min(100, (quotaUsed / quotaTotal) * 100) : 0;
-            quotaFill.style.width = pct + '%';
-            quotaText.textContent = `${formatBytesShort(quotaUsed)} / ${formatBytesShort(quotaTotal)} used`;
+            renderQuotaBar();
         } catch (e) {
             quotaText.textContent = (e.status === 401)
                 ? 'Login required to upload to IPFS.'
                 : 'Could not load quota.';
         }
+    };
+
+    const renderQuotaBar = () => {
+        const staged = IpfsPins.getStagedTotalBytes();
+        const totalUse = quotaUsed + staged;
+        const pct = quotaTotal > 0 ? Math.min(100, (totalUse / quotaTotal) * 100) : 0;
+        quotaFill.style.width = pct + '%';
+        const stagedNote = staged > 0 ? ` (${formatBytesShort(staged)} staged)` : '';
+        quotaText.textContent = `${formatBytesShort(totalUse)} / ${formatBytesShort(quotaTotal)} used${stagedNote}`;
     };
 
     const onFilePicked = () => {
@@ -5232,65 +5263,43 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
                           : mime.startsWith('video/') ? 'video' : 'file';
         radios.forEach(r => r.checked = r.value === defaultKind);
         warning.hidden = mime.startsWith('image/');
-        const remaining = quotaTotal - quotaUsed;
+        // Block at staging time: server_used + already_staged + new_file <= quota
+        const stagedNow = IpfsPins.getStagedTotalBytes();
+        const remaining = quotaTotal - quotaUsed - stagedNow;
         uploadBtn.disabled = f.size > remaining;
         uploadErr.hidden = true;
         if (f.size > remaining) {
             uploadErr.hidden = false;
-            uploadErr.textContent = `File is ${formatBytesShort(f.size)} but only ${formatBytesShort(remaining)} of quota remains. Unpin from your profile to free space.`;
+            uploadErr.textContent = `File is ${formatBytesShort(f.size)} but only ${formatBytesShort(remaining)} of quota remains (server: ${formatBytesShort(quotaUsed)} used, ${formatBytesShort(stagedNow)} already staged). Unpin from your profile or remove a staged placeholder.`;
         }
     };
     fileInput.addEventListener('change', onFilePicked);
 
-    const doUpload = async () => {
+    // Stage the file client-side and insert the placeholder into the textarea.
+    // No upload happens here — actual upload is deferred until publish time
+    // (see IpfsPins.resolveOrThrow). No CID and no server quota charge until
+    // the post actually publishes.
+    const doStage = async () => {
         const f = fileInput.files && fileInput.files[0];
         if (!f) return;
         const kind = modal.querySelector('input[name="ipfsUploadKind"]:checked').value;
 
-        uploadErr.hidden = true;
-        uploadBtn.disabled = true;
-        progressEl.hidden = false;
-        progressFill.style.width = '0%';
-        progressText.textContent = '0%';
-
-        let toUpload = f;
+        let toStage = f;
         try {
             if ((f.type || '').toLowerCase().startsWith('image/') && Utils.stripImageMetadata) {
-                toUpload = await Utils.stripImageMetadata(f);
+                toStage = await Utils.stripImageMetadata(f);
             }
         } catch (e) {
-            console.warn('[ipfs] image metadata strip failed, uploading original:', e);
-            toUpload = f;
+            console.warn('[ipfs] image metadata strip failed, staging original:', e);
+            toStage = f;
         }
 
-        try {
-            const result = await IpfsPins.uploadToIpfs(toUpload, {
-                onProgress: (p) => {
-                    const pct = Math.round(p * 100);
-                    progressFill.style.width = pct + '%';
-                    progressText.textContent = pct + '%';
-                }
-            });
-            const embedUrl = buildEmbedUrl(result.url, kind);
-            modal.close();
-            insertEmbedIntoTextarea(textarea, selectedText, start, end, embedUrl, kind);
-            if (result.alreadyPinned) {
-                Utils.showNotification('Already pinned by another user — using existing CID, no quota charged.', 'info');
-            }
-        } catch (e) {
-            progressEl.hidden = true;
-            uploadBtn.disabled = false;
-            uploadErr.hidden = false;
-            if (e.status === 413) {
-                uploadErr.textContent = 'Not enough quota — unpin from your profile to free space.';
-            } else if (e.status === 401) {
-                uploadErr.textContent = 'Login required to upload to IPFS.';
-            } else {
-                uploadErr.textContent = `Upload failed: ${e.error || e.message || 'unknown error'}`;
-            }
-        }
+        const { placeholder } = IpfsPins.stageFileForUpload(toStage, kind);
+        modal.close();
+        insertEmbedIntoTextarea(textarea, selectedText, start, end, placeholder, kind);
+        Utils.showNotification(`📦 Staged: ${f.name} — uploads when you post`, 'info');
     };
-    uploadBtn.addEventListener('click', doUpload);
+    uploadBtn.addEventListener('click', doStage);
 
     const tabHandlers = [];
     tabs.forEach(tab => {
@@ -5311,7 +5320,7 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
     const closeHandler = () => {
         pasteForm.removeEventListener('submit', pasteSubmitHandler);
         fileInput.removeEventListener('change', onFilePicked);
-        uploadBtn.removeEventListener('click', doUpload);
+        uploadBtn.removeEventListener('click', doStage);
         tabHandlers.forEach(([t, h]) => t.removeEventListener('click', h));
         modal.removeEventListener('close', closeHandler);
 
@@ -5853,6 +5862,14 @@ export async function publishNewPost() {
         let postContent = content;
         if (mediaUrl) {
             postContent = content ? `${content}\n\n${mediaUrl}` : mediaUrl;
+        }
+
+        // Resolve any IPFS upload placeholders (uploads happen now, on publish)
+        try {
+            postContent = await IpfsPins.resolveOrThrow(postContent);
+        } catch (e) {
+            UI.showErrorToast ? UI.showErrorToast(e.message) : Utils.showNotification(e.message, 'error');
+            return;
         }
 
         // Determine Monero address - use subaddress if enabled and wallet unlocked

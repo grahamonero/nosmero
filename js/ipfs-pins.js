@@ -141,3 +141,128 @@ export async function getCachedQuota() {
 export function invalidateQuotaCache() {
   _quotaCache = null;
 }
+
+// ===========================================================================
+// Staged-upload system (Step 7.1)
+//
+// Files are NOT uploaded when the user picks them in the modal. Instead, the
+// File object is stashed client-side and a placeholder token is inserted into
+// the compose textarea:
+//
+//   [ipfs upload: photo.jpg #a1b2c3d4]
+//
+// At publish time, resolveOrThrow(content) walks the placeholders, uploads
+// each staged file, and returns the content with placeholders replaced by real
+// `https://ipfs.nosmero.com/ipfs/<CID>` URLs. If any upload fails, all
+// already-uploaded ones in the same batch are rolled back (DELETEd) so quota
+// stays accurate. If the user abandons the post, no upload ever happens.
+//
+// Closes the abuse vector where a user could upload, copy the CID, and let
+// auto-cleanup expire the pin — no CID exists until the post is published.
+// ===========================================================================
+
+const _stagedFiles = new Map(); // id -> { file, kind, filename }
+const PLACEHOLDER_REGEX = /\[ipfs upload:[^#\]]*#([a-f0-9]{8})\]/g;
+
+function _genStageId() {
+  const buf = new Uint8Array(4);
+  crypto.getRandomValues(buf);
+  return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function _buildEmbedUrlForKind(baseUrl, kind) {
+  if (kind === 'video') return baseUrl + '#video.mp4';
+  if (kind === 'file')  return baseUrl;
+  return baseUrl + '#image.jpg';
+}
+
+/**
+ * Store a File client-side, return the placeholder token to insert into compose.
+ * @param {File|Blob} file
+ * @param {'image'|'video'|'file'} kind
+ * @returns {{id: string, placeholder: string}}
+ */
+export function stageFileForUpload(file, kind) {
+  const id = _genStageId();
+  const filename = file.name || 'upload';
+  _stagedFiles.set(id, { file, kind, filename });
+  return { id, placeholder: `[ipfs upload: ${filename} #${id}]` };
+}
+
+/** Total bytes of all currently-staged files (for the modal's quota math). */
+export function getStagedTotalBytes() {
+  let total = 0;
+  for (const { file } of _stagedFiles.values()) total += file.size;
+  return total;
+}
+
+export function getStagedCount() {
+  return _stagedFiles.size;
+}
+
+/** Forget a specific staged file (e.g. user removed the placeholder manually). */
+export function clearStagedFile(id) {
+  _stagedFiles.delete(id);
+}
+
+/**
+ * Walk the placeholders in `content`, upload each staged file, replace the
+ * placeholder with the real IPFS URL. Atomic: if any upload fails, the others
+ * in this batch are unpinned and the original content is returned.
+ *
+ * @returns {Promise<{content: string, errors: Array<{id, filename, error}>, uploaded: number}>}
+ */
+export async function resolvePendingPlaceholders(content) {
+  const matches = [...content.matchAll(PLACEHOLDER_REGEX)];
+  if (matches.length === 0) return { content, errors: [], uploaded: 0 };
+
+  const successful = []; // [{ id, cid, placeholder, replacement }]
+  const errors = [];
+
+  for (const match of matches) {
+    const id = match[1];
+    const staged = _stagedFiles.get(id);
+    if (!staged) {
+      errors.push({ id, filename: '?', error: 'staged_file_not_found' });
+      continue;
+    }
+    try {
+      const result = await uploadToIpfs(staged.file);
+      const url = _buildEmbedUrlForKind(result.url, staged.kind);
+      successful.push({ id, cid: result.cid, placeholder: match[0], replacement: url });
+    } catch (e) {
+      errors.push({ id, filename: staged.filename, error: e.error || e.message || 'upload_failed' });
+    }
+  }
+
+  if (errors.length > 0) {
+    // Roll back successful uploads so quota stays accurate
+    for (const s of successful) {
+      try { await unpinCid(s.cid); } catch {}
+    }
+    return { content, errors, uploaded: 0 };
+  }
+
+  let newContent = content;
+  for (const s of successful) {
+    newContent = newContent.split(s.placeholder).join(s.replacement);
+    _stagedFiles.delete(s.id);
+  }
+  _quotaCache = null; // server quota changed
+  return { content: newContent, errors: [], uploaded: successful.length };
+}
+
+/**
+ * Convenience wrapper that throws on any upload failure so callers can use
+ * try/catch instead of branching on the errors array.
+ */
+export async function resolveOrThrow(content) {
+  const { content: newContent, errors } = await resolvePendingPlaceholders(content);
+  if (errors.length > 0) {
+    const summary = errors.map(e => `${e.filename} (${e.error})`).join(', ');
+    const err = new Error(`IPFS upload failed for ${errors.length} file(s): ${summary}`);
+    err.errors = errors;
+    throw err;
+  }
+  return newContent;
+}

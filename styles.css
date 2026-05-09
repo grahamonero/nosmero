@@ -3803,3 +3803,10 @@
     opacity: 0.4;
     cursor: not-allowed;
 }
+
+.ipfs-stage-note {
+    font-size: 11px;
+    color: #888;
+    margin: 8px 0 12px;
+    font-style: italic;
+}
