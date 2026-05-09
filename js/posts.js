@@ -6,6 +6,7 @@ import * as Utils from './utils.js';
 import * as Relays from './relays.js';
 import * as UI from './ui/index.js';
 import * as PaywallUI from './paywall-ui.js';
+import * as FeedCache from './feed-cache.js';
 
 // Constants for feed management
 export const POSTS_PER_PAGE = 10;
@@ -304,7 +305,7 @@ export async function loadStreamingHomeFeed() {
         initializeHomeFeedResults();
         updateHomeFeedStatus('Loading your following list...');
 
-        // Step 1: Always fetch fresh following list
+        // Step 1: Load following list (cache-first, refreshes from relays in background)
         await loadFreshFollowingList();
 
         // Check if user has no follows - show trending feed with onboarding UI
@@ -315,11 +316,14 @@ export async function loadStreamingHomeFeed() {
             return;
         }
 
+        // Step 1.5: Render from cache instantly so the user sees something while relays load
+        await renderFeedFromCache();
+
         // Step 2: Prepare user profiles (Monero addresses load in background)
         updateHomeFeedStatus('Loading user profiles...');
         await prepareProfiles(); // Only waits for profiles, not Monero addresses
 
-        // Step 3: Stream posts directly from relays (no cache)
+        // Step 3: Stream fresh posts from relays (writes back to cache)
         updateHomeFeedStatus('Loading posts from relays...');
         console.log('🔄 Starting streamRelayPosts()...');
         await streamRelayPosts();
@@ -1519,7 +1523,7 @@ async function loadMoreTrendingPosts() {
 // Make loadMoreTrendingPosts globally accessible
 window.loadMoreTrendingPosts = loadMoreTrendingPosts;
 
-// Load fresh following list from relays (always, no cache)
+// Load following list - uses IndexedDB cache for instant render, refreshes from relays in background
 async function loadFreshFollowingList() {
     console.log('🔍 Starting loadFreshFollowingList()');
     console.log('🔍 State.publicKey:', State.publicKey ? State.publicKey.slice(0, 8) + '...' : 'null');
@@ -1534,20 +1538,44 @@ async function loadFreshFollowingList() {
         return;
     }
 
-    // CRITICAL: Set sync flag to false at start to prevent race condition (logged-in users only)
+    // Try cache first - instant render
+    const cached = await FeedCache.getCachedFollows(State.publicKey);
+    if (cached && Array.isArray(cached.follows) && cached.follows.length > 0) {
+        currentFollowingList = new Set(cached.follows);
+        State.setFollowingUsers(currentFollowingList);
+        State.setContactListFullySynced(true);
+        const ageMin = Math.round((Date.now() - cached.cached_at) / 60000);
+        updateHomeFeedStatus(`Following ${currentFollowingList.size} users (cached ${ageMin}m ago, refreshing...)`);
+        console.log(`📦 Loaded ${currentFollowingList.size} follows from cache (age ${ageMin}m)`);
+
+        // Refresh from relays in the background - don't block feed render
+        _fetchFollowsFromRelays({ background: true }).catch(err => {
+            console.warn('Background follow refresh failed:', err);
+        });
+        return;
+    }
+
+    // No cache - block on relay fetch (cold start)
     State.setContactListFullySynced(false);
     console.log('🔒 Contact list sync: LOCKED - follow actions blocked during sync');
-
-    // Show visual sync status indicator (logged-in users only)
     UI.showContactSyncStatus();
 
+    await _fetchFollowsFromRelays({ background: false });
+}
+
+// Fetch fresh kind 3 from relays. Updates currentFollowingList, State.followingUsers, and cache.
+// background=true means cache was already populated; don't reset state on failure.
+async function _fetchFollowsFromRelays({ background }) {
     try {
-        const readRelays = Relays.getUserDataRelays(); // Use NIP-65 relays for personal data
+        const readRelays = Relays.getUserDataRelays(); // NIP-65 relays for personal data
+        let bestEvent = null;
+        let bestSize = currentFollowingList.size;
         let foundFollowingList = false;
 
-        // Track sync progress for UI feedback
-        State.setContactListSyncProgress({ loaded: 0, total: readRelays.length });
-        UI.showContactSyncStatus(0, readRelays.length);
+        if (!background) {
+            State.setContactListSyncProgress({ loaded: 0, total: readRelays.length });
+            UI.showContactSyncStatus(0, readRelays.length);
+        }
 
         await new Promise((resolve) => {
             const sub = State.pool.subscribeMany(readRelays, [
@@ -1563,23 +1591,21 @@ async function loadFreshFollowingList() {
                         });
 
                         if (followingFromRelay.size > 0) {
-                            // Keep the largest following list found (in case different relays have different versions)
-                            if (followingFromRelay.size > currentFollowingList.size) {
+                            foundFollowingList = true;
+                            // Track best (largest) kind 3 event seen across relays
+                            if (followingFromRelay.size > bestSize) {
+                                bestSize = followingFromRelay.size;
+                                bestEvent = event;
                                 currentFollowingList = followingFromRelay;
-                                foundFollowingList = true;
-
-                                // Update global state with best result so far
                                 State.setFollowingUsers(followingFromRelay);
-                                localStorage.setItem('following-list', JSON.stringify([...followingFromRelay]));
-
                                 console.log('✓ Better following list found:', currentFollowingList.size, 'users');
-                                console.log('🔍 Following list details:', Array.from(followingFromRelay).slice(0, 5), '...');
-                                console.log('🔍 State.followingUsers updated to size:', State.followingUsers ? State.followingUsers.size : 'undefined');
-                                updateHomeFeedStatus(`Following ${currentFollowingList.size} users`);
+                                if (!background) {
+                                    updateHomeFeedStatus(`Following ${currentFollowingList.size} users`);
+                                }
                             } else {
                                 console.log(`📋 Relay response: ${followingFromRelay.size} users (keeping current ${currentFollowingList.size})`);
-                                // Still mark as found since we have a valid list
-                                foundFollowingList = true;
+                                // Still capture event for cache if we don't have one yet
+                                if (!bestEvent) bestEvent = event;
                             }
                         }
                     } catch (error) {
@@ -1592,7 +1618,6 @@ async function loadFreshFollowingList() {
                 }
             });
 
-            // Timeout after 15 seconds for better relay coverage
             setTimeout(() => {
                 sub.close();
                 console.log(`⏰ Following list fetch timeout - best result: ${currentFollowingList.size} users`);
@@ -1600,38 +1625,40 @@ async function loadFreshFollowingList() {
             }, 15000);
         });
 
-        // No caching - only use fresh data from relays
-        if (!foundFollowingList) {
-            currentFollowingList = new Set();
-            updateHomeFeedStatus(`⚠️ Unable to load following list from relays - please check connection`);
-            console.error('Could not fetch fresh following list from any relay');
-            // CRITICAL: Unlock follow actions even on failure (user can try manual actions)
-            State.setContactListFullySynced(true);
-            State.setContactListSyncProgress({ loaded: readRelays.length, total: readRelays.length });
-            UI.hideContactSyncStatus();
-            console.log('🔓 Contact list sync: UNLOCKED (failed to load)');
-            return; // Exit early if no fresh data available
-        } else {
-            // Update global state with fresh data (no localStorage caching)
-            State.setFollowingUsers(currentFollowingList);
-            console.log('✓ Fresh following list loaded and updated in global state');
-
-            // CRITICAL: Unlock follow actions now that sync is complete
-            State.setContactListFullySynced(true);
-            State.setContactListSyncProgress({ loaded: readRelays.length, total: readRelays.length });
-            UI.hideContactSyncStatus();
-            console.log(`🔓 Contact list sync: UNLOCKED - ${currentFollowingList.size} follows loaded, follow actions now safe`);
+        // Persist to cache - saveCachedFollows guards on created_at to skip older versions
+        if (bestEvent) {
+            FeedCache.saveCachedFollows(State.publicKey, bestEvent).catch(err => {
+                console.warn('Failed to save follows to cache:', err);
+            });
         }
 
-    } catch (error) {
-        console.error('Error loading fresh following list:', error);
-        currentFollowingList = new Set();
-        updateHomeFeedStatus(`Error loading following list - please refresh or check network`);
-        // CRITICAL: Unlock follow actions even on error (user can try manual actions)
+        if (!foundFollowingList && currentFollowingList.size === 0) {
+            // Cold start with no relay results - new user or network failure
+            updateHomeFeedStatus(`⚠️ Unable to load following list from relays - please check connection`);
+            console.error('Could not fetch fresh following list from any relay');
+            State.setContactListFullySynced(true);
+            UI.hideContactSyncStatus();
+            console.log('🔓 Contact list sync: UNLOCKED (failed to load)');
+            return;
+        }
+
+        State.setFollowingUsers(currentFollowingList);
         State.setContactListFullySynced(true);
-        UI.hideContactSyncStatus();
-        console.log('🔓 Contact list sync: UNLOCKED (error occurred)');
-        return; // Exit early if error occurs
+        if (!background) {
+            State.setContactListSyncProgress({ loaded: 1, total: 1 });
+            UI.hideContactSyncStatus();
+            console.log(`🔓 Contact list sync: UNLOCKED - ${currentFollowingList.size} follows loaded`);
+        } else {
+            console.log(`✓ Background refresh complete - ${currentFollowingList.size} follows`);
+        }
+    } catch (error) {
+        console.error('Error loading following list from relays:', error);
+        if (!background) {
+            updateHomeFeedStatus(`Error loading following list - please refresh or check network`);
+            State.setContactListFullySynced(true);
+            UI.hideContactSyncStatus();
+            console.log('🔓 Contact list sync: UNLOCKED (error occurred)');
+        }
     }
 }
 
@@ -2414,6 +2441,56 @@ async function prepareProfiles() {
     }
 }
 
+// Hydrate State.profileCache and cachedHomeFeedPosts from IndexedDB and render immediately.
+// This is the perceived-speed win: user sees their feed before any relay responds.
+async function renderFeedFromCache() {
+    if (currentFollowingList.size === 0) return;
+
+    try {
+        const followingArray = Array.from(currentFollowingList);
+
+        // Load cached profiles + events in parallel
+        const [cachedProfiles, cachedEvents] = await Promise.all([
+            FeedCache.getCachedProfiles(followingArray),
+            FeedCache.getCachedEvents(followingArray, 200)
+        ]);
+
+        // Hydrate profile cache so author names/avatars render
+        let profileHits = 0;
+        for (const pubkey of Object.keys(cachedProfiles)) {
+            const entry = cachedProfiles[pubkey];
+            if (entry?.profile) {
+                State.profileCache[pubkey] = {
+                    ...entry.profile,
+                    pubkey,
+                    created_at: entry.kind0_created_at || 0
+                };
+                profileHits++;
+            }
+        }
+
+        if (cachedEvents.length === 0) {
+            console.log(`📦 Cache: ${profileHits} profiles hydrated, 0 events cached - cold render`);
+            return;
+        }
+
+        // Hydrate event state. streamRelayPosts will append fresh events and dedupe by id.
+        cachedHomeFeedPosts = cachedEvents;
+        for (const ev of cachedEvents) {
+            if (!State.eventCache[ev.id]) State.eventCache[ev.id] = ev;
+            if (!oldestCachedTimestamp || ev.created_at < oldestCachedTimestamp) {
+                oldestCachedTimestamp = ev.created_at;
+            }
+        }
+
+        console.log(`📦 Cache: rendering ${cachedEvents.length} events + ${profileHits} profiles instantly`);
+        updateHomeFeedStatus(`📦 Cached timeline (${cachedEvents.length} notes) - refreshing from relays...`);
+        await displayPostsFromCache(30);
+    } catch (e) {
+        console.warn('Failed to render from cache:', e);
+    }
+}
+
 // Fetch initial batch of posts (200 posts with generous limit)
 async function streamRelayPosts() {
     if (currentFollowingList.size === 0) {
@@ -2434,6 +2511,7 @@ async function streamRelayPosts() {
 
     let feedSub = null;
     let timeoutId = null;
+    const freshEventsForCache = []; // Batched IndexedDB writes at end of stream
 
     try {
         feedSub = State.pool.subscribeMany(readRelays, [
@@ -2459,6 +2537,9 @@ async function streamRelayPosts() {
                     if (!State.eventCache[event.id]) {
                         State.eventCache[event.id] = event;
                     }
+
+                    // Queue for batch write to IndexedDB cache at end of stream
+                    freshEventsForCache.push(event);
 
                     // Track oldest timestamp for pagination
                     if (!oldestCachedTimestamp || event.created_at < oldestCachedTimestamp) {
@@ -2497,6 +2578,12 @@ async function streamRelayPosts() {
 
         console.log(`✅ Cached ${cachedHomeFeedPosts.length} notes. Displaying first batch...`);
 
+        // Reset display cursor so the merged (cache + fresh) list re-renders from the top.
+        // Without this, posts already displayed from IndexedDB cache stay pinned and the
+        // newer relay events appear out of order behind them.
+        displayedPostCount = 0;
+        currentHomeFeedResults = [];
+
         // Display first 30 posts
         await displayPostsFromCache(30);
 
@@ -2508,6 +2595,19 @@ async function streamRelayPosts() {
         } else {
             console.error('Error streaming relay posts:', error);
         }
+    }
+
+    // Persist fresh events to IndexedDB (fire and forget) and prune if cache is too large
+    if (freshEventsForCache.length > 0) {
+        FeedCache.saveCachedEvents(freshEventsForCache)
+            .then(written => {
+                console.log(`💾 Cached ${written} new events to IndexedDB`);
+                return FeedCache.pruneOldEventsIfNeeded();
+            })
+            .then(deleted => {
+                if (deleted > 0) console.log(`🧹 Pruned ${deleted} oldest cached events`);
+            })
+            .catch(err => console.warn('Event cache write failed:', err));
     }
 }
 
@@ -4254,11 +4354,38 @@ export async function fetchDisclosedTips(postsOrIds) {
 export async function fetchProfiles(pubkeys) {
     if (!pubkeys || pubkeys.length === 0) return;
 
-    // Filter out pubkeys we already have profiles for
-    const unknownPubkeys = pubkeys.filter(pk => !State.profileCache[pk]);
+    // Filter out pubkeys we already have profiles for in memory
+    let unknownPubkeys = pubkeys.filter(pk => !State.profileCache[pk]);
     if (unknownPubkeys.length === 0) return;
 
+    // Hydrate from IndexedDB cache before hitting relays
+    try {
+        const cachedProfiles = await FeedCache.getCachedProfiles(unknownPubkeys);
+        let cacheHits = 0;
+        for (const pubkey of Object.keys(cachedProfiles)) {
+            const entry = cachedProfiles[pubkey];
+            if (entry && entry.profile) {
+                State.profileCache[pubkey] = {
+                    ...entry.profile,
+                    pubkey,
+                    created_at: entry.kind0_created_at || 0
+                };
+                cacheHits++;
+            }
+        }
+        if (cacheHits > 0) {
+            console.log(`📦 Loaded ${cacheHits} profiles from cache`);
+            unknownPubkeys = pubkeys.filter(pk => !State.profileCache[pk]);
+            if (unknownPubkeys.length === 0) return;
+        }
+    } catch (e) {
+        console.warn('Profile cache read failed:', e);
+    }
+
     console.log('🔍 Fetching profiles for', unknownPubkeys.length, 'users');
+
+    // Collect fresh profiles from relays for batch cache write at the end
+    const freshProfilesForCache = [];
 
     try {
         if (!State.pool) {
@@ -4303,6 +4430,13 @@ export async function fetchProfiles(pubkeys) {
                             created_at: event.created_at
                         };
 
+                        // Queue for batch write to IndexedDB cache
+                        freshProfilesForCache.push({
+                            pubkey: event.pubkey,
+                            profile,
+                            kind0_created_at: event.created_at
+                        });
+
                         foundPubkeys.add(event.pubkey);
                         profilesReceived++;
 
@@ -4346,6 +4480,13 @@ export async function fetchProfiles(pubkeys) {
 
     } catch (error) {
         console.error('Error fetching profiles:', error);
+    }
+
+    // Persist fresh profiles to cache (fire and forget)
+    if (freshProfilesForCache.length > 0) {
+        FeedCache.saveCachedProfiles(freshProfilesForCache).catch(err => {
+            console.warn('Profile cache write failed:', err);
+        });
     }
 }
 
@@ -4414,6 +4555,13 @@ async function fetchMissingProfilesViaNIP65(missingPubkeys) {
                                         pubkey: event.pubkey,
                                         created_at: event.created_at
                                     };
+                                    FeedCache.saveCachedProfiles([{
+                                        pubkey: event.pubkey,
+                                        profile,
+                                        kind0_created_at: event.created_at
+                                    }]).catch(err => {
+                                        console.warn('Profile cache write failed:', err);
+                                    });
                                     console.log(`✅ Background: Found ${profile.name || 'Anonymous'}`);
                                     sub.close();
                                     resolve();
