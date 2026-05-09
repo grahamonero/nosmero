@@ -3281,6 +3281,15 @@ export function showNoteMenu(postId, event) {
 
     currentMenuPostId = postId;
 
+    // Show "Request Deletion" only when the logged-in user is the author.
+    // NIP-09 kind 5 events from non-authors are ignored by relays anyway.
+    const deleteBtn = document.getElementById('postMenuDeleteBtn');
+    if (deleteBtn) {
+        const post = State.eventCache?.[postId] || State.posts?.find(p => p.id === postId);
+        const isAuthor = post && post.pubkey && State.publicKey && post.pubkey === State.publicKey;
+        deleteBtn.style.display = isAuthor ? '' : 'none';
+    }
+
     // Position menu at mouse location with boundary checking
     menu.style.display = 'block';
     menu.style.position = 'fixed';
