@@ -316,3 +316,169 @@ export function revokePreviewBlobUrls() {
   for (const url of _activeBlobUrls) URL.revokeObjectURL(url);
   _activeBlobUrls.clear();
 }
+
+// ---------------------------------------------------------------------------
+// Profile "IPFS Pins" panel (Step 8) — visible only when viewing own profile.
+// ---------------------------------------------------------------------------
+
+function _formatBytesShort(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function _formatPinDate(unixSec) {
+  try {
+    return new Date(unixSec * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch { return ''; }
+}
+
+function _pinIcon(mimeType) {
+  if (!mimeType) return '📄';
+  if (mimeType.startsWith('image/')) return '🖼️';
+  if (mimeType.startsWith('video/')) return '🎬';
+  if (mimeType.startsWith('audio/')) return '🎵';
+  return '📄';
+}
+
+/**
+ * Render the IPFS Pins section into `containerEl`. Gated to own profile —
+ * if viewedPubkey !== ownPubkey, clears the container and returns.
+ *
+ * Wires its own buttons via window.copyIpfsPinUrl / window.unpinIpfsPinFromProfile
+ * (set by _bindWindowHandlers below — idempotent).
+ */
+export async function renderIpfsPinsSection(containerEl, viewedPubkey, ownPubkey) {
+  if (!containerEl) return;
+  if (!viewedPubkey || !ownPubkey || viewedPubkey !== ownPubkey) {
+    containerEl.innerHTML = '';
+    containerEl.style.display = 'none';
+    return;
+  }
+  containerEl.style.display = '';
+  containerEl.innerHTML = `
+    <div class="ipfs-pins-section" style="background: rgba(255,255,255,0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+      <h3 style="margin: 0 0 12px; font-size: 16px; color: #fff;">📦 IPFS Pins</h3>
+      <div class="ipfs-pins-loading" style="color: #888; font-size: 13px;">Loading pins…</div>
+    </div>
+  `;
+
+  _bindWindowHandlers();
+
+  let data;
+  try {
+    invalidateQuotaCache();
+    data = await listPins();
+  } catch (e) {
+    const sect = containerEl.querySelector('.ipfs-pins-section');
+    if (sect) {
+      sect.innerHTML = `
+        <h3 style="margin: 0 0 12px; font-size: 16px; color: #fff;">📦 IPFS Pins</h3>
+        <div style="color: #f87171; font-size: 13px;">${
+          e.status === 401 ? 'Login required to view IPFS pins.' : 'Could not load pins.'
+        }</div>
+      `;
+    }
+    return;
+  }
+
+  const { pins, quotaUsedBytes, quotaTotalBytes } = data;
+  const pct = quotaTotalBytes > 0 ? Math.min(100, (quotaUsedBytes / quotaTotalBytes) * 100) : 0;
+
+  const sect = containerEl.querySelector('.ipfs-pins-section');
+  sect.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+      <h3 style="margin: 0; font-size: 16px; color: #fff;">📦 IPFS Pins</h3>
+      <span style="color: #888; font-size: 12px;">${pins.length} pin${pins.length === 1 ? '' : 's'}</span>
+    </div>
+    <div style="font-size: 13px; color: #aaa; margin-bottom: 6px;">
+      ${_formatBytesShort(quotaUsedBytes)} / ${_formatBytesShort(quotaTotalBytes)} used
+    </div>
+    <div style="height: 8px; background: #2a2a2a; border-radius: 4px; overflow: hidden; margin-bottom: 16px;">
+      <div style="height: 100%; width: ${pct}%; background: linear-gradient(90deg, #ff6b35, #ff9558); transition: width 0.25s ease;"></div>
+    </div>
+    ${pins.length === 0
+      ? `<div style="color: #888; font-size: 13px; text-align: center; padding: 16px;">No pinned media yet. Upload from the 📦 button in compose.</div>`
+      : `<div class="ipfs-pins-list" style="display: flex; flex-direction: column; gap: 8px;">
+          ${pins.map(p => _renderPinRow(p)).join('')}
+        </div>`
+    }
+  `;
+}
+
+function _renderPinRow(pin) {
+  const isImage = (pin.mimeType || '').startsWith('image/');
+  const icon = _pinIcon(pin.mimeType);
+  const filename = pin.filename || pin.cid;
+  const safeFilename = String(filename).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const safeCid = String(pin.cid).replace(/[^A-Za-z0-9]/g, '');
+  const shortCid = pin.cid.length > 16 ? `${pin.cid.slice(0, 8)}…${pin.cid.slice(-6)}` : pin.cid;
+  return `
+    <div class="ipfs-pin-row" data-cid="${safeCid}" style="background: rgba(255,255,255,0.03); border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 12px; display: flex; gap: 12px; align-items: center;">
+      ${isImage
+        ? `<img src="${pin.url}" alt="" loading="lazy" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px; flex: 0 0 auto; background: #222;">`
+        : `<div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex: 0 0 auto;">${icon}</div>`
+      }
+      <div style="flex: 1; min-width: 0;">
+        <div style="color: #fff; font-size: 13px; font-weight: 500; word-break: break-all; line-height: 1.3;">${safeFilename}</div>
+        <div style="color: #888; font-size: 11px; margin-top: 2px;">
+          ${_formatBytesShort(pin.bytes)} · ${_formatPinDate(pin.createdAt)} · ${shortCid}
+        </div>
+      </div>
+      <div style="display: flex; gap: 6px; flex: 0 0 auto;">
+        <button onclick="copyIpfsPinUrl('${safeCid}')" title="Copy link" style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.4); border-radius: 6px; color: #c4b5fd; padding: 6px 10px; cursor: pointer; font-size: 13px;">⧉</button>
+        <button onclick="unpinIpfsPinFromProfile('${safeCid}', this)" title="Unpin" style="background: rgba(255, 80, 80, 0.12); border: 1px solid rgba(255, 80, 80, 0.4); border-radius: 6px; color: #f0a0a0; padding: 6px 10px; cursor: pointer; font-size: 13px;">🗑️</button>
+      </div>
+    </div>
+  `;
+}
+
+let _windowHandlersBound = false;
+function _bindWindowHandlers() {
+  if (_windowHandlersBound) return;
+  _windowHandlersBound = true;
+
+  window.copyIpfsPinUrl = async (cid) => {
+    const url = `${IPFS_GATEWAY_URL}/ipfs/${cid}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      _toast('Link copied.', 'success');
+    } catch {
+      _toast('Could not copy — your browser blocked clipboard access.', 'error');
+    }
+  };
+
+  window.unpinIpfsPinFromProfile = async (cid, btnEl) => {
+    if (!confirm('Unpin and break this link for everyone you have shared it with?')) return;
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = '…'; }
+    try {
+      await unpinCid(cid);
+      // Remove the row from the DOM and re-render the parent section to update the quota bar
+      const row = btnEl?.closest('.ipfs-pin-row');
+      const section = btnEl?.closest('.ipfs-pins-section')?.parentElement; // containerEl
+      if (row) row.remove();
+      if (section) {
+        // Re-fetch + re-render so quota bar reflects the refund
+        const ownPubkey = (window.NostrState && window.NostrState.publicKey) || null;
+        if (ownPubkey) await renderIpfsPinsSection(section, ownPubkey, ownPubkey);
+      }
+      _toast('Unpinned.', 'success');
+    } catch (e) {
+      _toast(`Unpin failed: ${e.error || e.message || 'unknown'}`, 'error');
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🗑️'; }
+    }
+  };
+}
+
+const IPFS_GATEWAY_URL = 'https://ipfs.nosmero.com';
+
+function _toast(message, kind = 'info') {
+  if (window.NostrUtils?.showNotification) {
+    window.NostrUtils.showNotification(message, kind);
+  } else if (window.showNotification) {
+    window.showNotification(message, kind);
+  } else {
+    console.log(`[ipfs] ${kind}: ${message}`);
+  }
+}
