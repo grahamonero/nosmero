@@ -10,6 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as Paywall from './paywall.js';
 import authRouter from './auth.js';
+import ipfsRouter from './ipfs.js';
 
 // Get __dirname equivalent for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -1493,6 +1494,7 @@ app.delete('/api/paywall/:noteId', paywallLimiter, async (req, res) => {
 
 // ==================== AUTH ENDPOINTS ====================
 app.use('/api/auth', authRouter);
+app.use('/api', ipfsRouter);
 
 // 404 handler
 app.use((req, res) => {

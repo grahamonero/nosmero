@@ -725,3 +725,45 @@ export function cleanupExpiredTokens() {
 
 // Clean up expired tokens every hour
 setInterval(cleanupExpiredTokens, 60 * 60 * 1000);
+
+// ==================== IPFS PINS ====================
+
+const ipfsStatements = {
+  insert: db.prepare(`
+    INSERT INTO ipfs_pins (cid, pubkey, bytes, filename, mime_type)
+    VALUES (@cid, @pubkey, @bytes, @filename, @mime_type)
+  `),
+  getByCid: db.prepare(`SELECT * FROM ipfs_pins WHERE cid = ?`),
+  listByPubkey: db.prepare(`
+    SELECT * FROM ipfs_pins WHERE pubkey = ? ORDER BY created_at DESC LIMIT ?
+  `),
+  deleteByCid: db.prepare(`DELETE FROM ipfs_pins WHERE cid = ?`),
+  sumBytesByPubkey: db.prepare(`
+    SELECT COALESCE(SUM(bytes), 0) AS used FROM ipfs_pins WHERE pubkey = ?
+  `)
+};
+
+export function createIpfsPin({ cid, pubkey, bytes, filename, mime_type }) {
+  ipfsStatements.insert.run({
+    cid, pubkey, bytes,
+    filename: filename || null,
+    mime_type: mime_type || null
+  });
+}
+
+export function getIpfsPin(cid) {
+  return ipfsStatements.getByCid.get(cid) || null;
+}
+
+export function listIpfsPinsByPubkey(pubkey, limit = 200) {
+  return ipfsStatements.listByPubkey.all(pubkey, limit);
+}
+
+export function deleteIpfsPin(cid) {
+  return ipfsStatements.deleteByCid.run(cid).changes;
+}
+
+export function getIpfsQuotaUsedBytes(pubkey) {
+  const row = ipfsStatements.sumBytesByPubkey.get(pubkey);
+  return row ? row.used : 0;
+}
