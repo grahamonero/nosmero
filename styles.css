@@ -3611,3 +3611,73 @@
     font-size: 13px;
     color: var(--text-secondary);
 }
+
+.ipfs-embed-modal {
+    background: #1a1a1a;
+    color: #fff;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 16px 18px;
+    min-width: 300px;
+    max-width: 92vw;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+.ipfs-embed-modal::backdrop {
+    background: rgba(0, 0, 0, 0.6);
+}
+.ipfs-embed-title {
+    margin: 0 0 12px;
+    font-size: 16px;
+    font-weight: 600;
+}
+.ipfs-embed-input {
+    width: 100%;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.ipfs-embed-input:focus {
+    border-color: #FF6600;
+    outline: none;
+}
+.ipfs-embed-modal .ipfs-error {
+    color: #f87171;
+    min-height: 1.2em;
+    margin: 6px 0 10px;
+    font-size: 13px;
+}
+.ipfs-embed-label {
+    font-size: 13px;
+    color: #aaa;
+    margin: 4px 0 8px;
+}
+.ipfs-embed-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.ipfs-embed-btn {
+    background: #1f6feb;
+    color: #fff;
+    border: 0;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+}
+.ipfs-embed-btn:hover {
+    background: #2a7cf5;
+}
+.ipfs-embed-btn.ipfs-embed-cancel {
+    margin-left: auto;
+    background: #333;
+}
+.ipfs-embed-btn.ipfs-embed-cancel:hover {
+    background: #444;
+}

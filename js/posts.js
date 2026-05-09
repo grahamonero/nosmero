@@ -5024,6 +5024,10 @@ export function formatText(textarea, format) {
                 cursorOffset = replacement.length - 1; // Position after https://
             }
             break;
+        case 'ipfs': {
+            showIPFSEmbedModal(textarea, selectedText, start, end);
+            return;
+        }
         case 'mention': {
             let bech32;
             const sel = selectedText.trim().replace(/^nostr:/i, '');
@@ -5096,6 +5100,66 @@ export function formatText(textarea, format) {
     const newPosition = start + cursorOffset;
     textarea.focus();
     textarea.setSelectionRange(newPosition, newPosition);
+}
+
+function extractIPFSCID(input) {
+    if (!input) return null;
+    let candidate = input.trim().replace(/^ipfs:\/\//i, '');
+    const gatewayMatch = candidate.match(/\/ipfs\/([^\/?#\s]+)/);
+    if (gatewayMatch) candidate = gatewayMatch[1];
+    candidate = candidate.split(/[\/?#]/)[0];
+    if (/^Qm[1-9A-HJ-NP-Za-km-z]{44}$/.test(candidate)) return candidate;
+    if (/^b[a-z2-7]{58,}$/.test(candidate)) return candidate;
+    return null;
+}
+
+function showIPFSEmbedModal(textarea, selectedText, start, end) {
+    const modal = document.getElementById('ipfsEmbedModal');
+    if (!modal) {
+        Utils.showNotification('IPFS modal not found', 'error');
+        return;
+    }
+    const cidInput = modal.querySelector('#ipfsCidInput');
+    const errEl = modal.querySelector('.ipfs-error');
+    const form = modal.querySelector('form');
+    cidInput.value = '';
+    errEl.textContent = '';
+
+    const submitHandler = (e) => {
+        const action = e.submitter && e.submitter.value;
+        if (!action || action === 'cancel') return;
+        if (!extractIPFSCID(cidInput.value)) {
+            e.preventDefault();
+            errEl.textContent = 'Invalid IPFS CID';
+            cidInput.focus();
+        }
+    };
+    const closeHandler = () => {
+        form.removeEventListener('submit', submitHandler);
+        modal.removeEventListener('close', closeHandler);
+        const action = modal.returnValue;
+        if (!action || action === 'cancel') return;
+        const cid = extractIPFSCID(cidInput.value);
+        if (!cid) return;
+        const isVideo = action === 'video';
+        const isFile = action === 'file';
+        // #fragment lets the existing image/video regex match the URL so it renders inline.
+        // Fragments aren't sent to the gateway, so only the bare CID is fetched.
+        let url = `https://dweb.link/ipfs/${cid}`;
+        if (isVideo) url += '#video.mp4';
+        else if (!isFile) url += '#image.jpg';
+        const replacement = selectedText ? `[${selectedText}](${url})` : url;
+        textarea.value = textarea.value.slice(0, start) + replacement + textarea.value.slice(end);
+        updateCharacterCount(textarea, 'mainCharCount');
+        const newPosition = start + replacement.length;
+        textarea.focus();
+        textarea.setSelectionRange(newPosition, newPosition);
+        Utils.showNotification(`Added IPFS ${isVideo ? 'video' : isFile ? 'file link' : 'image'}`, 'success');
+    };
+    form.addEventListener('submit', submitHandler);
+    modal.addEventListener('close', closeHandler);
+    modal.showModal();
+    cidInput.focus();
 }
 
 /**
