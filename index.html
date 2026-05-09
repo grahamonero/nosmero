@@ -44,6 +44,10 @@
                 <span class="menu-icon">👤</span>
                 <span>Profile</span>
             </div>
+            <div class="menu-item" data-tab="ipfs" onclick="handleMenuItemClick('ipfs')">
+                <span class="menu-icon">📦</span>
+                <span>IPFS Media</span>
+            </div>
             <div class="menu-item" data-tab="settings" onclick="handleMenuItemClick('settings')">
                 <span class="menu-icon">⚙️</span>
                 <span>Settings</span>
@@ -379,6 +383,9 @@
         <div id="profilePage" class="profile-page" style="display: none;">
             <!-- User profile will be displayed here -->
         </div>
+
+        <!-- IPFS Media page (hidden by default) -->
+        <div id="ipfsMediaPage" class="ipfs-media-page" style="display: none;"></div>
 
         <!-- Settings page (hidden by default) -->
         <div id="settingsPage" class="settings-page" style="display: none;">

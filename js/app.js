@@ -582,6 +582,11 @@ async function handleNavigation(event) {
         settingsPage.style.display = 'none';
     }
 
+    const ipfsMediaPage = document.getElementById('ipfsMediaPage');
+    if (ipfsMediaPage) {
+        ipfsMediaPage.style.display = 'none';
+    }
+
     // Show main feed container
     const feed = document.getElementById('feed');
     if (feed) {
@@ -633,8 +638,51 @@ async function handleNavigation(event) {
             // Settings is complex - always use full page
             await window.loadSettings();
             break;
+        case 'ipfs':
+            await loadIpfsMediaPage();
+            break;
         default:
             console.warn('Unknown navigation tab:', tab);
+    }
+}
+
+// Load IPFS Media page — list user's pinned CIDs with quota bar + unpin/copy
+async function loadIpfsMediaPage() {
+    if (!State.publicKey) {
+        showAuthUI();
+        return;
+    }
+    State.setCurrentPage('ipfs');
+
+    // Hide the feed container (we render into our own page)
+    const feed = document.getElementById('feed');
+    if (feed) feed.style.display = 'none';
+
+    const page = document.getElementById('ipfsMediaPage');
+    if (!page) return;
+    page.style.display = 'block';
+    page.innerHTML = `
+        <div style="max-width: 800px; margin: 0 auto; padding: 20px;">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                <button onclick="navigateTo('home')" style="background: none; border: 1px solid #333; border-radius: 8px; color: #fff; padding: 8px 14px; cursor: pointer; font-size: 14px;">← Back</button>
+                <h1 style="margin: 0; font-size: 22px; color: #fff;">📦 IPFS Media</h1>
+            </div>
+            <p style="color: #aaa; font-size: 13px; margin: 0 0 16px;">Files you've published to IPFS via Nosmero. Unpinning frees up your quota and breaks the link for anyone you've shared it with.</p>
+            <div id="ipfsMediaPanel"></div>
+        </div>
+    `;
+
+    try {
+        const IpfsPins = await import('./ipfs-pins.js');
+        await IpfsPins.renderIpfsPinsSection(
+            document.getElementById('ipfsMediaPanel'),
+            State.publicKey,
+            State.publicKey
+        );
+    } catch (e) {
+        console.error('[IPFS] Could not render IPFS Media page:', e);
+        const panel = document.getElementById('ipfsMediaPanel');
+        if (panel) panel.innerHTML = `<div style="color: #f87171;">Could not load: ${e.message || 'unknown error'}</div>`;
     }
 }
 
@@ -3466,7 +3514,7 @@ window.addEventListener('popstate', async (event) => {
 window.addEventListener('DOMContentLoaded', () => {
     // Check URL path to determine initial page
     const path = window.location.pathname.replace('/', '') || 'home';
-    const validPages = ['home', 'search', 'messages', 'notifications', 'profile', 'settings'];
+    const validPages = ['home', 'search', 'messages', 'notifications', 'profile', 'settings', 'ipfs'];
     const initialPage = validPages.includes(path) ? path : 'home';
 
     // Set initial state without creating new history entry

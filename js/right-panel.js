@@ -1632,7 +1632,6 @@ const RightPanel = {
                         <button onclick="viewUserProfilePage('${pubkey}')" style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; border-radius: 6px; color: #FF6600; padding: 6px 12px; cursor: pointer; font-size: 13px;">View Full Profile</button>
                     </div>
                 </div>
-                <div id="panelIpfsPinsContainer" style="padding: 0 16px;"></div>
                 <div style="border-top: 1px solid var(--border-color); padding: 8px 16px; background: rgba(0,0,0,0.2);">
                     <span style="color: #888; font-size: 13px;">Recent Notes</span>
                 </div>
@@ -1640,19 +1639,6 @@ const RightPanel = {
                     <div class="loading" style="padding: 20px; text-align: center;">Loading notes...</div>
                 </div>
             `;
-
-            // Render IPFS Pins section (own profile only — gated inside the helper)
-            try {
-                const IpfsPins = await import('./ipfs-pins.js');
-                const ownPubkey = window.NostrState?.publicKey || null;
-                IpfsPins.renderIpfsPinsSection(
-                    document.getElementById('panelIpfsPinsContainer'),
-                    pubkey,
-                    ownPubkey
-                );
-            } catch (e) {
-                console.warn('[RightPanel] Could not render IPFS pins section:', e);
-            }
 
             // Update follow button state
             this.updatePanelFollowButton(pubkey);
