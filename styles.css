@@ -4388,3 +4388,40 @@
     margin: 8px 0 12px;
     font-style: italic;
 }
+
+/* Compose-preview rendering of staged-but-not-yet-uploaded IPFS files */
+.ipfs-stage-preview {
+    margin: 8px 0;
+    border: 1px dashed rgba(255, 107, 53, 0.4);
+    border-radius: 6px;
+    padding: 8px;
+    background: rgba(255, 107, 53, 0.04);
+    display: block;
+}
+.ipfs-stage-preview img,
+.ipfs-stage-preview video {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    display: block;
+}
+.ipfs-stage-preview figcaption {
+    font-size: 11px;
+    color: #aaa;
+    margin-top: 6px;
+    font-style: italic;
+}
+.ipfs-stage-preview-file {
+    display: inline-block;
+    padding: 6px 10px;
+    border: 1px dashed rgba(255, 107, 53, 0.4);
+    border-radius: 4px;
+    color: #ddd;
+    text-decoration: none;
+    font-size: 13px;
+}
+.ipfs-stage-missing {
+    color: #f0a0a0;
+    font-style: italic;
+    font-size: 12px;
+}

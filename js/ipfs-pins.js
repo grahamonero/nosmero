@@ -266,3 +266,53 @@ export async function resolveOrThrow(content) {
   }
   return newContent;
 }
+
+// ---------------------------------------------------------------------------
+// Compose-preview support: render staged files as inline previews using blob:
+// URLs of the in-memory File objects. parseContent's image/video regex requires
+// `https?://` so blob: URLs can't be substituted before parseContent — instead
+// we post-process the rendered HTML and swap placeholder text for <img>/<video>.
+// ---------------------------------------------------------------------------
+
+const _activeBlobUrls = new Set();
+
+function _escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Take the HTML output of Utils.parseContent and replace any remaining
+ * `[ipfs upload: ... #id]` placeholder text with inline preview elements
+ * (img/video using blob: URLs of the staged Files). Also revokes any blob
+ * URLs from the previous render so memory doesn't leak across re-previews.
+ */
+export function previewizeRenderedHtml(html) {
+  revokePreviewBlobUrls();
+  if (!html) return html;
+  return html.replace(PLACEHOLDER_REGEX, (match, id) => {
+    const staged = _stagedFiles.get(id);
+    if (!staged) {
+      return `<span class="ipfs-stage-missing">📦 ${_escapeHtml(match)} (file not staged — page reloaded?)</span>`;
+    }
+    const blobUrl = URL.createObjectURL(staged.file);
+    _activeBlobUrls.add(blobUrl);
+    const filename = _escapeHtml(staged.filename);
+    if (staged.kind === 'image') {
+      return `<figure class="ipfs-stage-preview"><img src="${blobUrl}" alt="${filename}"><figcaption>📦 will upload on post: ${filename}</figcaption></figure>`;
+    }
+    if (staged.kind === 'video') {
+      return `<figure class="ipfs-stage-preview"><video src="${blobUrl}" controls></video><figcaption>📦 will upload on post: ${filename}</figcaption></figure>`;
+    }
+    return `<a href="${blobUrl}" download="${filename}" class="ipfs-stage-preview-file">📦 will upload on post: ${filename}</a>`;
+  });
+}
+
+/** Revoke any blob URLs created by previewizeRenderedHtml. Call on edit-mode toggle, logout, etc. */
+export function revokePreviewBlobUrls() {
+  for (const url of _activeBlobUrls) URL.revokeObjectURL(url);
+  _activeBlobUrls.clear();
+}

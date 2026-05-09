@@ -5607,7 +5607,8 @@ export function toggleComposePreview(composeArea) {
     const isPreviewActive = preview.style.display !== 'none';
 
     if (isPreviewActive) {
-        // Switch to edit mode
+        // Switch to edit mode — release any blob: URLs the preview created
+        IpfsPins.revokePreviewBlobUrls();
         preview.style.display = 'none';
         textarea.style.display = '';
         previewBtn.textContent = 'Preview';
@@ -5633,16 +5634,16 @@ export function toggleComposePreview(composeArea) {
             if (pubkeys.length > 0) {
                 fetchProfiles(pubkeys).then(() => {
                     if (preview.style.display !== 'none') {
-                        preview.innerHTML = Utils.parseContent(textarea.value, true);
+                        preview.innerHTML = IpfsPins.previewizeRenderedHtml(Utils.parseContent(textarea.value, true));
                     }
                 }).catch(() => {});
             }
         }
 
-        // Render through the same parseContent the feed uses, so npubs become
-        // @username chips, links/images/videos are rendered, etc.
-        // skipEmbeddedNotes=true avoids fetching nested events in compose.
-        preview.innerHTML = Utils.parseContent(content, true);
+        // Render through the same parseContent the feed uses, then post-process
+        // any [ipfs upload: ... #id] placeholders into inline image/video previews
+        // (using blob: URLs of the staged Files in JS memory).
+        preview.innerHTML = IpfsPins.previewizeRenderedHtml(Utils.parseContent(content, true));
 
         textarea.style.display = 'none';
         preview.style.display = '';
