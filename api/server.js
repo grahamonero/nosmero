@@ -117,17 +117,27 @@ async function _probeRelatr() {
   } catch { return 'fail'; }
 }
 
+async function _probeKubo() {
+  try {
+    const resp = await _probeWithTimeout(fetch('http://127.0.0.1:5001/api/v0/version', {
+      method: 'POST'
+    }));
+    const json = await resp.json();
+    return json && typeof json.Version === 'string' ? 'ok' : 'fail';
+  } catch { return 'fail'; }
+}
+
 app.get('/api/health', async (req, res) => {
   if (_healthCache.result && Date.now() - _healthCache.ts < HEALTH_CACHE_TTL_MS) {
     return res.json(_healthCache.result);
   }
-  const [monerod, strfry, relatr] = await Promise.all([
-    _probeMonerod(), _probeStrfry(), _probeRelatr()
+  const [monerod, strfry, relatr, kubo] = await Promise.all([
+    _probeMonerod(), _probeStrfry(), _probeRelatr(), _probeKubo()
   ]);
-  const allOk = monerod === 'ok' && strfry === 'ok' && relatr === 'ok';
+  const allOk = monerod === 'ok' && strfry === 'ok' && relatr === 'ok' && kubo === 'ok';
   const result = {
     status: allOk ? 'ok' : 'degraded',
-    monerod, strfry, relatr,
+    monerod, strfry, relatr, kubo,
     timestamp: new Date().toISOString(),
     environment: config.nodeEnv
   };
