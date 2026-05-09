@@ -59,6 +59,19 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
   );
 
+  -- IPFS pins table — one row per pinned CID. cid is PRIMARY KEY so the
+  -- same content uploaded by two users dedupes to a single pin (the first
+  -- uploader owns it; second uploader gets the existing URL with no quota
+  -- charge — see IPFS_PLAN.md). pubkey is hex Nostr key from NIP-98 sig.
+  CREATE TABLE IF NOT EXISTS ipfs_pins (
+    cid         TEXT PRIMARY KEY,
+    pubkey      TEXT NOT NULL,
+    bytes       INTEGER NOT NULL,
+    filename    TEXT,
+    mime_type   TEXT,
+    created_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+  );
+
   -- Indexes for fast lookups
   CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
   CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
@@ -68,6 +81,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tokens_expires ON email_tokens(expires_at);
   CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
   CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
+  CREATE INDEX IF NOT EXISTS idx_ipfs_pins_pubkey ON ipfs_pins(pubkey, created_at DESC);
 `);
 
 // Migration: Add password_salt column if it doesn't exist
