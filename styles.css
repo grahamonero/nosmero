@@ -3681,3 +3681,125 @@
 .ipfs-embed-btn.ipfs-embed-cancel:hover {
     background: #444;
 }
+
+/* --- IPFS modal tabs (Step 7) --- */
+.ipfs-embed-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid #333;
+    margin-bottom: 16px;
+}
+.ipfs-tab {
+    background: none;
+    border: none;
+    color: #999;
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+}
+.ipfs-tab:hover { color: #ddd; }
+.ipfs-tab.active {
+    color: #ff6b35;
+    border-bottom-color: #ff6b35;
+}
+.ipfs-tab-content[hidden] { display: none; }
+
+.ipfs-quota-row { margin-bottom: 14px; }
+.ipfs-quota-text {
+    display: block;
+    font-size: 13px;
+    color: #aaa;
+    margin-bottom: 6px;
+}
+.ipfs-quota-bar {
+    height: 8px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.ipfs-quota-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ff6b35, #ff9558);
+    transition: width 0.25s ease;
+}
+
+.ipfs-file-input {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+    color: #ddd;
+}
+.ipfs-file-info {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 12px;
+}
+
+.ipfs-type-radio {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+.ipfs-type-radio label {
+    color: #ddd;
+    font-size: 14px;
+    cursor: pointer;
+    user-select: none;
+}
+.ipfs-type-radio input[type="radio"] { margin-right: 4px; }
+
+.ipfs-metadata-warning {
+    background: rgba(255, 180, 0, 0.08);
+    border: 1px solid rgba(255, 180, 0, 0.3);
+    color: #ddc28a;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.45;
+    margin-bottom: 14px;
+}
+
+.ipfs-upload-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.ipfs-upload-progress-bar {
+    flex: 1;
+    height: 6px;
+    background: #2a2a2a;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.ipfs-upload-progress-fill {
+    height: 100%;
+    background: #ff6b35;
+    transition: width 0.15s linear;
+}
+.ipfs-upload-progress-text {
+    font-size: 12px;
+    color: #aaa;
+    min-width: 36px;
+    text-align: right;
+}
+
+.ipfs-upload-error {
+    background: rgba(255, 80, 80, 0.08);
+    border: 1px solid rgba(255, 80, 80, 0.3);
+    color: #f0a0a0;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+.ipfs-upload-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}

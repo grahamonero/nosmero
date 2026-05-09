@@ -6,6 +6,7 @@ import * as Utils from './utils.js';
 import * as Relays from './relays.js';
 import * as UI from './ui.js';
 import * as FeedCache from './feed-cache.js';
+import * as IpfsPins from './ipfs-pins.js';
 
 // Constants for feed management
 export const POSTS_PER_PAGE = 10;
@@ -5113,19 +5114,50 @@ function extractIPFSCID(input) {
     return null;
 }
 
+function formatBytesShort(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function buildEmbedUrl(baseUrl, kind) {
+    if (kind === 'video') return baseUrl + '#video.mp4';
+    if (kind === 'file')  return baseUrl;
+    return baseUrl + '#image.jpg';
+}
+
+function insertEmbedIntoTextarea(textarea, selectedText, start, end, url, kind) {
+    const replacement = selectedText ? `[${selectedText}](${url})` : url;
+    textarea.value = textarea.value.slice(0, start) + replacement + textarea.value.slice(end);
+    updateCharacterCount(textarea, 'mainCharCount');
+    const newPosition = start + replacement.length;
+    textarea.focus();
+    textarea.setSelectionRange(newPosition, newPosition);
+    const label = kind === 'video' ? 'video' : kind === 'file' ? 'file link' : 'image';
+    Utils.showNotification(`Added IPFS ${label}`, 'success');
+}
+
 function showIPFSEmbedModal(textarea, selectedText, start, end) {
     const modal = document.getElementById('ipfsEmbedModal');
     if (!modal) {
         Utils.showNotification('IPFS modal not found', 'error');
         return;
     }
+
+    const tabs = modal.querySelectorAll('.ipfs-tab');
+    const contents = modal.querySelectorAll('.ipfs-tab-content');
+    tabs.forEach((t, i) => t.classList.toggle('active', i === 0));
+    contents.forEach(c => c.hidden = c.dataset.tabContent !== 'paste');
+
+    // ---- Paste tab setup ----
     const cidInput = modal.querySelector('#ipfsCidInput');
     const errEl = modal.querySelector('.ipfs-error');
-    const form = modal.querySelector('form');
+    const pasteForm = modal.querySelector('.ipfs-paste-form');
     cidInput.value = '';
     errEl.textContent = '';
 
-    const submitHandler = (e) => {
+    const pasteSubmitHandler = (e) => {
         const action = e.submitter && e.submitter.value;
         if (!action || action === 'cancel') return;
         if (!extractIPFSCID(cidInput.value)) {
@@ -5134,29 +5166,164 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
             cidInput.focus();
         }
     };
+    pasteForm.addEventListener('submit', pasteSubmitHandler);
+
+    // ---- Upload tab setup ----
+    const fileInput = modal.querySelector('#ipfsUploadFile');
+    const fileInfo = modal.querySelector('.ipfs-file-info');
+    const radios = modal.querySelectorAll('input[name="ipfsUploadKind"]');
+    const warning = modal.querySelector('.ipfs-metadata-warning');
+    const uploadBtn = modal.querySelector('.ipfs-upload-btn');
+    const cancelUploadBtn = modal.querySelector('[data-upload-action="cancel"]');
+    const progressEl = modal.querySelector('.ipfs-upload-progress');
+    const progressFill = modal.querySelector('.ipfs-upload-progress-fill');
+    const progressText = modal.querySelector('.ipfs-upload-progress-text');
+    const uploadErr = modal.querySelector('.ipfs-upload-error');
+    const quotaText = modal.querySelector('.ipfs-quota-text');
+    const quotaFill = modal.querySelector('.ipfs-quota-fill');
+
+    let quotaUsed = 0, quotaTotal = 524288000;
+
+    const resetUploadTab = () => {
+        fileInput.value = '';
+        fileInfo.hidden = true;
+        fileInfo.textContent = '';
+        radios.forEach(r => r.checked = r.value === 'image');
+        warning.hidden = true;
+        progressEl.hidden = true;
+        progressFill.style.width = '0%';
+        progressText.textContent = '0%';
+        uploadErr.hidden = true;
+        uploadErr.textContent = '';
+        uploadBtn.disabled = true;
+    };
+    resetUploadTab();
+
+    const refreshQuotaBar = async () => {
+        quotaText.textContent = 'Loading quota…';
+        try {
+            const data = await IpfsPins.getCachedQuota();
+            quotaUsed = data.quotaUsedBytes;
+            quotaTotal = data.quotaTotalBytes;
+            const pct = quotaTotal > 0 ? Math.min(100, (quotaUsed / quotaTotal) * 100) : 0;
+            quotaFill.style.width = pct + '%';
+            quotaText.textContent = `${formatBytesShort(quotaUsed)} / ${formatBytesShort(quotaTotal)} used`;
+        } catch (e) {
+            quotaText.textContent = (e.status === 401)
+                ? 'Login required to upload to IPFS.'
+                : 'Could not load quota.';
+        }
+    };
+
+    const onFilePicked = () => {
+        const f = fileInput.files && fileInput.files[0];
+        if (!f) {
+            fileInfo.hidden = true;
+            warning.hidden = true;
+            uploadBtn.disabled = true;
+            return;
+        }
+        fileInfo.hidden = false;
+        fileInfo.textContent = `selected: ${f.name} (${formatBytesShort(f.size)})`;
+        const mime = (f.type || '').toLowerCase();
+        const defaultKind = mime.startsWith('image/') ? 'image'
+                          : mime.startsWith('video/') ? 'video' : 'file';
+        radios.forEach(r => r.checked = r.value === defaultKind);
+        warning.hidden = mime.startsWith('image/');
+        const remaining = quotaTotal - quotaUsed;
+        uploadBtn.disabled = f.size > remaining;
+        uploadErr.hidden = true;
+        if (f.size > remaining) {
+            uploadErr.hidden = false;
+            uploadErr.textContent = `File is ${formatBytesShort(f.size)} but only ${formatBytesShort(remaining)} of quota remains. Unpin from your profile to free space.`;
+        }
+    };
+    fileInput.addEventListener('change', onFilePicked);
+
+    const doUpload = async () => {
+        const f = fileInput.files && fileInput.files[0];
+        if (!f) return;
+        const kind = modal.querySelector('input[name="ipfsUploadKind"]:checked').value;
+
+        uploadErr.hidden = true;
+        uploadBtn.disabled = true;
+        cancelUploadBtn.disabled = true;
+        progressEl.hidden = false;
+        progressFill.style.width = '0%';
+        progressText.textContent = '0%';
+
+        let toUpload = f;
+        try {
+            if ((f.type || '').toLowerCase().startsWith('image/') && Utils.stripImageMetadata) {
+                toUpload = await Utils.stripImageMetadata(f);
+            }
+        } catch (e) {
+            console.warn('[ipfs] image metadata strip failed, uploading original:', e);
+            toUpload = f;
+        }
+
+        try {
+            const result = await IpfsPins.uploadToIpfs(toUpload, {
+                onProgress: (p) => {
+                    const pct = Math.round(p * 100);
+                    progressFill.style.width = pct + '%';
+                    progressText.textContent = pct + '%';
+                }
+            });
+            const embedUrl = buildEmbedUrl(result.url, kind);
+            modal.close();
+            insertEmbedIntoTextarea(textarea, selectedText, start, end, embedUrl, kind);
+            if (result.alreadyPinned) {
+                Utils.showNotification('Already pinned by another user — using existing CID, no quota charged.', 'info');
+            }
+        } catch (e) {
+            progressEl.hidden = true;
+            uploadBtn.disabled = false;
+            cancelUploadBtn.disabled = false;
+            uploadErr.hidden = false;
+            if (e.status === 413) {
+                uploadErr.textContent = 'Not enough quota — unpin from your profile to free space.';
+            } else if (e.status === 401) {
+                uploadErr.textContent = 'Login required to upload to IPFS.';
+            } else {
+                uploadErr.textContent = `Upload failed: ${e.error || e.message || 'unknown error'}`;
+            }
+        }
+    };
+    uploadBtn.addEventListener('click', doUpload);
+    cancelUploadBtn.addEventListener('click', () => modal.close());
+
+    const tabHandlers = [];
+    tabs.forEach(tab => {
+        const h = () => {
+            tabs.forEach(t => t.classList.toggle('active', t === tab));
+            contents.forEach(c => c.hidden = c.dataset.tabContent !== tab.dataset.tab);
+            if (tab.dataset.tab === 'upload') {
+                refreshQuotaBar();
+                fileInput.focus();
+            } else {
+                cidInput.focus();
+            }
+        };
+        tab.addEventListener('click', h);
+        tabHandlers.push([tab, h]);
+    });
+
     const closeHandler = () => {
-        form.removeEventListener('submit', submitHandler);
+        pasteForm.removeEventListener('submit', pasteSubmitHandler);
+        fileInput.removeEventListener('change', onFilePicked);
+        uploadBtn.removeEventListener('click', doUpload);
+        tabHandlers.forEach(([t, h]) => t.removeEventListener('click', h));
         modal.removeEventListener('close', closeHandler);
+
         const action = modal.returnValue;
         if (!action || action === 'cancel') return;
         const cid = extractIPFSCID(cidInput.value);
         if (!cid) return;
-        const isVideo = action === 'video';
-        const isFile = action === 'file';
-        // #fragment lets the existing image/video regex match the URL so it renders inline.
-        // Fragments aren't sent to the gateway, so only the bare CID is fetched.
-        let url = `https://dweb.link/ipfs/${cid}`;
-        if (isVideo) url += '#video.mp4';
-        else if (!isFile) url += '#image.jpg';
-        const replacement = selectedText ? `[${selectedText}](${url})` : url;
-        textarea.value = textarea.value.slice(0, start) + replacement + textarea.value.slice(end);
-        updateCharacterCount(textarea, 'mainCharCount');
-        const newPosition = start + replacement.length;
-        textarea.focus();
-        textarea.setSelectionRange(newPosition, newPosition);
-        Utils.showNotification(`Added IPFS ${isVideo ? 'video' : isFile ? 'file link' : 'image'}`, 'success');
+        const url = buildEmbedUrl(`https://dweb.link/ipfs/${cid}`, action);
+        insertEmbedIntoTextarea(textarea, selectedText, start, end, url, action);
     };
-    form.addEventListener('submit', submitHandler);
+
     modal.addEventListener('close', closeHandler);
     modal.showModal();
     cidInput.focus();
