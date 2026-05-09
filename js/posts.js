@@ -5174,7 +5174,9 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
     const radios = modal.querySelectorAll('input[name="ipfsUploadKind"]');
     const warning = modal.querySelector('.ipfs-metadata-warning');
     const uploadBtn = modal.querySelector('.ipfs-upload-btn');
-    const cancelUploadBtn = modal.querySelector('[data-upload-action="cancel"]');
+    // Cancel + form-level submit are handled natively by `<form method="dialog">`,
+    // which sets modal.returnValue to the submit button's `value` (e.g. "cancel")
+    // and closes the dialog. No JS click handler needed for the Cancel button.
     const progressEl = modal.querySelector('.ipfs-upload-progress');
     const progressFill = modal.querySelector('.ipfs-upload-progress-fill');
     const progressText = modal.querySelector('.ipfs-upload-progress-text');
@@ -5247,7 +5249,6 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
 
         uploadErr.hidden = true;
         uploadBtn.disabled = true;
-        cancelUploadBtn.disabled = true;
         progressEl.hidden = false;
         progressFill.style.width = '0%';
         progressText.textContent = '0%';
@@ -5279,7 +5280,6 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
         } catch (e) {
             progressEl.hidden = true;
             uploadBtn.disabled = false;
-            cancelUploadBtn.disabled = false;
             uploadErr.hidden = false;
             if (e.status === 413) {
                 uploadErr.textContent = 'Not enough quota — unpin from your profile to free space.';
@@ -5291,7 +5291,6 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
         }
     };
     uploadBtn.addEventListener('click', doUpload);
-    cancelUploadBtn.addEventListener('click', () => modal.close());
 
     const tabHandlers = [];
     tabs.forEach(tab => {
