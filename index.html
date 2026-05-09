@@ -1301,36 +1301,38 @@
 
         <!-- Upload-to-IPFS tab (Step 7 — npub-keyed pinning, 500 MB quota) -->
         <div class="ipfs-tab-content" data-tab-content="upload" hidden>
-            <div class="ipfs-quota-row">
-                <span class="ipfs-quota-text">Loading quota…</span>
-                <div class="ipfs-quota-bar"><div class="ipfs-quota-fill" style="width:0%"></div></div>
-            </div>
+            <form method="dialog" class="ipfs-upload-form">
+                <div class="ipfs-quota-row">
+                    <span class="ipfs-quota-text">Loading quota…</span>
+                    <div class="ipfs-quota-bar"><div class="ipfs-quota-fill" style="width:0%"></div></div>
+                </div>
 
-            <input type="file" id="ipfsUploadFile" class="ipfs-file-input">
-            <div class="ipfs-file-info" hidden></div>
+                <input type="file" id="ipfsUploadFile" class="ipfs-file-input">
+                <div class="ipfs-file-info" hidden></div>
 
-            <div class="ipfs-embed-label">Type:</div>
-            <div class="ipfs-type-radio">
-                <label><input type="radio" name="ipfsUploadKind" value="image" checked> 🖼️ Image</label>
-                <label><input type="radio" name="ipfsUploadKind" value="video"> 🎬 Video</label>
-                <label><input type="radio" name="ipfsUploadKind" value="file"> 📄 File</label>
-            </div>
+                <div class="ipfs-embed-label">Type:</div>
+                <div class="ipfs-type-radio">
+                    <label><input type="radio" name="ipfsUploadKind" value="image" checked> 🖼️ Image</label>
+                    <label><input type="radio" name="ipfsUploadKind" value="video"> 🎬 Video</label>
+                    <label><input type="radio" name="ipfsUploadKind" value="file"> 📄 File</label>
+                </div>
 
-            <div class="ipfs-metadata-warning" hidden>
-                ⚠️ Metadata is not stripped from non-image files. PDFs, documents, video and archives can leak author names, edit history, and embedded EXIF/GPS. Scrub sensitive metadata before uploading.
-            </div>
+                <div class="ipfs-metadata-warning" hidden>
+                    ⚠️ Metadata is not stripped from non-image files. PDFs, documents, video and archives can leak author names, edit history, and embedded EXIF/GPS. Scrub sensitive metadata before uploading.
+                </div>
 
-            <div class="ipfs-upload-progress" hidden>
-                <div class="ipfs-upload-progress-bar"><div class="ipfs-upload-progress-fill" style="width:0%"></div></div>
-                <span class="ipfs-upload-progress-text">0%</span>
-            </div>
+                <div class="ipfs-upload-progress" hidden>
+                    <div class="ipfs-upload-progress-bar"><div class="ipfs-upload-progress-fill" style="width:0%"></div></div>
+                    <span class="ipfs-upload-progress-text">0%</span>
+                </div>
 
-            <div class="ipfs-upload-error" hidden></div>
+                <div class="ipfs-upload-error" hidden></div>
 
-            <div class="ipfs-embed-actions">
-                <button type="button" class="ipfs-embed-btn ipfs-embed-cancel" data-upload-action="cancel">Cancel</button>
-                <button type="button" class="ipfs-embed-btn ipfs-upload-btn" data-upload-action="upload" disabled>Upload</button>
-            </div>
+                <div class="ipfs-embed-actions">
+                    <button type="submit" value="cancel" class="ipfs-embed-btn ipfs-embed-cancel">Cancel</button>
+                    <button type="button" class="ipfs-embed-btn ipfs-upload-btn" data-upload-action="upload" disabled>Upload</button>
+                </div>
+            </form>
         </div>
     </dialog>
 
