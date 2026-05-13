@@ -556,6 +556,7 @@ export async function goBackFromThread() {
 // ==================== POST CONTEXT MENU ====================
 
 let currentMenuPostId = null;
+export function getCurrentMenuPostId() { return currentMenuPostId; }
 
 export function showNoteMenu(postId, event) {
     if (!event) {
@@ -582,6 +583,25 @@ export function showNoteMenu(postId, event) {
             const post = State.eventCache?.[postId] || State.posts?.find(p => p.id === postId);
             if (post && post.pubkey && State.publicKey && post.pubkey === State.publicKey) {
                 deleteBtn.style.display = '';
+            }
+        }).catch(() => {});
+    }
+
+    // NIP-51 bookmark + pin button state
+    const bookmarkBtn = document.getElementById('postMenuBookmarkBtn');
+    const pinBtn = document.getElementById('postMenuPinBtn');
+    if (bookmarkBtn || pinBtn) {
+        Promise.all([import('../state.js'), import('../lists.js')]).then(([State, Lists]) => {
+            const post = State.eventCache?.[postId] || State.posts?.find(p => p.id === postId);
+            if (bookmarkBtn) {
+                bookmarkBtn.textContent = Lists.isBookmarked(postId) ? '★ Bookmarked' : '☆ Bookmark';
+            }
+            if (pinBtn) {
+                const isOwn = post && post.pubkey && State.publicKey && post.pubkey === State.publicKey;
+                pinBtn.style.display = isOwn ? '' : 'none';
+                if (isOwn) {
+                    pinBtn.textContent = Lists.isPinned(postId) ? '📌 Unpin from Profile' : '📌 Pin to Profile';
+                }
             }
         }).catch(() => {});
     }
@@ -709,46 +729,77 @@ export function viewPostSource() {
 export async function muteUser() {
     if (!currentMenuPostId) return;
 
-    // Find the post in cache or posts array
     const State = await import('../state.js');
     const post = State.eventCache[currentMenuPostId] || State.posts.find(p => p.id === currentMenuPostId);
 
-    if (!post || !post.pubkey) {
-        if (typeof showNotification === 'function') {
-            showNotification('Cannot mute - note author not found', 'error');
-        }
-        document.getElementById('postMenu').style.display = 'none';
-        return;
-    }
-
-    // Don't allow muting yourself
-    if (post.pubkey === State.publicKey) {
-        if (typeof showNotification === 'function') {
-            showNotification('You cannot mute yourself', 'error');
-        }
-        document.getElementById('postMenu').style.display = 'none';
-        return;
-    }
-
-    // Import posts module and call muteUser
-    const Posts = await import('../posts.js');
-    const success = await Posts.muteUser(post.pubkey);
-
-    if (success) {
-        if (typeof showNotification === 'function') {
-            showNotification('User muted successfully', 'success');
-        }
-        // Reload the feed to hide posts from muted user
-        setTimeout(() => {
-            window.location.reload();
-        }, 1000);
-    } else {
-        if (typeof showNotification === 'function') {
-            showNotification('Failed to mute user', 'error');
-        }
-    }
-
     document.getElementById('postMenu').style.display = 'none';
+
+    if (!post || !post.pubkey) {
+        if (typeof showNotification === 'function') showNotification('Cannot mute - note author not found', 'error');
+        return;
+    }
+
+    // Identify the *target* author. For a kind-6 repost the menu was opened on,
+    // the muted author is the original kind-1 author (p-tag), not the reposter.
+    let targetPubkey = post.pubkey;
+    if (post.kind === 6 || post.kind === 16) {
+        const pTag = (post.tags || []).find(t => t[0] === 'p' && t[1]);
+        if (pTag) targetPubkey = pTag[1];
+    }
+
+    if (targetPubkey === State.publicKey) {
+        if (typeof showNotification === 'function') showNotification('You cannot mute yourself', 'error');
+        return;
+    }
+
+    // Look up the author's display name for a clearer confirmation popup.
+    const profile = State.profileCache?.[targetPubkey];
+    const authorName = profile?.name || profile?.display_name || `${targetPubkey.slice(0, 8)}…`;
+
+    // Optimistic: flip the local mute set + sweep DOM immediately, then publish.
+    const Lists = await import('../lists.js');
+    Lists.lists.mutePubkeys.add(targetPubkey);
+    if (typeof State.setMutedUsers === 'function') State.setMutedUsers(new Set(Lists.lists.mutePubkeys));
+    const removed = removeMutedPostsFromDom(Lists, State);
+
+    // Confirmation popup — explicit acknowledgment of the action.
+    alert(`${authorName} has been muted.\n\nYou will no longer see their posts, reposts, or profile across any feed. The mute syncs to other Nostr clients via NIP-51.`);
+
+    if (typeof showNotification === 'function') {
+        showNotification(`User muted${removed > 0 ? ` (${removed} note${removed === 1 ? '' : 's'} hidden)` : ''}`, 'success');
+    }
+
+    // Publish in background — kind-10000 replaceable event.
+    const Posts = await import('../posts.js');
+    Posts.muteUser(targetPubkey).catch(e => {
+        console.error('Mute publish failed:', e);
+        if (typeof showNotification === 'function') showNotification('Mute did not sync to relays: ' + (e?.message || e), 'error');
+    });
+}
+
+// Walk the rendered DOM and remove any post elements whose underlying event
+// is now muted (covers direct posts AND reposts by looking up each id in the
+// event cache and re-running isMuted).
+function removeMutedPostsFromDom(Lists, State) {
+    let removed = 0;
+    const els = document.querySelectorAll('.post[data-post-id]');
+    for (const el of els) {
+        const id = el.dataset.postId;
+        const pubkey = el.dataset.pubkey;
+        const cachedEvent = State.eventCache?.[id] || State.posts?.find(p => p.id === id);
+        // Fast path: outer pubkey direct match (covers direct posts)
+        if (pubkey && Lists.lists.mutePubkeys.has(pubkey)) {
+            el.remove();
+            removed++;
+            continue;
+        }
+        // Slow path: full isMuted check covers reposts via tags/_repostContext
+        if (cachedEvent && Lists.isMuted(cachedEvent)) {
+            el.remove();
+            removed++;
+        }
+    }
+    return removed;
 }
 
 export async function reportPost() {

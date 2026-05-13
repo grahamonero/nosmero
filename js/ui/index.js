@@ -109,6 +109,7 @@ export const viewPostSource = Thread.viewPostSource;
 export const muteUser = Thread.muteUser;
 export const reportPost = Thread.reportPost;
 export const requestDeletion = Thread.requestDeletion;
+export const getCurrentMenuPostId = Thread.getCurrentMenuPostId;
 
 // Wallet functions - now handled by wallet-modal.js via window.openWalletModal/closeWalletModal
 export const showWalletModal = () => window.openWalletModal?.();

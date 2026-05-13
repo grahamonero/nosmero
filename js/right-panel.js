@@ -1566,11 +1566,41 @@ const RightPanel = {
         }
 
         section.classList.add('active');
-        section.innerHTML = '<div class="loading" style="padding: 20px; text-align: center;">Loading profile...</div>';
 
         if (this.defaultFeed) {
             this.defaultFeed.style.display = 'none';
         }
+
+        // NIP-51 muted-user block: short-circuit before rendering any posts.
+        try {
+            const Lists = await import('./lists.js');
+            if (Lists.lists.mutePubkeys.has(pubkey)) {
+                section.innerHTML = `
+                    <div style="padding: 32px 20px; text-align: center;">
+                        <div style="font-size: 36px; margin-bottom: 12px;">🔇</div>
+                        <div style="color: #fff; font-weight: 600; font-size: 16px; margin-bottom: 6px;">Posts are not viewable</div>
+                        <div style="color: #aaa; font-size: 14px; margin-bottom: 20px;">You have muted this user.</div>
+                        <button id="rightPanelUnmuteBtn" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600;">Unmute and view profile</button>
+                    </div>
+                `;
+                const btn = section.querySelector('#rightPanelUnmuteBtn');
+                if (btn) {
+                    btn.addEventListener('click', async () => {
+                        try {
+                            await Lists.unmuteUser(pubkey);
+                            this.renderProfile(pubkey); // re-render once unmuted
+                        } catch (e) {
+                            console.error('Unmute failed:', e);
+                        }
+                    });
+                }
+                return;
+            }
+        } catch (e) {
+            console.warn('Mute check skipped in renderProfile:', e?.message || e);
+        }
+
+        section.innerHTML = '<div class="loading" style="padding: 20px; text-align: center;">Loading profile...</div>';
 
         try {
             // Fetch profile

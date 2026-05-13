@@ -494,12 +494,13 @@ async function startApplication() {
             console.error('❌ Error loading Monero address from relay:', error);
         }
 
-        // Load mute list from relays (NIP-51 kind 10000)
+        // Load NIP-51 lists (mute kind 10000, pin kind 10001, bookmark kind 10003)
+        // Includes one-time migration from legacy kind 30000 d:mute on first load.
         try {
-            await NostrPosts.fetchMuteList();
+            const Lists = await import('./lists.js');
+            await Lists.loadAllLists();
         } catch (error) {
-            console.error('❌ Error loading mute list from relay:', error);
-            // Continue without mute list
+            console.error('❌ Error loading NIP-51 lists from relay:', error);
         }
 
         // Fetch notifications and messages in background to populate badges
@@ -618,6 +619,11 @@ async function handleNavigation(event) {
         ipfsMediaPage.style.display = 'none';
     }
 
+    const bookmarksPage = document.getElementById('bookmarksPage');
+    if (bookmarksPage) {
+        bookmarksPage.style.display = 'none';
+    }
+
     // Show main feed container
     const feed = document.getElementById('feed');
     if (feed) {
@@ -672,6 +678,9 @@ async function handleNavigation(event) {
         case 'ipfs':
             await loadIpfsMediaPage();
             break;
+        case 'bookmarks':
+            await loadBookmarksPage();
+            break;
         default:
             console.warn('Unknown navigation tab:', tab);
     }
@@ -714,6 +723,74 @@ async function loadIpfsMediaPage() {
         console.error('[IPFS] Could not render IPFS Media page:', e);
         const panel = document.getElementById('ipfsMediaPanel');
         if (panel) panel.innerHTML = `<div style="color: #f87171;">Could not load: ${e.message || 'unknown error'}</div>`;
+    }
+}
+
+// Load Bookmarks page — list user's NIP-51 kind 10003 bookmarked notes
+async function loadBookmarksPage() {
+    if (!State.publicKey) {
+        showAuthUI();
+        return;
+    }
+    State.setCurrentPage('bookmarks');
+
+    const feed = document.getElementById('feed');
+    if (feed) feed.style.display = 'none';
+
+    const page = document.getElementById('bookmarksPage');
+    if (!page) return;
+    page.style.display = 'block';
+    page.innerHTML = `
+        <div style="max-width: 800px; margin: 0 auto; padding: 20px;">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                <button onclick="navigateTo('home')" style="background: none; border: 1px solid #333; border-radius: 8px; color: #fff; padding: 8px 14px; cursor: pointer; font-size: 14px;">← Back</button>
+                <h1 style="margin: 0; font-size: 22px; color: #fff;">★ Bookmarks</h1>
+            </div>
+            <p style="color: #aaa; font-size: 13px; margin: 0 0 16px;">Notes you've saved via the post menu. Bookmarks sync across all NIP-51-aware Nostr clients (kind 10003).</p>
+            <div id="bookmarksList"></div>
+        </div>
+    `;
+
+    const list = document.getElementById('bookmarksList');
+    if (!list) return;
+
+    try {
+        const Lists = await import('./lists.js');
+        const ids = Array.from(Lists.lists.bookmarkedNoteIds);
+        if (ids.length === 0) {
+            list.innerHTML = `<div style="color: #888; padding: 32px; text-align: center; border: 1px dashed #333; border-radius: 8px;">No bookmarks yet. Open any note's ⋯ menu and tap "☆ Bookmark".</div>`;
+            return;
+        }
+        list.innerHTML = `<div style="color: #888; font-size: 13px; padding: 8px 0;">Loading ${ids.length} bookmark${ids.length === 1 ? '' : 's'}…</div>`;
+
+        // Fetch any uncached events
+        const cached = ids.map(id => State.eventCache?.[id] || State.posts?.find(p => p.id === id)).filter(Boolean);
+        const missingIds = ids.filter(id => !cached.find(e => e.id === id));
+        let fetched = [];
+        if (missingIds.length > 0) {
+            const Relays = await import('./relays.js');
+            try {
+                fetched = await State.pool.querySync(Relays.getReadRelays(), { ids: missingIds, limit: missingIds.length });
+            } catch (e) {
+                console.warn('Bookmark fetch error:', e);
+            }
+        }
+        const events = [...cached, ...fetched].sort((a, b) => b.created_at - a.created_at);
+
+        if (events.length === 0) {
+            list.innerHTML = `<div style="color: #888; padding: 32px; text-align: center;">Your bookmarks couldn't be loaded — relays didn't return any of the ${ids.length} note ID${ids.length === 1 ? '' : 's'}.</div>`;
+            return;
+        }
+
+        // Prefetch author profiles before rendering
+        const authors = [...new Set(events.map(e => e.pubkey))];
+        try { await Posts.fetchProfiles(authors); } catch {}
+
+        const rendered = await Promise.all(events.map(e => Posts.renderSinglePost(e, 'feed').catch(() => '')));
+        list.innerHTML = rendered.filter(Boolean).join('');
+    } catch (e) {
+        console.error('Bookmarks load failed:', e);
+        list.innerHTML = `<div style="color: #f87171;">Could not load bookmarks: ${e?.message || e}</div>`;
     }
 }
 
@@ -1534,7 +1611,34 @@ function displayUserPosts(posts) {
                 </div>
             ` : '';
 
-            profileContent.innerHTML = renderedPosts.join('') + loadMoreButton;
+            // NIP-51 pinned notes: pull from kind 10001 list and prepend above regular posts.
+            // Filter pinned IDs out of the regular feed so they don't appear twice.
+            let pinnedHtml = '';
+            try {
+                const Lists = await import('./lists.js');
+                const pinnedIds = Array.from(Lists.lists.pinnedNoteIds);
+                if (pinnedIds.length > 0) {
+                    const pinnedEvents = pinnedIds
+                        .map(id => State.eventCache?.[id] || cachedOwnPosts.find(p => p.id === id))
+                        .filter(Boolean);
+                    if (pinnedEvents.length > 0) {
+                        const renderedPinned = await Promise.all(
+                            pinnedEvents.map(p => Posts.renderSinglePost(p, 'feed').catch(() => ''))
+                        );
+                        pinnedHtml = `
+                            <div style="color: #FF6600; font-size: 13px; font-weight: 600; padding: 8px 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                📌 Pinned
+                            </div>
+                            ${renderedPinned.filter(Boolean).join('')}
+                            <div style="height: 1px; background: #333; margin: 12px 16px 16px;"></div>
+                        `;
+                    }
+                }
+            } catch (e) {
+                console.warn('Pinned notes section skipped:', e?.message || e);
+            }
+
+            profileContent.innerHTML = pinnedHtml + renderedPosts.join('') + loadMoreButton;
 
             // Process any embedded notes and paywalled notes after rendering
             (async () => {
@@ -3410,6 +3514,47 @@ window.viewPostSource = UI.viewPostSource;
 window.muteUser = UI.muteUser;
 window.reportPost = UI.reportPost;
 window.requestDeletion = UI.requestDeletion;
+
+// NIP-51 bookmark + pin toggles (used by post 3-dot menu)
+window.toggleBookmark = async function() {
+    const postId = UI.getCurrentMenuPostId?.();
+    if (!postId) return;
+    document.getElementById('postMenu').style.display = 'none';
+    try {
+        const Lists = await import('./lists.js');
+        const wasBookmarked = Lists.isBookmarked(postId);
+        if (wasBookmarked) {
+            await Lists.unbookmarkNote(postId);
+            (window.Utils?.showNotification || (() => {}))('Bookmark removed', 'info');
+        } else {
+            await Lists.bookmarkNote(postId);
+            (window.Utils?.showNotification || (() => {}))('Note bookmarked', 'success');
+        }
+    } catch (e) {
+        console.error('toggleBookmark failed:', e);
+        (window.Utils?.showNotification || (() => {}))('Bookmark failed: ' + (e?.message || e), 'error');
+    }
+};
+
+window.togglePin = async function() {
+    const postId = UI.getCurrentMenuPostId?.();
+    if (!postId) return;
+    document.getElementById('postMenu').style.display = 'none';
+    try {
+        const Lists = await import('./lists.js');
+        const wasPinned = Lists.isPinned(postId);
+        if (wasPinned) {
+            await Lists.unpinNote(postId);
+            (window.Utils?.showNotification || (() => {}))('Unpinned from profile', 'info');
+        } else {
+            await Lists.pinNote(postId);
+            (window.Utils?.showNotification || (() => {}))('Pinned to profile', 'success');
+        }
+    } catch (e) {
+        console.error('togglePin failed:', e);
+        (window.Utils?.showNotification || (() => {}))('Pin failed: ' + (e?.message || e), 'error');
+    }
+};
 window.viewUserProfilePage = UI.viewUserProfilePage;
 window.goBackFromProfile = UI.goBackFromProfile;
 window.goBackFromSettings = goBackFromSettings;

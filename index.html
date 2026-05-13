@@ -48,6 +48,10 @@
                 <span class="menu-icon">📦</span>
                 <span>IPFS Media</span>
             </div>
+            <div class="menu-item" data-tab="bookmarks" onclick="handleMenuItemClick('bookmarks')">
+                <span class="menu-icon">★</span>
+                <span>Bookmarks</span>
+            </div>
             <div class="menu-item" data-tab="settings" onclick="handleMenuItemClick('settings')">
                 <span class="menu-icon">⚙️</span>
                 <span>Settings</span>
@@ -386,6 +390,9 @@
 
         <!-- IPFS Media page (hidden by default) -->
         <div id="ipfsMediaPage" class="ipfs-media-page" style="display: none;"></div>
+
+        <!-- Bookmarks page (hidden by default) -->
+        <div id="bookmarksPage" class="bookmarks-page" style="display: none;"></div>
 
         <!-- Settings page (hidden by default) -->
         <div id="settingsPage" class="settings-page" style="display: none;">
@@ -1229,6 +1236,8 @@
 
     <!-- Post Menu -->
     <div id="postMenu" class="post-menu" style="display: none;">
+        <button id="postMenuBookmarkBtn" onclick="toggleBookmark()">☆ Bookmark</button>
+        <button id="postMenuPinBtn" onclick="togglePin()" style="display: none;">📌 Pin to Profile</button>
         <button onclick="copyPostLink()">Copy Link</button>
         <button onclick="copyPostId()">Copy Note ID</button>
         <button onclick="copyPostJson()">Copy JSON</button>

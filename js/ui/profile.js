@@ -489,11 +489,38 @@ export async function viewUserProfilePage(pubkey) {
         }
 
         // Import required modules
-        const [StateModule, Posts, Utils] = await Promise.all([
+        const [StateModule, Posts, Utils, Lists] = await Promise.all([
             import('../state.js'),
             import('../posts.js'),
-            import('../utils.js')
+            import('../utils.js'),
+            import('../lists.js').catch(() => null)
         ]);
+
+        // NIP-51 muted-user block: short-circuit before doing anything else.
+        if (Lists?.lists?.mutePubkeys?.has(pubkey)) {
+            const profilePage = document.getElementById('profilePage');
+            if (profilePage) {
+                document.getElementById('feed')?.style.setProperty('display', 'none');
+                profilePage.style.display = 'block';
+                profilePage.innerHTML = `
+                    <div style="max-width: 600px; margin: 40px auto; padding: 32px 20px; text-align: center;">
+                        <div style="font-size: 48px; margin-bottom: 16px;">🔇</div>
+                        <div style="color: #fff; font-weight: 600; font-size: 20px; margin-bottom: 8px;">Posts are not viewable</div>
+                        <div style="color: #aaa; font-size: 15px; margin-bottom: 24px;">You have muted this user.</div>
+                        <button id="profilePageUnmuteBtn" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px;">Unmute and view profile</button>
+                    </div>
+                `;
+                const btn = profilePage.querySelector('#profilePageUnmuteBtn');
+                if (btn) {
+                    btn.addEventListener('click', async () => {
+                        await Lists.unmuteUser(pubkey);
+                        viewUserProfilePage(pubkey);
+                    });
+                }
+            }
+            StateModule.setCurrentPage('profile');
+            return;
+        }
 
         // Store current page to go back to
         previousPage = StateModule.currentPage || 'home';
