@@ -86,6 +86,12 @@ async function finalizeLogin() {
     } else {
         window.location.reload();
     }
+
+    // NIP-89 handler announcement (debounced to once per week).
+    // Fire-and-forget so login isn't delayed.
+    import('./nip89.js')
+        .then(NIP89 => NIP89.publishHandlerAnnouncement())
+        .catch(e => console.warn('NIP-89 announcement skipped:', e?.message || e));
 }
 
 // ==================== SECURE KEY STORAGE ====================
