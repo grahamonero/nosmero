@@ -884,6 +884,36 @@
             </div>
 
             <div class="settings-section">
+                <h3>Muted Hashtags</h3>
+                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Posts tagged with any of these hashtags will be hidden from your feeds. Public — syncs to other NIP-51 clients (kind 10000).</p>
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <input id="addMuteHashtagInput" type="text" placeholder="e.g. nsfw (without the #)"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();addMutedHashtag(event);}"
+                           style="flex: 1; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #fff;">
+                    <button onclick="addMutedHashtag(event)"
+                            style="padding: 10px 16px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">Mute</button>
+                </div>
+                <div id="mutedHashtagsList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Muted Words</h3>
+                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Posts containing any of these substrings will be hidden. Case-insensitive, matches anywhere in the post. Private — encrypted to yourself.</p>
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <input id="addMuteWordInput" type="text" placeholder="e.g. spamword"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();addMutedWord(event);}"
+                           style="flex: 1; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #fff;">
+                    <button onclick="addMutedWord(event)"
+                            style="padding: 10px 16px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">Mute</button>
+                </div>
+                <div id="mutedWordsList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="settings-section">
                 <h3>🔐 Web of Trust</h3>
                 <p style="color: #999; font-size: 12px; margin-bottom: 16px;">NIP-85 trust scoring powered by Relatr</p>
 

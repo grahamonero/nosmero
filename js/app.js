@@ -4113,6 +4113,10 @@ async function populateSettingsForm() {
         // Populate muted users list
         await populateMutedUsersList();
 
+        // Populate muted hashtags + words (NIP-51 kind 10000)
+        await populateMutedHashtagsList();
+        await populateMutedWordsList();
+
         // Sync Web of Trust toggles with localStorage
         const webOfTrustEnabled = localStorage.getItem('webOfTrustEnabled') !== 'false';
         const showEverywhere = localStorage.getItem('showTrustBadgesEverywhere') === 'true';
@@ -4617,6 +4621,142 @@ window.unmutePubkey = async function(pubkey) {
         Utils.showNotification('Failed to unmute user', 'error');
     }
 }
+
+// ==================== MUTED HASHTAGS / WORDS (NIP-51 kind 10000) ====================
+
+function escTag(s) { return String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
+
+async function populateMutedHashtagsList() {
+    const el = document.getElementById('mutedHashtagsList');
+    if (!el) return;
+    try {
+        const Lists = await import('./lists.js');
+        const tags = [...Lists.lists.muteHashtags].sort();
+        if (tags.length === 0) {
+            el.innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">No muted hashtags</div>';
+            return;
+        }
+        el.innerHTML = tags.map(t => `
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: rgba(255, 102, 0, 0.08); border-radius: 6px; margin-bottom: 6px;">
+                <div style="color: #fff;">#${escTag(t)}</div>
+                <button onclick="removeMutedHashtag('${escTag(t)}', event)"
+                        style="background: #4CAF50; border: none; border-radius: 4px; color: white; padding: 5px 10px; font-size: 12px; cursor: pointer; font-weight: bold;">Unmute</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        console.error('populateMutedHashtagsList failed:', e);
+    }
+}
+
+async function populateMutedWordsList() {
+    const el = document.getElementById('mutedWordsList');
+    if (!el) return;
+    try {
+        const Lists = await import('./lists.js');
+        const words = [...Lists.lists.muteWords].sort();
+        if (words.length === 0) {
+            el.innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">No muted words</div>';
+            return;
+        }
+        el.innerHTML = words.map(w => `
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: rgba(255, 68, 68, 0.08); border-radius: 6px; margin-bottom: 6px;">
+                <div style="color: #fff;">${escTag(w)}</div>
+                <button onclick="removeMutedWord('${escTag(w)}', event)"
+                        style="background: #4CAF50; border: none; border-radius: 4px; color: white; padding: 5px 10px; font-size: 12px; cursor: pointer; font-weight: bold;">Unmute</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        console.error('populateMutedWordsList failed:', e);
+    }
+}
+
+function setBtnBusy(btn, busyText) {
+    if (!btn) return () => {};
+    const orig = btn.textContent;
+    const wasDisabled = btn.disabled;
+    btn.textContent = busyText;
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.cursor = 'wait';
+    return () => {
+        btn.textContent = orig;
+        btn.disabled = wasDisabled;
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+    };
+}
+
+window.addMutedHashtag = async function(event) {
+    const input = document.getElementById('addMuteHashtagInput');
+    if (!input) return;
+    const raw = (input.value || '').trim();
+    if (!raw) return;
+    const btn = event?.target || input.nextElementSibling;
+    const restore = setBtnBusy(btn, 'Publishing…');
+    try {
+        const Lists = await import('./lists.js');
+        await Lists.muteHashtag(raw);
+        input.value = '';
+        await populateMutedHashtagsList();
+        Utils.showNotification(`Muted #${raw.toLowerCase().replace(/^#/, '')}`, 'success');
+    } catch (e) {
+        console.error('addMutedHashtag failed:', e);
+        Utils.showNotification('Could not mute hashtag: ' + (e?.message || e), 'error');
+    } finally {
+        restore();
+    }
+};
+
+window.removeMutedHashtag = async function(tag, event) {
+    const btn = event?.target;
+    const restore = setBtnBusy(btn, 'Publishing…');
+    try {
+        const Lists = await import('./lists.js');
+        await Lists.unmuteHashtag(tag);
+        await populateMutedHashtagsList();
+        Utils.showNotification(`Unmuted #${tag}`, 'info');
+    } catch (e) {
+        Utils.showNotification('Could not unmute: ' + (e?.message || e), 'error');
+    } finally {
+        restore();
+    }
+};
+
+window.addMutedWord = async function(event) {
+    const input = document.getElementById('addMuteWordInput');
+    if (!input) return;
+    const raw = (input.value || '').trim();
+    if (!raw) return;
+    const btn = event?.target || input.nextElementSibling;
+    const restore = setBtnBusy(btn, 'Publishing…');
+    try {
+        const Lists = await import('./lists.js');
+        await Lists.muteWord(raw);
+        input.value = '';
+        await populateMutedWordsList();
+        Utils.showNotification(`Muted "${raw.toLowerCase()}"`, 'success');
+    } catch (e) {
+        console.error('addMutedWord failed:', e);
+        Utils.showNotification('Could not mute word: ' + (e?.message || e), 'error');
+    } finally {
+        restore();
+    }
+};
+
+window.removeMutedWord = async function(word, event) {
+    const btn = event?.target;
+    const restore = setBtnBusy(btn, 'Publishing…');
+    try {
+        const Lists = await import('./lists.js');
+        await Lists.unmuteWord(word);
+        await populateMutedWordsList();
+        Utils.showNotification(`Unmuted "${word}"`, 'info');
+    } catch (e) {
+        Utils.showNotification('Could not unmute: ' + (e?.message || e), 'error');
+    } finally {
+        restore();
+    }
+};
 
 // Add read relay from Settings modal
 async function addReadRelay() {
