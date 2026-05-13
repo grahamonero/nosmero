@@ -551,9 +551,24 @@ export async function processEmbeddedNotes(containerId) {
                     }
                 }
 
-                // Replace placeholder with actual note content
-                console.log('✅ Rendering embedded note');
-                noteDiv.innerHTML = renderEmbeddedNote(event, State);
+                // Replace placeholder with actual content. Kinds 1/6/16 render
+                // as a note inline; anything else goes through the NIP-89
+                // unknown-kind fallback so we can offer "Open in [client]" links.
+                const NOTE_LIKE_KINDS = new Set([1, 6, 16]);
+                if (NOTE_LIKE_KINDS.has(event.kind)) {
+                    console.log('✅ Rendering embedded note');
+                    noteDiv.innerHTML = renderEmbeddedNote(event, State);
+                } else {
+                    console.log(`✅ Rendering NIP-89 unknown-kind fallback for kind ${event.kind}`);
+                    try {
+                        const NIP89 = await import('./nip89.js');
+                        noteDiv.innerHTML = NIP89.renderUnknownKindCard(event);
+                        NIP89.hydrateUnknownKindCards(noteDiv).catch(() => {});
+                    } catch (e) {
+                        console.warn('NIP-89 fallback unavailable, rendering as note:', e?.message || e);
+                        noteDiv.innerHTML = renderEmbeddedNote(event, State);
+                    }
+                }
                 noteDiv.classList.add('loaded');
             } else {
                 // Fallback: show minimal info instead of "Loading event..."

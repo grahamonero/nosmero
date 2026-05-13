@@ -177,6 +177,37 @@ async function handleHashRouting() {
             clearInterval(waitForReady);
             console.log('⚠️ Timeout waiting for app to be ready');
         }, 10000);
+    } else {
+        // NIP-89 deep-link form: bech32 entity directly in the hash
+        // (e.g. #nevent1..., #note1..., #npub1..., #nprofile1..., #naddr1...).
+        // Matches the URL template Nosmero advertises in kind 31990.
+        const raw = hash.replace(/^#/, '');
+        const bech32Match = raw.match(/^(nevent1|note1|npub1|nprofile1|naddr1)[0-9a-z]+$/i);
+        if (bech32Match) {
+            try {
+                const { nip19 } = window.NostrTools;
+                const decoded = nip19.decode(decodeURIComponent(raw));
+                const waitForReady = setInterval(() => {
+                    if (State.publicKey && State.pool) {
+                        clearInterval(waitForReady);
+                        if (decoded.type === 'nevent') {
+                            window.openThreadView(decoded.data.id);
+                        } else if (decoded.type === 'note') {
+                            window.openThreadView(decoded.data);
+                        } else if (decoded.type === 'npub') {
+                            window.viewUserProfilePage(decoded.data);
+                        } else if (decoded.type === 'nprofile') {
+                            window.viewUserProfilePage(decoded.data.pubkey);
+                        } else if (decoded.type === 'naddr') {
+                            console.log('📍 naddr deep-link (not yet routable):', decoded.data);
+                        }
+                    }
+                }, 500);
+                setTimeout(() => clearInterval(waitForReady), 10000);
+            } catch (e) {
+                console.warn('Failed to decode NIP-89 bech32 hash:', e?.message || e);
+            }
+        }
     }
 }
 
@@ -425,6 +456,12 @@ async function startApplication() {
             console.error('❌ Error loading mute list from relay:', error);
             // Continue without mute list
         }
+
+        // NIP-89 handler announcement (debounced to once per week).
+        // Fire-and-forget so it doesn't delay the rest of startup.
+        import('./nip89.js')
+            .then(NIP89 => NIP89.publishHandlerAnnouncement())
+            .catch(e => console.warn('NIP-89 announcement skipped:', e?.message || e));
 
         // Fetch notifications and messages in background to populate badges
         // Add small delays to avoid competing with home feed loading
