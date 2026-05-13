@@ -2546,31 +2546,58 @@ async function loadMoreProfilePosts() {
 export async function viewUserProfilePage(pubkey) {
     try {
         // Import required modules
-        const [StateModule, Posts] = await Promise.all([
+        const [StateModule, Posts, Lists] = await Promise.all([
             import('./state.js'),
-            import('./posts.js')
+            import('./posts.js'),
+            import('./lists.js').catch(() => null)
         ]);
-        
+
+        // NIP-51 muted-user block: short-circuit before doing anything else.
+        if (Lists?.lists?.mutePubkeys?.has(pubkey)) {
+            const profilePage = document.getElementById('profilePage');
+            if (profilePage) {
+                document.getElementById('feed')?.style.setProperty('display', 'none');
+                profilePage.style.display = 'block';
+                profilePage.innerHTML = `
+                    <div style="max-width: 600px; margin: 40px auto; padding: 32px 20px; text-align: center;">
+                        <div style="font-size: 48px; margin-bottom: 16px;">🔇</div>
+                        <div style="color: #fff; font-weight: 600; font-size: 20px; margin-bottom: 8px;">Posts are not viewable</div>
+                        <div style="color: #aaa; font-size: 15px; margin-bottom: 24px;">You have muted this user.</div>
+                        <button id="profilePageUnmuteBtn" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px;">Unmute and view profile</button>
+                    </div>
+                `;
+                const btn = profilePage.querySelector('#profilePageUnmuteBtn');
+                if (btn) {
+                    btn.addEventListener('click', async () => {
+                        await Lists.unmuteUser(pubkey);
+                        viewUserProfilePage(pubkey);
+                    });
+                }
+            }
+            StateModule.setCurrentPage('profile');
+            return;
+        }
+
         // Store current page to go back to
         previousPage = StateModule.currentPage || 'home';
-        
+
         // Hide current page and clear content
         document.getElementById('feed')?.style.setProperty('display', 'none');
         document.getElementById('messagesPage')?.style.setProperty('display', 'none');
         document.getElementById('threadPage')?.style.setProperty('display', 'none');
-        
+
         // Clear any thread content that might be in the feed
         const feedElement = document.getElementById('feed');
         if (feedElement) {
             feedElement.innerHTML = '';
         }
-        
+
         const profilePage = document.getElementById('profilePage');
         if (!profilePage) {
             console.error('Profile page element not found');
             return;
         }
-        
+
         // Show loading state
         profilePage.innerHTML = `
             <div style="max-width: 800px; margin: 0 auto; padding: 20px;">
@@ -2580,7 +2607,7 @@ export async function viewUserProfilePage(pubkey) {
             </div>
         `;
         profilePage.style.display = 'block';
-        
+
         // Update current page state
         StateModule.setCurrentPage('profile');
 
@@ -3264,6 +3291,7 @@ export async function goBackFromProfile() {
 // ==================== POST CONTEXT MENU ====================
 
 let currentMenuPostId = null;
+export function getCurrentMenuPostId() { return currentMenuPostId; }
 
 export function showNoteMenu(postId, event) {
     if (!event) {
@@ -3284,10 +3312,27 @@ export function showNoteMenu(postId, event) {
     // Show "Request Deletion" only when the logged-in user is the author.
     // NIP-09 kind 5 events from non-authors are ignored by relays anyway.
     const deleteBtn = document.getElementById('postMenuDeleteBtn');
+    const post = State.eventCache?.[postId] || State.posts?.find(p => p.id === postId);
+    const isAuthor = post && post.pubkey && State.publicKey && post.pubkey === State.publicKey;
     if (deleteBtn) {
-        const post = State.eventCache?.[postId] || State.posts?.find(p => p.id === postId);
-        const isAuthor = post && post.pubkey && State.publicKey && post.pubkey === State.publicKey;
         deleteBtn.style.display = isAuthor ? '' : 'none';
+    }
+
+    // NIP-51 bookmark + pin button state
+    const bookmarkBtn = document.getElementById('postMenuBookmarkBtn');
+    const pinBtn = document.getElementById('postMenuPinBtn');
+    if (bookmarkBtn || pinBtn) {
+        import('./lists.js').then(Lists => {
+            if (bookmarkBtn) {
+                bookmarkBtn.textContent = Lists.isBookmarked(postId) ? '★ Bookmarked' : '☆ Bookmark';
+            }
+            if (pinBtn) {
+                pinBtn.style.display = isAuthor ? '' : 'none';
+                if (isAuthor) {
+                    pinBtn.textContent = Lists.isPinned(postId) ? '📌 Unpin from Profile' : '📌 Pin to Profile';
+                }
+            }
+        }).catch(() => {});
     }
 
     // Position menu at mouse location with boundary checking
@@ -3397,38 +3442,67 @@ export function viewPostSource() {
 export async function muteUser() {
     if (!currentMenuPostId) return;
 
-    // Find the post in cache or posts array
     const State = await import('./state.js');
     const post = State.eventCache[currentMenuPostId] || State.posts.find(p => p.id === currentMenuPostId);
 
+    document.getElementById('postMenu').style.display = 'none';
+
     if (!post || !post.pubkey) {
         showNotification('Cannot mute - note author not found', 'error');
-        document.getElementById('postMenu').style.display = 'none';
         return;
     }
 
-    // Don't allow muting yourself
-    if (post.pubkey === State.publicKey) {
+    // For a kind-6 repost the menu was opened on, mute the *original* author
+    // (the p-tag), not the reposter.
+    let targetPubkey = post.pubkey;
+    if (post.kind === 6 || post.kind === 16) {
+        const pTag = (post.tags || []).find(t => t[0] === 'p' && t[1]);
+        if (pTag) targetPubkey = pTag[1];
+    }
+
+    if (targetPubkey === State.publicKey) {
         showNotification('You cannot mute yourself', 'error');
-        document.getElementById('postMenu').style.display = 'none';
         return;
     }
 
-    // Import posts module and call muteUser
+    const profile = State.profileCache?.[targetPubkey];
+    const authorName = profile?.name || profile?.display_name || `${targetPubkey.slice(0, 8)}…`;
+
+    // Optimistic: flip the local mute set + sweep DOM immediately, then publish.
+    const Lists = await import('./lists.js');
+    Lists.lists.mutePubkeys.add(targetPubkey);
+    if (typeof State.setMutedUsers === 'function') State.setMutedUsers(new Set(Lists.lists.mutePubkeys));
+    const removed = removeMutedPostsFromDom(Lists, State);
+
+    alert(`${authorName} has been muted.\n\nYou will no longer see their posts, reposts, or profile across any feed. The mute syncs to other Nostr clients via NIP-51.`);
+
+    showNotification(`User muted${removed > 0 ? ` (${removed} note${removed === 1 ? '' : 's'} hidden)` : ''}`, 'success');
+
     const Posts = await import('./posts.js');
-    const success = await Posts.muteUser(post.pubkey);
+    Posts.muteUser(targetPubkey).catch(e => {
+        console.error('Mute publish failed:', e);
+        showNotification('Mute did not sync to relays: ' + (e?.message || e), 'error');
+    });
+}
 
-    if (success) {
-        showNotification('User muted successfully', 'success');
-        // Reload the feed to hide posts from muted user
-        setTimeout(() => {
-            window.location.reload();
-        }, 1000);
-    } else {
-        showNotification('Failed to mute user', 'error');
+function removeMutedPostsFromDom(Lists, State) {
+    let removed = 0;
+    const els = document.querySelectorAll('.post[data-post-id]');
+    for (const el of els) {
+        const id = el.dataset.postId;
+        const pubkey = el.dataset.pubkey;
+        const cachedEvent = State.eventCache?.[id] || State.posts?.find(p => p.id === id);
+        if (pubkey && Lists.lists.mutePubkeys.has(pubkey)) {
+            el.remove();
+            removed++;
+            continue;
+        }
+        if (cachedEvent && Lists.isMuted(cachedEvent)) {
+            el.remove();
+            removed++;
+        }
     }
-
-    document.getElementById('postMenu').style.display = 'none';
+    return removed;
 }
 
 export async function reportPost() {

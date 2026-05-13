@@ -1460,144 +1460,25 @@ async function _fetchFollowsFromRelays({ background }) {
 // ==================== MUTE LIST MANAGEMENT (NIP-51) ====================
 
 // Fetch mute list from relays (kind 10000)
+// Mute list handling moved to js/lists.js (NIP-51 standard kind 10000 with
+// NIP-44 encryption + bunker-compatible signing). These exports remain as
+// thin delegates so existing callers (UI handlers etc.) keep working.
+
 export async function fetchMuteList() {
-    console.log('🔇 Fetching mute list (kind 10000)...');
-
-    if (!State.publicKey) {
-        console.log('🔇 No publicKey, skipping mute list fetch');
-        return;
-    }
-
-    try {
-        const Relays = await import('./relays.js');
-        const readRelays = Relays.getUserDataRelays();
-
-        await new Promise((resolve) => {
-            const sub = State.pool.subscribeMany(readRelays, [
-                { kinds: [10000], authors: [State.publicKey], limit: 1 }
-            ], {
-                onevent(event) {
-                    try {
-                        const mutedPubkeys = new Set();
-                        event.tags.forEach(tag => {
-                            if (tag[0] === 'p' && tag[1]) {
-                                mutedPubkeys.add(tag[1]);
-                            }
-                        });
-
-                        State.setMutedUsers(mutedPubkeys);
-                        console.log('✅ Mute list loaded:', mutedPubkeys.size, 'users');
-                    } catch (error) {
-                        console.error('Error parsing mute list:', error);
-                    }
-                },
-                oneose: () => {
-                    sub.close();
-                    resolve();
-                }
-            });
-
-            // Timeout after 5 seconds
-            setTimeout(() => {
-                sub.close();
-                console.log('⏰ Mute list fetch timeout');
-                resolve();
-            }, 5000);
-        });
-
-    } catch (error) {
-        console.error('Error fetching mute list:', error);
-    }
+    const Lists = await import('./lists.js');
+    return Lists.loadAllLists();
 }
 
-// Publish updated mute list to relays (kind 10000)
-export async function publishMuteList() {
-    console.log('📤 Publishing mute list...');
-
-    if (!State.hasPrivateKey() || !State.publicKey) {
-        console.error('Cannot publish mute list - no keys available');
-        return false;
-    }
-
-    try {
-        const Relays = await import('./relays.js');
-        const writeRelays = Relays.getUserDataRelays();
-
-        // Build tags array from muted users
-        const tags = Array.from(State.mutedUsers || new Set()).map(pubkey => ['p', pubkey]);
-
-        // Create kind 10000 event
-        const muteListEvent = {
-            kind: 10000,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: tags,
-            content: '', // Public mutes only (no encryption for simplicity)
-            pubkey: State.publicKey
-        };
-
-        // Sign the event
-        const signedEvent = window.NostrTools.finalizeEvent(muteListEvent, State.getPrivateKeyForSigning());
-
-        // Publish to relays
-        const publishPromises = State.pool.publish(writeRelays, signedEvent);
-        await Promise.allSettled(publishPromises);
-
-        console.log('✅ Mute list published');
-        return true;
-    } catch (error) {
-        console.error('Error publishing mute list:', error);
-        return false;
-    }
-}
-
-// Add user to mute list
 export async function muteUser(pubkey) {
-    if (!pubkey) {
-        console.error('Cannot mute - no pubkey provided');
-        return false;
-    }
-
-    // Ensure mutedUsers is initialized
-    if (!State.mutedUsers) {
-        State.setMutedUsers(new Set());
-    }
-
-    // Add to muted users set
-    State.mutedUsers.add(pubkey);
-
-    // Publish updated mute list
-    const success = await publishMuteList();
-
-    if (success) {
-        console.log('✅ User muted:', pubkey.substring(0, 16) + '...');
-    }
-
-    return success;
+    if (!pubkey) return false;
+    const Lists = await import('./lists.js');
+    return await Lists.muteUser(pubkey);
 }
 
-// Remove user from mute list
 export async function unmuteUser(pubkey) {
-    if (!pubkey) {
-        console.error('Cannot unmute - no pubkey provided');
-        return false;
-    }
-
-    // Ensure mutedUsers is initialized
-    if (!State.mutedUsers) {
-        State.setMutedUsers(new Set());
-    }
-
-    // Remove from muted users set
-    State.mutedUsers.delete(pubkey);
-
-    // Publish updated mute list
-    const success = await publishMuteList();
-
-    if (success) {
-        console.log('✅ User unmuted:', pubkey.substring(0, 16) + '...');
-    }
-
-    return success;
+    if (!pubkey) return false;
+    const Lists = await import('./lists.js');
+    return await Lists.unmuteUser(pubkey);
 }
 
 // Fetch a specific user's public mute list (for author moderation)
@@ -2506,17 +2387,16 @@ async function renderHomeFeedResults() {
     }
     console.log(`🎨 Rendering ${currentHomeFeedResults.length} notes to homeFeedList`);
 
-    // Filter out posts from muted users
-    let filteredResults = currentHomeFeedResults.filter(post => {
-        if (State.mutedUsers?.has(post.pubkey)) {
-            console.log('🔇 Filtered out post from muted user:', post.pubkey.substring(0, 16) + '...');
-            return false;
+    // NIP-51 mute filter: muted pubkeys + hashtags + words
+    let filteredResults = currentHomeFeedResults;
+    try {
+        const Lists = await import('./lists.js');
+        filteredResults = currentHomeFeedResults.filter(post => !Lists.isMuted(post));
+        if (filteredResults.length < currentHomeFeedResults.length) {
+            console.log(`🔇 NIP-51 filter hid ${currentHomeFeedResults.length - filteredResults.length} posts`);
         }
-        return true;
-    });
-
-    if (filteredResults.length < currentHomeFeedResults.length) {
-        console.log(`🔇 Filtered out ${currentHomeFeedResults.length - filteredResults.length} posts from muted users`);
+    } catch (e) {
+        filteredResults = currentHomeFeedResults.filter(post => !State.mutedUsers?.has(post.pubkey));
     }
 
     // Normalize events: extract original posts from reposts (kind 6)
@@ -4363,8 +4243,21 @@ async function fetchMissingProfilesViaNIP65(missingPubkeys) {
 }
 
 // Render a single post (for thread view, search results, etc.)
+// Cached reference to the lists module — populated on first renderSinglePost
+// call. Lets us check the NIP-51 mute filter without an await-per-render.
+let _ListsRef = null;
+const _loadLists = () => _ListsRef || (import('./lists.js').then(m => { _ListsRef = m; return m; }));
+
 export async function renderSinglePost(post, context = 'feed', engagementData = null, parentPostsMap = null, repostContext = null) {
     try {
+        // NIP-51 mute filter — return empty string so muted posts vanish from
+        // every feed/thread/render path without having to be filtered upstream.
+        const Lists = _ListsRef || await _loadLists();
+        if (Lists?.isMuted) {
+            if (Lists.isMuted(post)) return '';
+            if (repostContext?.reposter && Lists.lists.mutePubkeys.has(repostContext.reposter)) return '';
+        }
+
         const author = getAuthorInfo(post);
         const moneroAddress = getMoneroAddress(post);
         const lightningAddress = getLightningAddress(post);
@@ -6886,6 +6779,12 @@ async function showMoreTrendingAll() {
     const reposterPubkeys = pagesToShow.filter(n => n._repostContext).map(n => n._repostContext.reposter);
     const allPubkeys = [...new Set([...authorPubkeys, ...reposterPubkeys])];
     await fetchProfiles(allPubkeys);
+
+    // Populate the shared event cache so post-action handlers (Mute, Bookmark,
+    // Pin, etc.) can look these up by id without re-fetching from relays.
+    for (const note of pagesToShow) {
+        if (!State.eventCache[note.id]) State.eventCache[note.id] = note;
+    }
 
     // Fetch parent posts for replies
     const parentPostsMap = await fetchParentPosts(pagesToShow, getParentPostRelays());
