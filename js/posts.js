@@ -52,25 +52,6 @@ let cachedTrendingPosts = [];
 let displayedTrendingPostCount = 0;
 const TRENDING_POSTS_PER_PAGE = 30;
 
-// ==================== CLIENT ANALYTICS ====================
-
-// Track event to server-side analytics (fire and forget)
-function trackClientEvent(kind, pubkey, eventId = null) {
-    // Don't block on analytics - fire and forget
-    fetch('/api/analytics/event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            kind: kind,
-            pubkey: pubkey,
-            event_id: eventId
-        })
-    }).catch(err => {
-        // Silent fail - analytics shouldn't break the app
-        console.debug('[Analytics] Failed to track event:', err.message);
-    });
-}
-
 // Clear all home feed state (used when switching users)
 export function clearHomeFeedState() {
     console.log('🧹 Clearing home feed state');
@@ -3507,62 +3488,64 @@ export async function likePost(postId) {
         alert('Note not found');
         return;
     }
-    
-    // Check if already liked
-    const isLiked = State.likedPosts.has(postId);
-    
+
+    const wasLiked = State.likedPosts.has(postId);
+
+    // Optimistic UI: flip heart instantly, do network work after.
+    if (wasLiked) {
+        State.likedPosts.delete(postId);
+    } else {
+        State.likedPosts.add(postId);
+    }
+    updateLikeButton(postId, !wasLiked);
+
     try {
-        if (isLiked) {
-            // Unlike: Create deletion event (kind 5) for the like
+        if (wasLiked) {
             const eventTemplate = {
                 kind: 5,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
-                    ['e', postId], // Reference to the post
-                    ['k', '7']     // Deleting kind 7 (reaction) events
+                    ['e', postId],
+                    ['k', '7']
                 ],
-                content: 'Unlike' // Deletion reason
+                content: 'Unlike'
             };
-
             const signedEvent = await Utils.signEvent(eventTemplate);
-            await State.pool.publish(Relays.getWriteRelays(), signedEvent);
-            
-            State.likedPosts.delete(postId);
-            updateLikeButton(postId, false);
+            State.pool.publish(Relays.getWriteRelays(), signedEvent);
             Utils.showNotification('Note unliked', 'info');
-            
         } else {
-            // Get relay hint for the author (NIP-65 outbox model)
-            const relayHint = await Relays.getPrimaryRelayHint(post.pubkey);
-
-            // Like: Create reaction event (kind 7) with relay hints
             const eventTemplate = {
                 kind: 7,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
-                    ['e', postId, relayHint],
-                    ['p', post.pubkey, relayHint],
-                    ['k', '1'], // Reacting to kind 1 (text note)
+                    ['e', postId],
+                    ['p', post.pubkey],
+                    ['k', '1'],
                     ['client', 'nosmero']
                 ],
-                content: '🤍' // Heart emoji
+                content: '🤍'
             };
-
             const signedEvent = await Utils.signEvent(eventTemplate);
-
-            // Publish to your write relays + author's read relays (inbox)
-            const authorInbox = await Relays.getInboxRelays(post.pubkey);
-            const publishRelays = [...new Set([...Relays.getWriteRelays(), ...authorInbox])];
-            await State.pool.publish(publishRelays, signedEvent);
-
-            // Track like event
-            trackClientEvent(7, State.publicKey, signedEvent.id);
-
-            State.likedPosts.add(postId);
-            updateLikeButton(postId, true);
             Utils.showNotification('Note liked!', 'success');
+
+            // Publish to own write relays immediately; author-inbox lookup may hit
+            // the network (NIP-65 discovery), so do it in the background.
+            State.pool.publish(Relays.getWriteRelays(), signedEvent);
+            Relays.getInboxRelays(post.pubkey)
+                .then(authorInbox => {
+                    const extra = authorInbox.filter(r => !Relays.getWriteRelays().includes(r));
+                    if (extra.length) State.pool.publish(extra, signedEvent);
+                })
+                .catch(e => console.warn('Inbox-relay publish for like skipped:', e));
         }
     } catch (error) {
+        // Signing failed — revert optimistic UI
+        if (wasLiked) {
+            State.likedPosts.add(postId);
+        } else {
+            State.likedPosts.delete(postId);
+        }
+        updateLikeButton(postId, wasLiked);
         console.error('Failed to like/unlike post:', error);
         Utils.showNotification('Failed to update like: ' + error.message, 'error');
     }
@@ -3732,9 +3715,6 @@ async function doQuickRepost() {
     const publishRelays = [...new Set([...Relays.getWriteRelays(), ...authorInbox])];
     await State.pool.publish(publishRelays, signedEvent);
 
-    // Track repost event
-    trackClientEvent(6, State.publicKey, signedEvent.id);
-
     State.repostedPosts.add(currentRepostPost.id);
     updateRepostButton(currentRepostPost.id, true);
     Utils.showNotification('Note reposted!', 'success');
@@ -3782,9 +3762,6 @@ async function doQuoteRepost() {
     const authorInbox = await Relays.getInboxRelays(currentRepostPost.pubkey);
     const publishRelays = [...new Set([...Relays.getWriteRelays(), ...authorInbox])];
     await State.pool.publish(publishRelays, signedEvent);
-
-    // Track quote note event
-    trackClientEvent(1, State.publicKey, signedEvent.id);
 
     Utils.showNotification('Quote note published!', 'success');
 
@@ -3926,9 +3903,6 @@ export async function sendReply(replyToId) {
         console.log('  Recipient inbox relays:', recipientInbox);
         console.log('  Combined publish relays:', publishRelays.length, publishRelays);
         await State.pool.publish(publishRelays, signedEvent);
-
-        // Track reply event
-        trackClientEvent(1, State.publicKey, signedEvent.id);
 
         Utils.showNotification('Reply published!', 'success');
         document.getElementById('replyModal').style.display = 'none';
@@ -5179,9 +5153,6 @@ export async function sendPost() {
             throw new Error('No write relays configured. Please check your relay settings.');
         }
 
-        // Track note event
-        trackClientEvent(1, State.publicKey, signedEvent.id);
-
         // Add to local posts array and update feed
         State.posts.unshift(signedEvent);
 
@@ -6180,9 +6151,6 @@ export async function publishNewPost() {
         const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
 
-        // Track note event
-        trackClientEvent(1, State.publicKey, signedEvent.id);
-
         Utils.showNotification('Note published!', 'success');
 
         // Clear form and close modal
@@ -6997,9 +6965,6 @@ export async function sendReplyDirect(replyToId, content) {
         console.log('  Combined publish relays:', publishRelays.length, publishRelays);
         await State.pool.publish(publishRelays, signedEvent);
 
-        // Track reply event
-        trackClientEvent(1, State.publicKey, signedEvent.id);
-
         Utils.showNotification('Reply published!', 'success');
 
         // Refresh feed to show new reply
@@ -7067,9 +7032,6 @@ export async function sendPostDirect(content) {
         Utils.addMentionTags(eventTemplate, eventTemplate.content);
         const signedEvent = await Utils.signEvent(eventTemplate);
         await State.pool.publish(Relays.getWriteRelays(), signedEvent);
-
-        // Track post event
-        trackClientEvent(1, State.publicKey, signedEvent.id);
 
         Utils.showNotification('Note published!', 'success');
 

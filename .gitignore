@@ -51,3 +51,8 @@ api/trigger-*.js
 # System files
 .DS_Store
 Thumbs.db
+
+nosmero-stats*
+nosmero-healthcheck*
+analytics.html
+test-client-tags.html
