@@ -51,6 +51,7 @@ Thumbs.db
 # Internal documentation (never push to GitHub)
 PENDING_FIXES.md
 
-# Dev-only files (never push to production or GitHub)
+nosmero-stats*
+nosmero-healthcheck*
 analytics.html
 test-client-tags.html
