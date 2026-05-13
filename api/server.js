@@ -4,7 +4,6 @@ import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { verifyTransactionProof, generateProofHash } from './verify.js';
 import fetch from 'node-fetch';
-import { initializeNewVoicesScheduler, getCachedNewVoices } from './new-voices-scheduler.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -420,30 +419,6 @@ app.get('/api/relatr/search', async (req, res) => {
     res.status(503).json({
       success: false,
       error: 'Relatr service unavailable'
-    });
-  }
-});
-
-// Relatr: New Voices endpoint (discovery feed for promising newcomers)
-app.get('/api/relatr/new-voices', async (req, res) => {
-  try {
-    const cache = await getCachedNewVoices();
-
-    res.json({
-      success: true,
-      voices: cache.voices || [],
-      count: cache.count || 0,
-      lastUpdate: cache.lastUpdate || 0,
-      cacheAge: cache.lastUpdate ? Date.now() - cache.lastUpdate : null
-    });
-
-  } catch (error) {
-    console.error('[NewVoices] Error serving cached voices:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load new voices',
-      voices: [],
-      count: 0
     });
   }
 });
@@ -1356,7 +1331,6 @@ Endpoints:
   GET  /api/relatr/trust-score/:pubkey  - Get trust score
   GET  /api/relatr/stats                - Get Relatr statistics
   GET  /api/relatr/search?q=<query>     - Search profiles
-  GET  /api/relatr/new-voices           - New Voices discovery feed
   GET  /api/trending                    - Get trending searches
   POST /api/trending                    - Log a search term
   POST /api/monero/rpc                  - Monero RPC proxy (wallet sync)
@@ -1385,9 +1359,6 @@ Relatr Server: ${RELATR_BASE_URL}
 
 Server started at: ${new Date().toISOString()}
   `);
-
-  // Initialize New Voices scheduler (runs daily at 2 AM)
-  initializeNewVoicesScheduler();
 });
 
 // Graceful shutdown

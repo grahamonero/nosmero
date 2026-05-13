@@ -1351,10 +1351,6 @@ async function loadTrendingFeedForNewUser() {
                     <a href="#" onclick="loadSearch(); return false;" style="color: #FF6600; text-decoration: underline; cursor: pointer; font-size: 14px;">
                         🔍 Search for users to follow
                     </a>
-                    <span style="color: #666; margin: 0 12px;">or</span>
-                    <a href="#" onclick="navigateTo('newvoices'); return false;" style="color: #8B5CF6; text-decoration: underline; cursor: pointer; font-size: 14px;">
-                        ✨ Discover New Voices
-                    </a>
                 </div>
             </div>
         `;
