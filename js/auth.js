@@ -43,10 +43,12 @@ function handlePinEnterKey(e) {
  * Called after keys are set in state and localStorage.
  */
 async function finalizeLogin() {
-    // Load user's NIP-65 relay list
+    // Load user's NIP-65 relay list. Prefer pubkey-keyed localStorage so the
+    // user's announced/local-only state survives a relogin on the same
+    // device; fall back to fetching from the network on a fresh device.
     try {
         const Relays = await import('./relays.js');
-        await Relays.importRelayList();
+        await Relays.loadUserRelayList();
     } catch (error) {
         console.error('Error loading NIP-65 relay list:', error);
     }

@@ -94,6 +94,12 @@ async function initializeApp() {
         RightPanel.init();
         console.log('✓ Right panel initialized');
 
+        // Kick off hash routing immediately so shared links (#note:..., #nevent1...)
+        // show "Loading thread..." in the right panel while the PIN modal is still
+        // up — otherwise the home feed + default right panel render first and the
+        // user sees a confusing flash before the note appears.
+        handleHashRouting();
+
         // Initialize theme toggle
         initializeThemeToggle();
         console.log('✓ Theme toggle initialized');
@@ -126,8 +132,8 @@ async function initializeApp() {
         console.log('- showLoginModal:', typeof window.showLoginModal);
         console.log('- logout:', typeof window.logout);
 
-        // Handle hash routing (for shared note links)
-        handleHashRouting();  // Check for #note:{noteId} URLs
+        // Hash routing now runs earlier (after RightPanel.init) so the thread
+        // loading state appears immediately rather than after feed render.
 
     } catch (error) {
         console.error('❌ App initialization failed:', error);
@@ -146,7 +152,7 @@ async function handleHashRouting() {
 
         // Wait for app to be fully initialized (user logged in, relays connected)
         const waitForReady = setInterval(() => {
-            if (State.publicKey && State.pool) {
+            if (State.pool) {
                 clearInterval(waitForReady);
                 console.log('✓ App ready, opening thread view for:', noteId);
                 window.openThreadView(noteId);
@@ -164,7 +170,7 @@ async function handleHashRouting() {
 
         // Wait for app to be fully initialized
         const waitForReady = setInterval(() => {
-            if (State.publicKey && State.pool) {
+            if (State.pool) {
                 clearInterval(waitForReady);
                 console.log('✓ App ready, opening profile view for:', pubkey);
                 window.viewUserProfilePage(pubkey);
@@ -187,7 +193,7 @@ async function handleHashRouting() {
                 const { nip19 } = window.NostrTools;
                 const decoded = nip19.decode(decodeURIComponent(raw));
                 const waitForReady = setInterval(() => {
-                    if (State.publicKey && State.pool) {
+                    if (State.pool) {
                         clearInterval(waitForReady);
                         if (decoded.type === 'nevent') {
                             window.openThreadView(decoded.data.id);
@@ -2861,6 +2867,96 @@ async function loadZapSettingsFromRelays() {
     }
 }
 
+// ==================== NIP-78 RELAY LIST SYNC ====================
+// Save/load the user's full relay list (read + write + announced whitelist) on
+// Nosmero's NIP-78 relay so the state follows the user across devices.
+// Kind 10002 is the public outbox declaration (announced subset only); this
+// NIP-78 event is the full local state including which relays are kept
+// local-only (in read/write but NOT in `announced`).
+
+async function saveRelayListToRelays() {
+    if (!State.publicKey || !State.getPrivateKeyForSigning()) {
+        throw new Error('User not authenticated');
+    }
+
+    const relayList = Relays.userRelayList;
+    console.log('💾 Saving relay list to NIP-78 relay...', {
+        read: relayList.read.length,
+        write: relayList.write.length,
+        announced: (relayList.announced || []).length
+    });
+
+    const event = {
+        kind: 30078,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+            ["d", "nosmero:relay-list"],
+            ["type", "relay_list"]
+        ],
+        content: JSON.stringify({
+            read: relayList.read,
+            write: relayList.write,
+            announced: relayList.announced || [],
+            updated_at: Math.floor(Date.now() / 1000),
+            app: "nosmero",
+            version: "1.0"
+        }),
+        pubkey: State.publicKey
+    };
+
+    const signedEvent = await Utils.signEvent(event);
+    const publishResults = await State.pool.publish(NIP78_STORAGE_RELAYS, signedEvent);
+    console.log('✅ Relay list saved to NIP-78 relay', publishResults);
+}
+
+async function loadRelayListFromRelays() {
+    if (!State.publicKey) return null;
+
+    console.log('📥 Loading relay list from NIP-78 relay...');
+    try {
+        const filter = {
+            kinds: [30078],
+            authors: [State.publicKey],
+            "#d": ["nosmero:relay-list"],
+            limit: 1
+        };
+
+        const events = await new Promise((resolve) => {
+            const found = [];
+            const sub = State.pool.subscribeMany(NIP78_STORAGE_RELAYS, [filter], {
+                onevent(event) { found.push(event); },
+                oneose() { sub.close(); resolve(found); }
+            });
+            setTimeout(() => { sub.close(); resolve(found); }, 2000);
+        });
+
+        if (events.length === 0) {
+            console.log('ℹ️ No relay list found on NIP-78 relay');
+            return null;
+        }
+
+        const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
+        const data = JSON.parse(latest.content);
+        if (!Array.isArray(data.read) || !Array.isArray(data.write)) {
+            console.warn('⚠️ NIP-78 relay-list event has bad shape, ignoring:', data);
+            return null;
+        }
+        // `announced` may be missing on older events — default to all read/write.
+        const announced = Array.isArray(data.announced)
+            ? data.announced
+            : [...new Set([...data.read, ...data.write])];
+        console.log('✅ Loaded relay list from NIP-78 relay', {
+            read: data.read.length,
+            write: data.write.length,
+            announced: announced.length
+        });
+        return { read: data.read, write: data.write, announced };
+    } catch (error) {
+        console.error('❌ Error loading relay list from NIP-78 relay:', error);
+        return null;
+    }
+}
+
 // Get Monero address for any user (with NIP-78 support for all users)
 async function getUserMoneroAddress(pubkey) {
     console.log('🔍 getUserMoneroAddress called for:', pubkey.slice(0, 8), 'isCurrentUser:', pubkey === State.publicKey);
@@ -3488,7 +3584,7 @@ function getDefaultBtcZapAmount() {
 
 // Share post (copy link to clipboard)
 function sharePost(postId) {
-    const url = `${window.location.origin}${window.location.pathname}#note:${postId}`;
+    const url = `${window.location.origin}/#note:${postId}`;
     navigator.clipboard.writeText(url).then(() => {
         Utils.showNotification('Note link copied to clipboard');
     }).catch(() => {
@@ -3510,6 +3606,7 @@ window.showNoteMenu = UI.showNoteMenu;
 window.copyPostLink = UI.copyPostLink;
 window.copyPostId = UI.copyPostId;
 window.copyPostJson = UI.copyPostJson;
+window.copyPostNevent = UI.copyPostNevent;
 window.viewPostSource = UI.viewPostSource;
 window.muteUser = UI.muteUser;
 window.reportPost = UI.reportPost;
@@ -3693,8 +3790,11 @@ window.addEventListener('DOMContentLoaded', () => {
     const validPages = ['home', 'search', 'messages', 'notifications', 'profile', 'settings', 'ipfs'];
     const initialPage = validPages.includes(path) ? path : 'home';
 
-    // Set initial state without creating new history entry
-    history.replaceState({ page: initialPage }, '', initialPage === 'home' ? '/' : `/${initialPage}`);
+    // Preserve hash so shared note/profile links (#note:..., #nevent1...) survive
+    // the replaceState — otherwise handleHashRouting reads an empty hash.
+    const hash = window.location.hash || '';
+    const newPath = initialPage === 'home' ? '/' : `/${initialPage}`;
+    history.replaceState({ page: initialPage }, '', newPath + hash);
 });
 
 // Close mobile menu when a nav item is clicked
@@ -4476,7 +4576,11 @@ async function saveSettings() {
         State.setNotificationSettings(notificationSettings);
         console.log('🔔 Notification settings saved:', notificationSettings);
 
-        // Publish NIP-65 relay list to network (kind 10002)
+        // Publish NIP-65 relay list to network (kind 10002 — announced subset),
+        // and sync the full relay state (incl. local-only relays + announced
+        // whitelist) to Nosmero's NIP-78 relay so it follows the user across
+        // devices. The kind 10002 publish is best-effort but cross-client
+        // critical; the NIP-78 save is best-effort but cross-device critical.
         try {
             const relayList = Relays.userRelayList;
             const published = await Relays.publishRelayList(relayList.read, relayList.write);
@@ -4484,6 +4588,11 @@ async function saveSettings() {
                 console.log('📡 NIP-65 relay list published to network');
             } else {
                 console.warn('⚠️ Failed to publish relay list to network');
+            }
+            try {
+                await saveRelayListToRelays();
+            } catch (nip78Error) {
+                console.error('❌ Error syncing relay list to NIP-78:', nip78Error);
             }
         } catch (error) {
             console.error('❌ Error publishing relay list:', error);
@@ -4566,38 +4675,74 @@ async function populateRelayLists() {
     const readRelays = Relays.getReadRelays();
     const writeRelays = Relays.getWriteRelays();
 
-    console.log('Read relays:', readRelays);
-    console.log('Write relays:', writeRelays);
+    const renderRow = (relay, accentBg, removeFn, withAnnounce) => {
+        const safeRelay = String(relay).replace(/"/g, '&quot;').replace(/'/g, "\\'");
+        const announceControl = withAnnounce
+            ? `<label title="Include this relay in your published NIP-65 announcement. Untick to keep it local-only (won't appear in nevent relay hints other clients generate)."
+                      style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: #ccc; cursor: pointer; white-space: nowrap;">
+                   <input type="checkbox" ${Relays.isRelayAdvertised(relay) ? 'checked' : ''}
+                          onchange="toggleRelayAdvertise('${safeRelay}', this.checked)"
+                          style="cursor: pointer;">
+                   Announce
+               </label>`
+            : '';
+        return `
+            <div style="display: flex; align-items: center; padding: 8px; background: ${accentBg}; border-radius: 6px; margin-bottom: 6px; gap: 8px;">
+                <span style="color: var(--text-primary); font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${safeRelay}</span>
+                ${announceControl}
+                <button onclick="${removeFn}('${safeRelay}')"
+                        style="background: #ff4444; border: none; border-radius: 4px; color: white; padding: 4px 8px; font-size: 12px; cursor: pointer;">
+                    Remove
+                </button>
+            </div>
+        `;
+    };
 
-    // Populate read relays list
     const readRelaysList = document.getElementById('readRelaysList');
     if (readRelaysList) {
-        readRelaysList.innerHTML = readRelays.map(relay => `
-            <div style="display: flex; align-items: center; justify-content: between; padding: 8px; background: rgba(255, 102, 0, 0.1); border-radius: 6px; margin-bottom: 6px;">
-                <span style="color: var(--text-primary); font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${relay}</span>
-                <button onclick="removeReadRelayFromModal('${relay}')"
-                        style="background: #ff4444; border: none; border-radius: 4px; color: white; padding: 4px 8px; font-size: 12px; cursor: pointer; margin-left: 8px;">
-                    Remove
-                </button>
-            </div>
-        `).join('');
+        readRelaysList.innerHTML = readRelays
+            .map(r => renderRow(r, 'rgba(255, 102, 0, 0.1)', 'removeReadRelayFromModal', false))
+            .join('');
     }
 
-    // Populate write relays list
     const writeRelaysList = document.getElementById('writeRelaysList');
     if (writeRelaysList) {
-        writeRelaysList.innerHTML = writeRelays.map(relay => `
-            <div style="display: flex; align-items: center; justify-content: between; padding: 8px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; margin-bottom: 6px;">
-                <span style="color: var(--text-primary); font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${relay}</span>
-                <button onclick="removeWriteRelayFromModal('${relay}')"
-                        style="background: #ff4444; border: none; border-radius: 4px; color: white; padding: 4px 8px; font-size: 12px; cursor: pointer; margin-left: 8px;">
-                    Remove
-                </button>
-            </div>
-        `).join('');
+        writeRelaysList.innerHTML = writeRelays
+            .map(r => renderRow(r, 'rgba(139, 92, 246, 0.1)', 'removeWriteRelayFromModal', true))
+            .join('');
     }
 
+    updateAdvertiseHint(writeRelays);
     console.log('✅ Relay lists populated');
+}
+
+// Show NIP-65 guidance when the user announces more than 4 write relays.
+// Only write relays drive the nevent-hint bloat the Announce toggle is meant
+// to address.
+function updateAdvertiseHint(writeRelays) {
+    const hintEl = document.getElementById('relayAdvertiseHint');
+    if (!hintEl) return;
+
+    const announced = writeRelays.filter(r => Relays.isRelayAdvertised(r)).length;
+
+    if (announced <= 4) {
+        hintEl.style.display = 'none';
+        return;
+    }
+
+    hintEl.style.display = 'block';
+    hintEl.innerHTML = `💡 NIP-65 recommends keeping write relays to 2–4 (you have ${announced} announced). Other clients pack your announced write relays into shareable <code>nevent</code> references — longer lists make those references too long for IRC and similar protocols. Untick <strong>Announce</strong> on relays you only use locally.`;
+}
+
+async function toggleRelayAdvertise(url, advertise) {
+    try {
+        Relays.setRelayAdvertise(url, advertise);
+        // Re-render to refresh the guidance hint (cheap; lists are small).
+        await populateRelayLists();
+    } catch (error) {
+        console.error('Failed to toggle relay advertise flag:', error);
+        Utils.showNotification('Could not update relay setting', 'error');
+    }
 }
 
 // Populate muted users list in Settings modal
@@ -4958,6 +5103,8 @@ window.showPrimaryAddress = showPrimaryAddress;
 
 // Export saveMoneroAddressToRelays for wallet-modal subaddress rotation
 window.saveMoneroAddressToRelays = saveMoneroAddressToRelays;
+window.loadRelayListFromRelays = loadRelayListFromRelays;
+window.saveRelayListToRelays = saveRelayListToRelays;
 
 // Override loadSettings to use modal approach
 window.loadSettings = loadSettings;
@@ -4973,6 +5120,7 @@ window.addWriteRelay = addWriteRelay;
 window.removeReadRelayFromModal = removeReadRelayFromModal;
 window.removeWriteRelayFromModal = removeWriteRelayFromModal;
 window.populateRelayLists = populateRelayLists;
+window.toggleRelayAdvertise = toggleRelayAdvertise;
 
 // Make edit profile functions available globally
 window.showEditProfileModal = showEditProfileModal;

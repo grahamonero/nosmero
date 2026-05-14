@@ -95,9 +95,15 @@ export const getUserDataRelays = () => {
 };
 
 // User's relay configuration (NIP-65)
+// `announced` is the whitelist of relay URLs that get published in the user's
+// kind 10002 NIP-65 announcement. Relays in read/write but NOT in announced are
+// still used locally for reading/publishing — they just aren't broadcast as
+// part of the user's outbox declaration. Per NIP-65 spec, keep this small
+// (2–4 per category) so nevent relay hints stay short and shareable.
 export let userRelayList = {
     read: [...DEFAULT_RELAYS],
-    write: [...DEFAULT_RELAYS]
+    write: [...DEFAULT_RELAYS],
+    announced: [...DEFAULT_RELAYS]
 };
 
 // Performance tracking for relays
@@ -403,14 +409,22 @@ export function parseRelayList(event) {
 // Publish user's relay list (NIP-65)
 export async function publishRelayList(readRelays, writeRelays) {
     console.log('📤 Publishing NIP-65 relay list...');
-    console.log('Read relays:', readRelays);
-    console.log('Write relays:', writeRelays);
+
+    // Only relays in the `announced` whitelist go into kind 10002.
+    const announced = new Set(userRelayList.announced || []);
+    const advertisedRead = readRelays.filter(url => announced.has(url));
+    const advertisedWrite = writeRelays.filter(url => announced.has(url));
+
+    console.log('Advertised read relays:', advertisedRead);
+    console.log('Advertised write relays:', advertisedWrite);
+    const excluded = [...readRelays, ...writeRelays].filter(url => !announced.has(url));
+    if (excluded.length) console.log('Local-only (not announced):', [...new Set(excluded)]);
 
     const tags = [];
     const processedRelays = new Set();
 
     // Find relays that are in BOTH read and write lists
-    const bothRelays = readRelays.filter(url => writeRelays.includes(url));
+    const bothRelays = advertisedRead.filter(url => advertisedWrite.includes(url));
     console.log('Relays in both lists (no permission marker):', bothRelays);
 
     // Add relays that are in BOTH lists (no third element)
@@ -420,7 +434,7 @@ export async function publishRelayList(readRelays, writeRelays) {
     });
 
     // Add read-only relays (not in write list)
-    readRelays.forEach(url => {
+    advertisedRead.forEach(url => {
         if (!processedRelays.has(url)) {
             tags.push(['r', url, 'read']);
             processedRelays.add(url);
@@ -428,7 +442,7 @@ export async function publishRelayList(readRelays, writeRelays) {
     });
 
     // Add write-only relays (not in read list)
-    writeRelays.forEach(url => {
+    advertisedWrite.forEach(url => {
         if (!processedRelays.has(url)) {
             tags.push(['r', url, 'write']);
             processedRelays.add(url);
@@ -483,34 +497,85 @@ export function updateActiveRelays() {
     }
 }
 
-// Load user's relay list from localStorage or fetch from relays
-export async function loadUserRelayList() {
-    // Try localStorage first
-    const stored = localStorage.getItem('user-relay-list');
-    if (stored) {
-        try {
-            userRelayList = JSON.parse(stored);
-            updateActiveRelays();
-            return;
-        } catch (error) {
-            console.error('Error parsing stored relay list:', error);
-        }
+// localStorage key for the relay list. Pubkey-keyed when logged in so that
+// the user's relay state (including which relays are in the `announced`
+// whitelist) survives a logout/login round-trip on the same device, and so
+// different accounts don't share state.
+function relayStorageKey() {
+    return State.publicKey ? `user-relay-list:${State.publicKey}` : 'user-relay-list';
+}
+
+// Read from localStorage and apply to userRelayList. Returns true if data
+// was found, false otherwise. NOTE: the anonymous→pubkey-keyed migration was
+// removed 2026-05-14 because it incorrectly adopted defaults written by an
+// anonymous page visit as the user's data on first login on a new machine,
+// blocking NIP-65 / NIP-78 network fetch forever.
+function hydrateFromStorage() {
+    const key = relayStorageKey();
+    const stored = localStorage.getItem(key);
+    if (!stored) return false;
+    try {
+        const parsed = JSON.parse(stored);
+        const read = parsed.read || [];
+        const write = parsed.write || [];
+        // Missing `announced` field defaults to every read/write URL announced.
+        const announced = Array.isArray(parsed.announced)
+            ? parsed.announced
+            : [...new Set([...read, ...write])];
+
+        userRelayList = { read, write, announced };
+        updateActiveRelays();
+        return true;
+    } catch (error) {
+        console.error('Error parsing stored relay list:', error);
+        return false;
     }
-    
-    // Try to fetch from network if we have a public key
-    if (State.publicKey) {
-        const fetched = await fetchUserRelayList(State.publicKey);
-        if (fetched && (fetched.read.length > 0 || fetched.write.length > 0)) {
-            userRelayList = fetched;
-            localStorage.setItem('user-relay-list', JSON.stringify(userRelayList));
-            updateActiveRelays();
+}
+
+// Load user's relay list. NIP-78 is the cross-device source of truth and is
+// ALWAYS consulted when logged in, so changes on Machine A propagate to
+// Machine B on next login. localStorage is a fast-path bootstrap that gets
+// overwritten when NIP-78 returns data; if NIP-78 is unreachable, the cache
+// keeps the user functional. Kind 10002 is the last resort for accounts that
+// have never written to NIP-78.
+export async function loadUserRelayList() {
+    const hadCache = hydrateFromStorage();
+    if (!State.publicKey) return;
+
+    // Always consult NIP-78 — it has the user's full state across devices.
+    try {
+        const fromNip78 = await window.loadRelayListFromRelays?.();
+        if (fromNip78 && (fromNip78.read.length > 0 || fromNip78.write.length > 0)) {
+            userRelayList = {
+                read: fromNip78.read,
+                write: fromNip78.write,
+                announced: fromNip78.announced
+            };
+            saveUserRelayList();
+            return;
         }
+    } catch (error) {
+        console.error('NIP-78 relay-list lookup failed, falling back to cache/kind 10002:', error);
+    }
+
+    // NIP-78 had no data. If we hydrated from localStorage, keep that.
+    if (hadCache) return;
+
+    // No cache + no NIP-78: try kind 10002 as last resort.
+    const fetched = await fetchUserRelayList(State.publicKey);
+    if (fetched && (fetched.read.length > 0 || fetched.write.length > 0)) {
+        userRelayList = {
+            read: fetched.read,
+            write: fetched.write,
+            announced: Array.from(new Set([...fetched.read, ...fetched.write]))
+        };
+        saveUserRelayList();
     }
 }
 
 // Save user relay list to localStorage
 export function saveUserRelayList() {
-    localStorage.setItem('user-relay-list', JSON.stringify(userRelayList));
+    localStorage.setItem(relayStorageKey(), JSON.stringify(userRelayList));
     updateActiveRelays();
 }
 
@@ -531,6 +596,9 @@ export function addReadRelay(url) {
     
     if (!userRelayList.read.includes(url)) {
         userRelayList.read.push(url);
+        // New relays default to announced (positive default — user can untick).
+        if (!userRelayList.announced) userRelayList.announced = [];
+        if (!userRelayList.announced.includes(url)) userRelayList.announced.push(url);
         saveUserRelayList();
         return true;
     }
@@ -542,9 +610,12 @@ export function addWriteRelay(url) {
     if (!url || (!url.startsWith('wss://') && !url.startsWith('ws://'))) {
         throw new Error('Relay URL must start with wss:// or ws://');
     }
-    
+
     if (!userRelayList.write.includes(url)) {
         userRelayList.write.push(url);
+        // New relays default to announced (positive default — user can untick).
+        if (!userRelayList.announced) userRelayList.announced = [];
+        if (!userRelayList.announced.includes(url)) userRelayList.announced.push(url);
         saveUserRelayList();
         return true;
     }
@@ -556,6 +627,7 @@ export function removeReadRelay(url) {
     const index = userRelayList.read.indexOf(url);
     if (index > -1) {
         userRelayList.read.splice(index, 1);
+        cleanupAnnounced();
         saveUserRelayList();
         return true;
     }
@@ -567,24 +639,53 @@ export function removeWriteRelay(url) {
     const index = userRelayList.write.indexOf(url);
     if (index > -1) {
         userRelayList.write.splice(index, 1);
+        cleanupAnnounced();
         saveUserRelayList();
         return true;
     }
     return false; // Not found
 }
 
+// Toggle whether a relay appears in the user's kind 10002 announcement.
+// `advertise=true` adds to the announced whitelist; `false` removes it.
+export function setRelayAdvertise(url, advertise) {
+    if (!userRelayList.announced) userRelayList.announced = [];
+    const idx = userRelayList.announced.indexOf(url);
+    if (advertise) {
+        if (idx === -1) userRelayList.announced.push(url);
+    } else {
+        if (idx > -1) userRelayList.announced.splice(idx, 1);
+    }
+    saveUserRelayList();
+}
+
+export function isRelayAdvertised(url) {
+    return (userRelayList.announced || []).includes(url);
+}
+
+// Drop entries from `announced` that are no longer in either read or write.
+function cleanupAnnounced() {
+    if (!userRelayList.announced || userRelayList.announced.length === 0) return;
+    const inUse = new Set([...userRelayList.read, ...userRelayList.write]);
+    userRelayList.announced = userRelayList.announced.filter(url => inUse.has(url));
+}
+
 // Reset to default relays
 export function resetToDefaultRelays() {
     userRelayList.read = [...DEFAULT_RELAYS];
     userRelayList.write = [...DEFAULT_RELAYS];
+    userRelayList.announced = [...DEFAULT_RELAYS];
     saveUserRelayList();
 }
 
-// Force reset to default relays for new users (clears localStorage)
+// Force reset to default relays. Used between user sessions to scrub the
+// previous user's anonymous-keyed data out of memory and storage.
+// Pubkey-keyed entries are intentionally left alone — they belong to that
+// account and will be re-hydrated on next login for that account.
 export function forceResetToDefaultRelays() {
     console.log('🔄 Force resetting to default public relays for new user');
 
-    // Clear any stored relay preferences
+    // Clear any anonymous-scoped relay storage (legacy + current).
     localStorage.removeItem('user-relay-list');
     localStorage.removeItem('user-relay-list-read');
     localStorage.removeItem('user-relay-list-write');
@@ -592,6 +693,7 @@ export function forceResetToDefaultRelays() {
     // Reset relay configuration to defaults
     userRelayList.read = [...DEFAULT_RELAYS];
     userRelayList.write = [...DEFAULT_RELAYS];
+    userRelayList.announced = [...DEFAULT_RELAYS];
 
     // Update active relays to defaults
     updateActiveRelays();
@@ -599,15 +701,37 @@ export function forceResetToDefaultRelays() {
     console.log('✅ Relays reset to defaults:', { read: userRelayList.read, write: userRelayList.write });
 }
 
-// Import relay list from user's NIP-65 profile
+// Import relay list from user's NIP-65 profile. Merges with local state so
+// local-only relays (in read/write but not in `announced`) the user added on
+// this device aren't wiped — those URLs are by definition never in the
+// network kind 10002 event.
 export async function importRelayList() {
     if (!State.publicKey) {
         throw new Error('Please login first');
     }
-    
+
     const fetched = await fetchUserRelayList(State.publicKey);
     if (fetched && (fetched.read.length > 0 || fetched.write.length > 0)) {
-        userRelayList = fetched;
+        const announced = userRelayList.announced || [];
+        // Local-only = present in read/write but NOT in announced.
+        const localOnlyReads = (userRelayList.read || []).filter(url => !announced.includes(url));
+        const localOnlyWrites = (userRelayList.write || []).filter(url => !announced.includes(url));
+
+        const mergedRead = Array.from(new Set([...fetched.read, ...localOnlyReads]));
+        const mergedWrite = Array.from(new Set([...fetched.write, ...localOnlyWrites]));
+
+        userRelayList = {
+            read: mergedRead,
+            write: mergedWrite,
+            // Announced set is everything fetched from kind 10002 — the user has
+            // already declared those as announced — plus any existing announced
+            // entries still in the merged read/write set.
+            announced: Array.from(new Set([
+                ...fetched.read,
+                ...fetched.write,
+                ...announced.filter(url => mergedRead.includes(url) || mergedWrite.includes(url))
+            ]))
+        };
         saveUserRelayList();
         return true;
     }

@@ -656,7 +656,7 @@ export function showNoteMenu(postId, event) {
 export function copyPostLink() {
     if (!currentMenuPostId) return;
 
-    const url = `${window.location.origin}${window.location.pathname}#note:${currentMenuPostId}`;
+    const url = `${window.location.origin}/#note:${currentMenuPostId}`;
     navigator.clipboard.writeText(url).then(() => {
         if (typeof showNotification === 'function') {
             showNotification('Note link copied to clipboard');
@@ -713,6 +713,38 @@ export async function copyPostJson() {
         console.error('Error copying post JSON:', error);
         if (typeof showNotification === 'function') {
             showNotification('Failed to copy JSON', 'error');
+        }
+    }
+
+    document.getElementById('postMenu').style.display = 'none';
+}
+
+export async function copyPostNevent() {
+    if (!currentMenuPostId) return;
+
+    try {
+        const State = await import('../state.js');
+        const { userRelayList } = await import('../relays.js');
+        const post = State.eventCache[currentMenuPostId] || State.posts.find(p => p.id === currentMenuPostId);
+
+        const announced = new Set(userRelayList.announced || []);
+        const announcedWrites = (userRelayList.write || []).filter(url => announced.has(url));
+        const relayHints = announcedWrites.slice(0, 3);
+
+        const nevent = window.NostrTools.nip19.neventEncode({
+            id: currentMenuPostId,
+            author: post?.pubkey,
+            relays: relayHints
+        });
+
+        await navigator.clipboard.writeText(nevent);
+        if (typeof showNotification === 'function') {
+            showNotification('nevent copied to clipboard');
+        }
+    } catch (error) {
+        console.error('Error copying nevent:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to copy nevent', 'error');
         }
     }
 
