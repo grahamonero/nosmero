@@ -69,13 +69,24 @@ export function clearHomeFeedState() {
 export function getFeedAuthors() {
     // If user is logged in, get their following list
     if (State.publicKey && State.followingUsers && State.followingUsers.size > 0) {
-        const followingArray = Array.from(State.followingUsers);
-        return followingArray;
+        return appendOwnPubkeyIfEnabled(Array.from(State.followingUsers));
     }
 
     // Anonymous users or users not following anyone see curated authors
     const curatedAuthors = Utils.getCuratedAuthors();
     return curatedAuthors;
+}
+
+// Append the user's own pubkey to a following-list-derived authors array when
+// the "show own notes in Following" toggle is enabled (default: true). Returns
+// a new array; never mutates the input. No-op for anonymous users or when the
+// own pubkey is already in the set (e.g. user follows themselves).
+function appendOwnPubkeyIfEnabled(authors) {
+    if (!State.publicKey) return authors;
+    const showOwnNotes = localStorage.getItem('show-own-notes-in-following') !== 'false';
+    if (!showOwnNotes) return authors;
+    if (authors.includes(State.publicKey)) return authors;
+    return [...authors, State.publicKey];
 }
 
 // Load main feed with streaming approach
@@ -2046,7 +2057,7 @@ async function renderFeedFromCache() {
     if (currentFollowingList.size === 0) return;
 
     try {
-        const followingArray = Array.from(currentFollowingList);
+        const followingArray = appendOwnPubkeyIfEnabled(Array.from(currentFollowingList));
 
         // Load cached profiles + events in parallel
         const [cachedProfiles, cachedEvents] = await Promise.all([
@@ -2096,7 +2107,7 @@ async function streamRelayPosts() {
         return;
     }
 
-    const followingArray = Array.from(currentFollowingList);
+    const followingArray = appendOwnPubkeyIfEnabled(Array.from(currentFollowingList));
     const readRelays = Relays.getUserDataRelays();
     const INITIAL_LIMIT = 200; // Generous limit to catch multiple users
 
@@ -2885,7 +2896,7 @@ async function fetchMorePostsInBackground() {
     isBackgroundFetching = true;
     console.log('🔄 Starting background fetch for more posts...');
 
-    const followingArray = Array.from(currentFollowingList);
+    const followingArray = appendOwnPubkeyIfEnabled(Array.from(currentFollowingList));
     const readRelays = Relays.getUserDataRelays();
     const FETCH_LIMIT = 200;
 

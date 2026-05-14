@@ -351,6 +351,14 @@
             </div>
         </div>
 
+        <!-- Quick-toggle chip: only visible when Following feed is active -->
+        <div id="followingFeedChip" style="display: none; padding: 8px 16px; border-bottom: 1px solid #222; background: rgba(255, 102, 0, 0.03);">
+            <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #ccc; cursor: pointer;">
+                <input type="checkbox" id="followingChipShowOwn" checked onchange="toggleShowOwnNotesInFollowing(this.checked, true)" style="cursor: pointer;">
+                <span>Show my own notes in this feed</span>
+            </label>
+        </div>
+
         <div class="feed" id="feed">
             <!-- Welcome Banner for First-Time Anonymous Users -->
             <div class="welcome-banner hidden" id="welcomeBanner">
@@ -1004,6 +1012,23 @@
             </div>
 
             <div class="settings-section">
+                <h3>📰 Feed</h3>
+
+                <div class="trust-badges-toggle" style="margin-bottom: 16px;">
+                    <div>
+                        <div class="trust-badges-label">Show my own notes in Following feed</div>
+                        <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                            Include posts you publish in the timeline alongside accounts you follow
+                        </div>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="showOwnNotesInFollowing" checked onchange="toggleShowOwnNotesInFollowing(this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-section">
                 <h3>Notifications</h3>
                 <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Choose which types of notifications to receive</p>
                 <div style="display: grid; gap: 12px;">
@@ -1232,12 +1257,11 @@
 
                     <div style="padding: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px;">
                         <div style="font-size: 12px; color: #aaa; line-height: 1.6;">
-                            <strong style="color: #10B981;">🔐 Privacy-First Verification</strong><br>
+                            <strong style="color: #10B981;">🔍 Public Blockchain Verification</strong><br>
                             Your transaction details (TXID & tx_key) will be:<br>
                             • Verified instantly against the Monero blockchain<br>
-                            • Proof hash published publicly (not the TXID or tx_key)<br>
-                            • Never stored in logs or databases<br>
-                            • Discarded immediately after verification
+                            • Published as tags on a public kind 9736 tip event<br>
+                            • Anyone can re-verify the amount via Monero's check_tx_key
                         </div>
                     </div>
                 </div>
