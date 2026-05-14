@@ -1702,7 +1702,7 @@ export async function submitDisclosurePrompt() {
 
     let verificationData = null;
 
-    // Option C: Verification required (proofs sent via DM)
+    // Option C: Verification required (publishes kind 9736 with txid+tx_key tags)
     if (disclosureType === 'verify') {
         const txidInput = document.getElementById('verificationTxid');
         const txKeyInput = document.getElementById('verificationTxKey');

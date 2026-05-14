@@ -509,6 +509,20 @@ async function startApplication() {
             console.error('❌ Error loading NIP-51 lists from relay:', error);
         }
 
+        // Load feed preferences from NIP-78 relay (cross-device sync of toggles
+        // like "show own notes in Following"). Falls back to localStorage default.
+        try {
+            const feedPrefs = await loadFeedPrefsFromRelays();
+            if (feedPrefs && typeof feedPrefs.show_own_notes_in_following === 'boolean') {
+                localStorage.setItem('show-own-notes-in-following', feedPrefs.show_own_notes_in_following.toString());
+                const chipBox = document.getElementById('followingChipShowOwn');
+                if (chipBox) chipBox.checked = feedPrefs.show_own_notes_in_following;
+                console.log('📰 Loaded feed prefs from relay:', feedPrefs);
+            }
+        } catch (error) {
+            console.error('❌ Error loading feed prefs from relay:', error);
+        }
+
         // Fetch notifications and messages in background to populate badges
         // Add small delays to avoid competing with home feed loading
         setTimeout(() => {
@@ -2141,6 +2155,15 @@ function updateUIForLogin() {
     if (typeof window.updateHeaderUIForAuthState === 'function') {
         window.updateHeaderUIForAuthState();
     }
+
+    // Surface the Following quick-toggle chip now that we have a logged-in
+    // user — hidden by default at page load to avoid showing it to anonymous
+    // users (who are redirected to Trending on the Following tab).
+    const followingChip = document.getElementById('followingFeedChip');
+    const followingTab = document.querySelector('.feed-tab[data-feed="following"]');
+    if (followingChip && followingTab && followingTab.classList.contains('active')) {
+        followingChip.style.display = 'block';
+    }
 }
 
 // Update UI for logged out state
@@ -2163,6 +2186,10 @@ function updateUIForLogout() {
     if (typeof window.updateHeaderUIForAuthState === 'function') {
         window.updateHeaderUIForAuthState();
     }
+
+    // Hide the Following quick-toggle chip — anonymous users land on Trending.
+    const followingChip = document.getElementById('followingFeedChip');
+    if (followingChip) followingChip.style.display = 'none';
 }
 
 // Make auth UI functions available globally
@@ -2953,6 +2980,68 @@ async function loadRelayListFromRelays() {
         return { read: data.read, write: data.write, announced };
     } catch (error) {
         console.error('❌ Error loading relay list from NIP-78 relay:', error);
+        return null;
+    }
+}
+
+// ==================== NIP-78 FEED PREFERENCES SYNC ====================
+// Stores small per-user feed preferences (e.g. show-own-notes-in-following)
+// under a dedicated d-tag so future feed prefs can be added without colliding
+// with payment or relay-list state.
+
+async function saveFeedPrefsToRelays(prefs) {
+    if (!State.publicKey || !State.getPrivateKeyForSigning()) {
+        throw new Error('User not authenticated');
+    }
+
+    const event = {
+        kind: 30078,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+            ["d", "nosmero:feed-prefs"],
+            ["type", "feed_preferences"]
+        ],
+        content: JSON.stringify({
+            ...prefs,
+            updated_at: Math.floor(Date.now() / 1000),
+            app: "nosmero",
+            version: "1.0"
+        }),
+        pubkey: State.publicKey
+    };
+
+    const signedEvent = await Utils.signEvent(event);
+    const publishResults = await State.pool.publish(NIP78_STORAGE_RELAYS, signedEvent);
+    console.log('✅ Feed prefs saved to NIP-78 relay', publishResults);
+}
+
+async function loadFeedPrefsFromRelays() {
+    if (!State.publicKey) return null;
+
+    try {
+        const filter = {
+            kinds: [30078],
+            authors: [State.publicKey],
+            "#d": ["nosmero:feed-prefs"],
+            limit: 1
+        };
+
+        const events = await new Promise((resolve) => {
+            const found = [];
+            const sub = State.pool.subscribeMany(NIP78_STORAGE_RELAYS, [filter], {
+                onevent(event) { found.push(event); },
+                oneose() { sub.close(); resolve(found); }
+            });
+            setTimeout(() => { sub.close(); resolve(found); }, 1500);
+        });
+
+        if (events.length === 0) return null;
+
+        const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
+        const data = JSON.parse(latest.content);
+        return data;
+    } catch (error) {
+        console.error('❌ Error loading feed prefs from NIP-78 relay:', error);
         return null;
     }
 }
@@ -4322,6 +4411,14 @@ async function populateSettingsForm() {
             }
         });
 
+        // Populate "show own notes in Following" toggle (default: true)
+        const showOwnNotesToggle = document.getElementById('showOwnNotesInFollowing');
+        if (showOwnNotesToggle) {
+            const showOwnNotes = localStorage.getItem('show-own-notes-in-following') !== 'false';
+            showOwnNotesToggle.checked = showOwnNotes;
+            console.log('📰 Show own notes in Following:', showOwnNotes);
+        }
+
         // Populate relay lists
         await populateRelayLists();
 
@@ -4575,6 +4672,20 @@ async function saveSettings() {
         });
         State.setNotificationSettings(notificationSettings);
         console.log('🔔 Notification settings saved:', notificationSettings);
+
+        // Save "show own notes in Following" preference + NIP-78 cross-device sync
+        const showOwnNotesToggle = document.getElementById('showOwnNotesInFollowing');
+        if (showOwnNotesToggle) {
+            const showOwnNotes = showOwnNotesToggle.checked;
+            localStorage.setItem('show-own-notes-in-following', showOwnNotes.toString());
+            console.log('📰 Saved show-own-notes-in-following:', showOwnNotes);
+            try {
+                await saveFeedPrefsToRelays({ show_own_notes_in_following: showOwnNotes });
+                console.log('✅ Feed prefs published to NIP-78 relay');
+            } catch (error) {
+                console.error('❌ Error publishing feed prefs to relay:', error);
+            }
+        }
 
         // Publish NIP-65 relay list to network (kind 10002 — announced subset),
         // and sync the full relay state (incl. local-only relays + announced
@@ -5278,6 +5389,36 @@ window.toggleShareData = function(enabled) {
     console.log('Share data with Relatr ' + (enabled ? 'enabled' : 'disabled'));
 };
 
+// Toggle "show own notes in Following feed". Called from both the Settings
+// page toggle and the quick-toggle chip on the Following feed. Mirrors state
+// between the two checkboxes, persists to localStorage, fires NIP-78 sync,
+// and reloads the Following feed if it's currently active.
+window.toggleShowOwnNotesInFollowing = function(enabled, fromChip) {
+    localStorage.setItem('show-own-notes-in-following', enabled.toString());
+    console.log('📰 Show own notes in Following:', enabled);
+
+    // Mirror state between Settings toggle and chip checkbox
+    const settingsToggle = document.getElementById('showOwnNotesInFollowing');
+    const chipToggle = document.getElementById('followingChipShowOwn');
+    if (settingsToggle && settingsToggle.checked !== enabled) settingsToggle.checked = enabled;
+    if (chipToggle && chipToggle.checked !== enabled) chipToggle.checked = enabled;
+
+    // NIP-78 sync — fire-and-forget; localStorage is the authoritative
+    // local source and the chip flip is a quick interaction.
+    saveFeedPrefsToRelays({ show_own_notes_in_following: enabled }).catch(err => {
+        console.warn('⚠️ Failed to sync feed prefs to NIP-78:', err);
+    });
+
+    // If we're currently looking at the Following feed, reload so the
+    // change is immediately visible. The chip lives only on Following so
+    // a chip-driven flip always means we're on Following.
+    const followingTab = document.querySelector('.feed-tab[data-feed="following"]');
+    const onFollowing = fromChip || (followingTab && followingTab.classList.contains('active'));
+    if (onFollowing && Posts && typeof Posts.loadStreamingHomeFeed === 'function') {
+        Posts.loadStreamingHomeFeed();
+    }
+};
+
 // Legacy function - kept for backward compatibility
 window.toggleTrustBadges = function(enabled) {
     toggleWebOfTrust(enabled);
@@ -5311,10 +5452,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     optionsContainer.style.opacity = webOfTrustEnabled ? '1' : '0.5';
                     optionsContainer.style.pointerEvents = webOfTrustEnabled ? 'auto' : 'none';
                 }
+
+                // Sync the "show own notes in Following" toggle (default: true)
+                const showOwnNotesToggle = document.getElementById('showOwnNotesInFollowing');
+                if (showOwnNotesToggle) {
+                    showOwnNotesToggle.checked = localStorage.getItem('show-own-notes-in-following') !== 'false';
+                }
             }
         });
         observer.observe(settingsPage, { attributes: true, attributeFilter: ['style'] });
     }
+
+    // On initial page load the chip stays hidden — startApplication() will
+    // surface it after login completes via the same path handleFeedTabClick
+    // uses (so anonymous users never see it). We still sync the chip's
+    // checked state here so the first render after login is correct.
+    const chipBox = document.getElementById('followingChipShowOwn');
+    if (chipBox) chipBox.checked = localStorage.getItem('show-own-notes-in-following') !== 'false';
 });
 
 // ==================== DEBUG FUNCTION ====================

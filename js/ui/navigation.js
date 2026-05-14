@@ -164,6 +164,19 @@ export async function handleFeedTabClick(feedType, event) {
     });
     event.target.classList.add('active');
 
+    // Show the Following quick-toggle chip only on the Following feed for
+    // logged-in users (anonymous users get redirected to Trending), and sync
+    // its checked state from localStorage each time we land there.
+    const followingChip = document.getElementById('followingFeedChip');
+    if (followingChip) {
+        const showChip = feedType === 'following' && !!StateModule.publicKey;
+        followingChip.style.display = showChip ? 'block' : 'none';
+        if (showChip) {
+            const chipBox = document.getElementById('followingChipShowOwn');
+            if (chipBox) chipBox.checked = localStorage.getItem('show-own-notes-in-following') !== 'false';
+        }
+    }
+
     // Ensure Posts module is loaded
     const PostsModule = await ensurePostsLoaded();
 

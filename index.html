@@ -326,6 +326,14 @@
             </div>
         </div>
 
+        <!-- Quick-toggle chip: only visible when Following feed is active -->
+        <div id="followingFeedChip" style="display: none; padding: 8px 16px; border-bottom: 1px solid #222; background: rgba(255, 102, 0, 0.03);">
+            <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #ccc; cursor: pointer;">
+                <input type="checkbox" id="followingChipShowOwn" checked onchange="toggleShowOwnNotesInFollowing(this.checked, true)" style="cursor: pointer;">
+                <span>Show my own notes in this feed</span>
+            </label>
+        </div>
+
         <div class="feed" id="feed">
             <!-- Welcome Banner for First-Time Anonymous Users -->
             <div class="welcome-banner hidden" id="welcomeBanner">
@@ -615,6 +623,23 @@
                         <p style="color: #ccc; font-size: 12px; margin: 0;">
                             Trust scores are calculated based on social graph distance, NIP-05 verification, Lightning addresses, and relay list publication. Scores range from 0-100, with higher scores indicating more trusted users.
                         </p>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>📰 Feed</h3>
+
+                    <div class="trust-badges-toggle" style="margin-bottom: 16px;">
+                        <div>
+                            <div class="trust-badges-label">Show my own notes in Following feed</div>
+                            <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                                Include posts you publish in the timeline alongside accounts you follow
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="showOwnNotesInFollowing" checked onchange="toggleShowOwnNotesInFollowing(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
                     </div>
                 </div>
 
@@ -1201,7 +1226,7 @@
                                style="margin-right: 12px; margin-top: 4px;">
                         <div style="flex: 1;">
                             <div style="font-weight: 600; font-size: 15px; color: #10B981; margin-bottom: 4px;">✓ Disclose + Verify</div>
-                            <div style="font-size: 13px; color: #999;">Cryptographically verified with blockchain proof. Transaction details sent privately to recipient via encrypted DM.</div>
+                            <div style="font-size: 13px; color: #999;">Cryptographically verified with blockchain proof. Verified badge displayed publicly on the note.</div>
                         </div>
                     </div>
                 </label>
@@ -1235,12 +1260,11 @@
 
                     <div style="padding: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px;">
                         <div style="font-size: 12px; color: #aaa; line-height: 1.6;">
-                            <strong style="color: #10B981;">🔐 Privacy-First Verification</strong><br>
+                            <strong style="color: #10B981;">🔍 Public Blockchain Verification</strong><br>
                             Your transaction details (TXID & tx_key) will be:<br>
                             • Verified instantly against the Monero blockchain<br>
-                            • Sent privately to the recipient via encrypted DM (NIP-17)<br>
-                            • Never stored in logs or published publicly<br>
-                            • Discarded immediately after verification
+                            • Published as tags on a public kind 9736 tip event<br>
+                            • Anyone can re-verify the amount via Monero's check_tx_key
                         </div>
                     </div>
                 </div>
