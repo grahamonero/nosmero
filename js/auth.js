@@ -293,7 +293,7 @@ export async function loginWithNsec() {
         // Load user's NIP-65 relay list after successful login
         try {
             const Relays = await import('./relays.js');
-            await Relays.importRelayList();
+            await Relays.loadUserRelayList();
         } catch (error) {
             console.error('Error loading NIP-65 relay list:', error);
         }
@@ -419,7 +419,7 @@ export async function completeLoginWithNsec(nsec, displayName = null, options = 
         // Load user's NIP-65 relay list
         try {
             const Relays = await import('./relays.js');
-            await Relays.importRelayList();
+            await Relays.loadUserRelayList();
         } catch (error) {
             console.error('Error loading NIP-65 relay list:', error);
         }
@@ -500,7 +500,7 @@ export async function loginWithExtension() {
             const Relays = await import('./relays.js');
             console.log('📡 Relays module imported');
             console.log('📡 State.publicKey after module import:', State.publicKey);
-            await Relays.importRelayList();
+            await Relays.loadUserRelayList();
         } catch (error) {
             console.error('Error loading NIP-65 relay list:', error);
         }
@@ -587,7 +587,7 @@ export async function loginWithAmber() {
         // Load user's NIP-65 relay list after successful login
         try {
             const Relays = await import('./relays.js');
-            await Relays.importRelayList();
+            await Relays.loadUserRelayList();
         } catch (error) {
             console.error('Error loading NIP-65 relay list:', error);
         }
@@ -672,10 +672,11 @@ export async function initNostrLogin() {
 
                 showNotification('nsec.app login successful!', 'success');
 
-                // Load user's NIP-65 relay list after successful login
+                // Load user's NIP-65 relay list. Prefer pubkey-keyed
+                // localStorage so local-only relays survive relogin.
                 try {
                     const Relays = await import('./relays.js');
-                    await Relays.importRelayList();
+                    await Relays.loadUserRelayList();
                 } catch (error) {
                     console.error('Error loading NIP-65 relay list:', error);
                 }

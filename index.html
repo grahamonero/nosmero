@@ -834,23 +834,26 @@
 
             <div class="settings-section">
                 <h3>Relay Configuration (NIP-65)</h3>
-                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Configure which relays you read from and write to</p>
-                
-                <div style="display: flex; gap: 20px;">
-                    <div style="flex: 1;">
+                <p style="color: #ccc; font-size: 12px; margin-bottom: 4px;"><strong>Read</strong> relays are where others send replies and mentions to you. <strong>Write</strong> relays are where you publish your own notes.</p>
+                <p style="color: #ccc; font-size: 12px; margin-bottom: 12px;">Your <strong>Announced</strong> relays — the subset published in your kind 10002 event — are what other clients use to find your notes and what they pack into shareable <code>nevent</code> references. NIP-65 recommends 2–4 announced relays per category so those references stay short enough to share in IRC and similar channels. Untick <strong>Announce</strong> to keep a relay in your local read/write list without including it in kind 10002.</p>
+
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <div>
                         <h4 style="color: #FF6600; margin-bottom: 8px;">Read Relays</h4>
-                        <div id="readRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
+                        <div id="readRelaysList" style="margin-bottom: 12px; max-height: 220px; overflow-y: auto;"></div>
                         <input type="text" id="newReadRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
                         <button onclick="addReadRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Read Relay</button>
                     </div>
-                    
-                    <div style="flex: 1;">
+
+                    <div>
                         <h4 style="color: #8B5CF6; margin-bottom: 8px;">Write Relays</h4>
-                        <div id="writeRelaysList" style="margin-bottom: 12px; max-height: 150px; overflow-y: auto;"></div>
+                        <div id="writeRelaysList" style="margin-bottom: 12px; max-height: 220px; overflow-y: auto;"></div>
                         <input type="text" id="newWriteRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
                         <button onclick="addWriteRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #8B5CF6, #FF6600); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Write Relay</button>
                     </div>
                 </div>
+
+                <div id="relayAdvertiseHint" style="display: none; margin-top: 12px; padding: 10px 12px; background: rgba(255, 223, 0, 0.08); border-left: 3px solid #FFDF00; border-radius: 4px; color: #ffffff; font-size: 12px;"></div>
                 
                 <div style="margin-top: 12px; padding: 8px; background: #111; border-radius: 8px;">
                     <button onclick="resetToDefaultRelays()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer; margin-right: 8px;">Reset to Defaults</button>
@@ -1279,6 +1282,7 @@
         <button id="postMenuBookmarkBtn" onclick="toggleBookmark()">☆ Bookmark</button>
         <button id="postMenuPinBtn" onclick="togglePin()" style="display: none;">📌 Pin to Profile</button>
         <button onclick="copyPostLink()">Copy Link</button>
+        <button onclick="copyPostNevent()">Copy as nevent</button>
         <button onclick="copyPostId()">Copy Note ID</button>
         <button onclick="copyPostJson()">Copy JSON</button>
         <button onclick="viewPostSource()">View Source</button>
