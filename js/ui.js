@@ -2118,6 +2118,105 @@ export async function goBackFromThread() {
     history.back();
 }
 
+// ==================== NIP-23 ARTICLE VIEWING ====================
+
+/**
+ * Open a NIP-23 article in the full-page article view.
+ * Accepts either a full kind-30023 event or a coordinate
+ * `{ pubkey, identifier, relayHints? }`.
+ */
+export async function openArticleView(arg, skipHistory = false) {
+    if (!arg) return;
+    try {
+        const [Articles, StateModule] = await Promise.all([
+            import('./articles.js'),
+            import('./state.js'),
+        ]);
+
+        let event = arg;
+        if (!event || event.kind !== 30023) {
+            const coord = arg.pubkey && arg.identifier !== undefined ? arg : null;
+            if (!coord) {
+                console.warn('openArticleView: bad article reference', arg);
+                return;
+            }
+            event = await Articles.fetchArticleByCoord({
+                pubkey: coord.pubkey,
+                identifier: coord.identifier,
+                relayHints: coord.relayHints || [],
+            });
+        }
+
+        if (!event) {
+            console.warn('openArticleView: article not found on any relay');
+            return;
+        }
+
+        const naddr = Articles.articleToNaddr(event);
+
+        if (!skipHistory && naddr) {
+            history.pushState(
+                { page: 'article', naddr },
+                '',
+                `/a/${naddr}`
+            );
+        }
+
+        // Hide other pages, show article page
+        document.getElementById('feed')?.style.setProperty('display', 'none');
+        document.getElementById('messagesPage')?.style.setProperty('display', 'none');
+        document.getElementById('profilePage')?.style.setProperty('display', 'none');
+        document.getElementById('threadPage')?.style.setProperty('display', 'none');
+
+        const articlePage = document.getElementById('articlePage');
+        const articleContent = document.getElementById('articlePageContent');
+        if (!articlePage || !articleContent) {
+            console.error('Article page elements not found');
+            return;
+        }
+        articlePage.style.display = 'block';
+
+        StateModule.setCurrentPage('article');
+
+        // Make sure the author profile is loaded so the byline renders correctly.
+        if (!StateModule.profileCache?.[event.pubkey]) {
+            try {
+                const Posts = await import('./posts.js');
+                await Posts.fetchProfiles([event.pubkey]).catch(() => {});
+            } catch (_) {}
+        }
+
+        articleContent.innerHTML = Articles.renderArticleReader(event);
+        Articles.wireArticleHandlers(articleContent);
+
+        // Hydrate any embeds inside the article body (e.g. quoted nevents/naddrs)
+        try {
+            const Utils = await import('./utils.js');
+            if (Utils.processEmbeddedNotes) {
+                await Utils.processEmbeddedNotes('articlePageContent');
+            }
+        } catch (e) {
+            console.warn('Article body embed hydration failed:', e?.message || e);
+        }
+
+        // Mount NIP-22 comment thread (kind 1111) below the article.
+        try {
+            const Comments = await import('./comments.js');
+            Comments.mountCommentThread(articleContent, event).catch(err => {
+                console.warn('Comment thread mount failed:', err);
+            });
+        } catch (e) {
+            console.warn('comments.js failed to load:', e?.message || e);
+        }
+    } catch (error) {
+        console.error('Error opening article:', error);
+    }
+}
+
+export async function goBackFromArticle() {
+    history.back();
+}
+
 // ==================== USER PROFILE VIEWING ====================
 
 function getTimeAgo(timestamp) {
@@ -2135,6 +2234,28 @@ function getTimeAgo(timestamp) {
 let cachedProfilePosts = [];
 let displayedProfilePostCount = 0;
 const PROFILE_POSTS_PER_PAGE = 30;
+
+// Load and render kind-30023 articles for a mobile profile view.
+async function loadMobileProfileArticles(pubkey) {
+    const box = document.getElementById('userArticlesContainer');
+    if (!box) return;
+    box.innerHTML = '<div style="text-align: center; color: #666; padding: 40px;">Loading articles…</div>';
+    try {
+        const Articles = await import('./articles.js');
+        const events = await Articles.queryArticles({ authors: [pubkey], limit: 30 });
+        if (!events.length) {
+            box.innerHTML = '<div style="text-align: center; color: #888; padding: 40px;">No articles yet.</div>';
+            return;
+        }
+        box.innerHTML = `<div class="articles-feed" style="padding: 12px;">${
+            events.map(ev => Articles.renderArticleCard(ev)).join('')
+        }</div>`;
+        Articles.wireArticleHandlers(box);
+    } catch (e) {
+        console.error('loadMobileProfileArticles failed:', e);
+        box.innerHTML = '<div style="text-align: center; color: #aaa; padding: 40px;">Failed to load articles.</div>';
+    }
+}
 
 async function fetchUserPosts(pubkey) {
     try {
@@ -2668,11 +2789,16 @@ export async function viewUserProfilePage(pubkey) {
                         <button data-action="copy-npub" data-pubkey="${escapeHtml(pubkey)}" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 8px 16px; cursor: pointer; font-size: 14px;">📋 Copy npub</button>
                     </div>
                 </div>
+                <div class="mobile-profile-tabs" style="display: flex; gap: 0; border-bottom: 1px solid var(--border-color, #2a2a2a); margin: 8px 0 0;">
+                    <button class="mobile-profile-tab active" data-mobile-profile-tab="notes" data-mobile-profile-pubkey="${escapeHtml(pubkey)}" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid var(--accent-color, #f60); color: #ddd; font-size: 14px; cursor: pointer;">Notes</button>
+                    <button class="mobile-profile-tab" data-mobile-profile-tab="articles" data-mobile-profile-pubkey="${escapeHtml(pubkey)}" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid transparent; color: #888; font-size: 14px; cursor: pointer;">Articles</button>
+                </div>
                 <div id="userPostsContainer" style="word-break: break-word; overflow-wrap: break-word; max-width: 100%; padding-bottom: 80px;">
                     <div style="text-align: center; color: #666; padding: 40px;">
                         <p>Loading user posts...</p>
                     </div>
                 </div>
+                <div id="userArticlesContainer" style="display: none; max-width: 100%; padding-bottom: 80px;"></div>
             </div>
         `;
 
@@ -2725,6 +2851,40 @@ export async function viewUserProfilePage(pubkey) {
                     window.copyUserNpub(pk);
                 });
             }
+
+            // Wire Notes/Articles profile sub-tabs
+            const tabBtns = profilePage.querySelectorAll('.mobile-profile-tab');
+            const notesBox = document.getElementById('userPostsContainer');
+            const articlesBox = document.getElementById('userArticlesContainer');
+            let articlesLoaded = false;
+
+            const activateTab = (which) => {
+                tabBtns.forEach(t => {
+                    const isActive = t.dataset.mobileProfileTab === which;
+                    t.classList.toggle('active', isActive);
+                    t.style.color = isActive ? '#ddd' : '#888';
+                    t.style.borderBottomColor = isActive
+                        ? 'var(--accent-color, #f60)'
+                        : 'transparent';
+                });
+                if (notesBox) notesBox.style.display = (which === 'notes') ? '' : 'none';
+                if (articlesBox) articlesBox.style.display = (which === 'articles') ? '' : 'none';
+
+                if (which === 'articles' && !articlesLoaded) {
+                    articlesLoaded = true;
+                    loadMobileProfileArticles(pubkey).catch(e => {
+                        console.warn('Failed to load mobile profile articles:', e);
+                        if (articlesBox) articlesBox.innerHTML = '<div style="padding: 20px; color: #aaa; text-align: center;">Failed to load articles.</div>';
+                    });
+                }
+            };
+
+            tabBtns.forEach(btn => {
+                btn.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    activateTab(btn.dataset.mobileProfileTab);
+                });
+            });
         }, 0);
 
         // Update follow button state

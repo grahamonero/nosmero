@@ -169,10 +169,12 @@
 
             <nav class="feed-selector">
                 <a href="#" class="feed-tab active" data-feed="following" onclick="handleFeedTabClick('following', event)">Following</a>
-                <a href="#" class="feed-tab" data-feed="live" onclick="handleFeedTabClick('live', event)">📺 Live</a>
-                <a href="#" class="feed-tab" data-feed="tipactivity" onclick="handleFeedTabClick('tipactivity', event)">Monero Tip Activity</a>
-                <a href="#" class="feed-tab" data-feed="global" onclick="handleFeedTabClick('global', event)">Web of Trust Feed</a>
                 <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero Notes</a>
+                <a href="#" class="feed-tab" data-feed="articles" onclick="handleFeedTabClick('articles', event)">📝 Articles</a>
+                <a href="#" class="feed-tab" data-feed="global" onclick="handleFeedTabClick('global', event)">Suggested Follows</a>
+                <a href="#" class="feed-tab" data-feed="trending" onclick="handleFeedTabClick('trending', event)">Popular Notes</a>
+                <a href="#" class="feed-tab" data-feed="tipactivity" onclick="handleFeedTabClick('tipactivity', event)">Monero Tip Activity</a>
+                <a href="#" class="feed-tab" data-feed="live" onclick="handleFeedTabClick('live', event)">📺 Live</a>
                 <button class="create-note-btn" id="headerCreateNoteBtn" onclick="handleCreateNoteClick()" style="display: none;">
                     ✏️ <span>Post</span>
                 </button>
@@ -419,6 +421,17 @@
 
         <div id="profilePage" class="profile-page" style="display: none;">
             <!-- User profile will be displayed here -->
+        </div>
+
+        <!-- NIP-23 long-form article page (hidden by default) -->
+        <div id="articlePage" class="article-page" style="display: none;">
+            <div class="thread-header">
+                <button onclick="goBackFromArticle()" style="background: none; border: none; color: #fff; cursor: pointer; font-size: 18px; margin-right: 12px;">←</button>
+                <h2>Article</h2>
+            </div>
+            <div id="articlePageContent" class="article-content">
+                <!-- Article will be rendered here -->
+            </div>
         </div>
 
         <!-- IPFS Media page (hidden by default) -->

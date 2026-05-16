@@ -199,7 +199,7 @@ function parseMarkdownContent(content, skipEmbeddedNotes = false) {
     let mentionIndex = 0;
 
     // Replace nostr: URIs with placeholders before markdown parsing
-    let processed = content.replace(/(nostr:)?(npub1[a-z0-9]{58}|nprofile1[a-z0-9]+|note1[a-z0-9]{58}|nevent1[a-z0-9]+)/gi, (match) => {
+    let processed = content.replace(/(nostr:)?(npub1[a-z0-9]{58}|nprofile1[a-z0-9]+|note1[a-z0-9]{58}|nevent1[a-z0-9]+|naddr1[a-z0-9]+)/gi, (match) => {
         mentions.push(match);
         return `__NOSTR_MENTION_${mentionIndex++}__`;
     });
@@ -221,7 +221,7 @@ function parseMarkdownContent(content, skipEmbeddedNotes = false) {
                 'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'hr', 'table', 'thead',
                 'tbody', 'tr', 'th', 'td'],
             ALLOWED_ATTR: ['href', 'src', 'target', 'rel', 'class', 'data-nevent', 'data-noteid',
-                'data-note1', 'alt', 'controls', 'data-pubkey', 'data-action', 'data-eventid'],
+                'data-note1', 'data-naddr', 'alt', 'controls', 'data-pubkey', 'data-action', 'data-eventid'],
             ALLOW_DATA_ATTR: true,
             ADD_ATTR: ['target']
         });
@@ -279,6 +279,13 @@ function processNostrMention(mention, skipEmbeddedNotes = false) {
     // nevent mention
     if (content.startsWith('nevent1') && !skipEmbeddedNotes) {
         return `<div class="embedded-note" data-nevent="${escapeHtml(content)}">Loading event...</div>`;
+    }
+
+    // naddr mention — NIP-19 addressable / parameterized replaceable events
+    // (kind 30000-39999: NIP-23 articles, NIP-53 livestreams, NIP-89 handlers,
+    // NIP-51 lists, NIP-78 app data). Resolved by {kind, pubkey, d-tag} not id.
+    if (content.startsWith('naddr1') && !skipEmbeddedNotes) {
+        return `<div class="embedded-note" data-naddr="${escapeHtml(content)}">Loading event...</div>`;
     }
 
     // Fallback
@@ -388,6 +395,13 @@ export function parseContent(content, skipEmbeddedNotes = false) {
         parsed = parsed.replace(neventRegex, (match, prefix, nevent) => {
             return `<div class="embedded-note" data-nevent="${nevent}">Loading event...</div>`;
         });
+
+        // Parse nostr naddr mentions (NIP-19 addressable / parameterized
+        // replaceable events: NIP-23 articles, livestreams, handlers, lists).
+        const naddrRegex = /(nostr:)?(naddr1[a-z0-9]+)/gi;
+        parsed = parsed.replace(naddrRegex, (match, prefix, naddr) => {
+            return `<div class="embedded-note" data-naddr="${naddr}">Loading event...</div>`;
+        });
     }
     
     // Parse nostr nprofile mentions - show as user names
@@ -429,7 +443,7 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     if (typeof DOMPurify !== 'undefined') {
         parsed = DOMPurify.sanitize(parsed, {
             ALLOWED_TAGS: ['a', 'img', 'video', 'source', 'span', 'div', 'br', 'p'],
-            ALLOWED_ATTR: ['href', 'src', 'target', 'rel', 'class', 'data-nevent', 'data-noteid', 'data-note1', 'alt', 'controls', 'data-pubkey', 'data-action', 'data-eventid'],
+            ALLOWED_ATTR: ['href', 'src', 'target', 'rel', 'class', 'data-nevent', 'data-noteid', 'data-note1', 'data-naddr', 'alt', 'controls', 'data-pubkey', 'data-action', 'data-eventid'],
             ALLOW_DATA_ATTR: true,
             ADD_ATTR: ['target']
         });
@@ -495,17 +509,19 @@ export async function processEmbeddedNotes(containerId) {
         return;
     }
 
-    const embeddedNotes = container.querySelectorAll('.embedded-note[data-nevent]:not(.loaded), .embedded-note[data-noteid]:not(.loaded)');
+    const embeddedNotes = container.querySelectorAll('.embedded-note[data-nevent]:not(.loaded), .embedded-note[data-noteid]:not(.loaded), .embedded-note[data-naddr]:not(.loaded)');
     console.log(`🔍 processEmbeddedNotes: Found ${embeddedNotes.length} embedded notes in ${containerId}`);
 
     for (const noteDiv of embeddedNotes) {
         const nevent = noteDiv.dataset.nevent;
         const noteid = noteDiv.dataset.noteid;
-        console.log('📝 Processing embedded note:', { nevent, noteid });
+        const naddr = noteDiv.dataset.naddr;
+        console.log('📝 Processing embedded note:', { nevent, noteid, naddr });
 
         try {
             let eventId;
             let relayHints = [];
+            let addressable = null; // {kind, pubkey, identifier} when naddr-sourced
 
             if (nevent) {
                 const { nip19 } = window.NostrTools;
@@ -518,25 +534,59 @@ export async function processEmbeddedNotes(containerId) {
                 }
             } else if (noteid) {
                 eventId = noteid;
+            } else if (naddr) {
+                const { nip19 } = window.NostrTools;
+                const decoded = nip19.decode(naddr);
+                if (decoded.type === 'naddr') {
+                    addressable = {
+                        kind: decoded.data.kind,
+                        pubkey: decoded.data.pubkey,
+                        identifier: decoded.data.identifier || '',
+                    };
+                    if (decoded.data.relays && decoded.data.relays.length > 0) {
+                        relayHints = decoded.data.relays;
+                        console.log('📍 Relay hints from naddr:', relayHints);
+                    }
+                }
             }
 
-            if (!eventId) {
-                console.warn('⚠️ No eventId found for embedded note');
+            if (!eventId && !addressable) {
+                console.warn('⚠️ No eventId or addressable coordinate found for embedded note');
                 continue;
             }
 
-            console.log('🔎 Looking for event:', eventId.slice(0, 8));
-
             // Try to find the event in existing caches first
             const State = await import('./state.js');
-            let event = State.eventCache[eventId] || State.posts.find(p => p.id === eventId);
+            let event = null;
 
-            if (!event) {
-                console.log('📡 Event not in cache, fetching from relays...');
-                // Try to fetch from relays, using relay hints if available
-                event = await fetchEventById(eventId, relayHints);
+            if (addressable) {
+                console.log('🔎 Looking for addressable event:', addressable.kind, addressable.pubkey.slice(0, 8), addressable.identifier);
+                // Scan cache for matching {kind, pubkey, d-tag}
+                for (const cached of Object.values(State.eventCache)) {
+                    if (cached?.kind === addressable.kind &&
+                        cached?.pubkey === addressable.pubkey &&
+                        (cached?.tags || []).some(t => t[0] === 'd' && t[1] === addressable.identifier)) {
+                        event = cached;
+                        break;
+                    }
+                }
+                if (!event) {
+                    console.log('📡 Addressable event not in cache, fetching from relays...');
+                    event = await fetchAddressableEvent(addressable, relayHints);
+                } else {
+                    console.log('✅ Addressable event found in cache');
+                }
             } else {
-                console.log('✅ Event found in cache');
+                console.log('🔎 Looking for event:', eventId.slice(0, 8));
+                event = State.eventCache[eventId] || State.posts.find(p => p.id === eventId);
+
+                if (!event) {
+                    console.log('📡 Event not in cache, fetching from relays...');
+                    // Try to fetch from relays, using relay hints if available
+                    event = await fetchEventById(eventId, relayHints);
+                } else {
+                    console.log('✅ Event found in cache');
+                }
             }
 
             if (event) {
@@ -558,11 +608,30 @@ export async function processEmbeddedNotes(containerId) {
                 if (NOTE_LIKE_KINDS.has(event.kind)) {
                     console.log('✅ Rendering embedded note');
                     noteDiv.innerHTML = renderEmbeddedNote(event, State);
+                } else if (event.kind === 30023) {
+                    console.log('✅ Rendering inline NIP-23 article card');
+                    try {
+                        const Articles = await import('./articles.js');
+                        noteDiv.innerHTML = Articles.renderArticleCard(event, { compact: true });
+                        Articles.wireArticleHandlers(noteDiv);
+                    } catch (e) {
+                        console.warn('Article render failed, falling back to NIP-89:', e?.message || e);
+                        try {
+                            const NIP89 = await import('./nip89.js');
+                            noteDiv.innerHTML = NIP89.renderUnknownKindCard(event, naddr || null);
+                            NIP89.hydrateUnknownKindCards(noteDiv).catch(() => {});
+                        } catch (_) {
+                            noteDiv.innerHTML = renderEmbeddedNote(event, State);
+                        }
+                    }
                 } else {
                     console.log(`✅ Rendering NIP-89 unknown-kind fallback for kind ${event.kind}`);
                     try {
                         const NIP89 = await import('./nip89.js');
-                        noteDiv.innerHTML = NIP89.renderUnknownKindCard(event);
+                        // When the source was an naddr, pass it through so the
+                        // handler-discovery deep-links use naddr (correct for
+                        // parameterized replaceable events) rather than nevent.
+                        noteDiv.innerHTML = NIP89.renderUnknownKindCard(event, naddr || null);
                         NIP89.hydrateUnknownKindCards(noteDiv).catch(() => {});
                     } catch (e) {
                         console.warn('NIP-89 fallback unavailable, rendering as note:', e?.message || e);
@@ -573,9 +642,12 @@ export async function processEmbeddedNotes(containerId) {
             } else {
                 // Fallback: show minimal info instead of "Loading event..."
                 console.warn('⚠️ Event not found, showing unavailable message');
+                const idLabel = eventId
+                    ? `${eventId.slice(0, 8)}...`
+                    : (addressable ? `kind ${addressable.kind}` : '');
                 noteDiv.innerHTML = `<div class="embedded-note-unavailable">
                     <span class="embedded-note-label">Referenced note</span>
-                    <span class="embedded-note-id">${eventId.slice(0, 8)}...</span>
+                    <span class="embedded-note-id">${escapeHtml(idLabel)}</span>
                     <span class="embedded-note-status">unavailable</span>
                 </div>`;
                 noteDiv.classList.add('unavailable');
@@ -648,6 +720,61 @@ async function fetchEventById(eventId, relayHints = []) {
         });
     } catch (error) {
         console.error('Error fetching event by ID:', error);
+        return null;
+    }
+}
+
+// Fetch a parameterized replaceable event by its {kind, pubkey, identifier}
+// coordinate (NIP-19 naddr / NIP-33 addressable). Returns the newest matching
+// event by created_at, or null on timeout.
+async function fetchAddressableEvent(coord, relayHints = []) {
+    try {
+        const Relays = await import('./relays.js');
+        const State = await import('./state.js');
+        const readRelays = Relays.getReadRelays();
+        const fallbackRelays = [
+            'wss://relay.damus.io',
+            'wss://nos.lol',
+            'wss://relay.snort.social'
+        ];
+        const allRelays = [...new Set([
+            ...relayHints,
+            ...readRelays,
+            ...fallbackRelays
+        ])];
+
+        console.log('📡 Fetching addressable event from', allRelays.length, 'relays:', coord.kind, coord.pubkey.slice(0, 8), coord.identifier);
+
+        return new Promise((resolve) => {
+            let newest = null;
+            const timeout = setTimeout(() => {
+                try { sub.close(); } catch (_) {}
+                if (newest) {
+                    State.eventCache[newest.id] = newest;
+                    console.log('✅ Addressable event resolved:', newest.id.slice(0, 8));
+                }
+                resolve(newest);
+            }, 5000);
+
+            const sub = State.pool.subscribeMany(allRelays, [{
+                kinds: [coord.kind],
+                authors: [coord.pubkey],
+                '#d': [coord.identifier],
+            }], {
+                onevent(event) {
+                    // Keep newest by created_at — parameterized replaceable
+                    if (!newest || event.created_at > newest.created_at) {
+                        newest = event;
+                    }
+                },
+                oneose() {
+                    // Don't resolve on first EOSE — wait for timeout so slower
+                    // relays can deliver a newer version of the addressable.
+                }
+            });
+        });
+    } catch (error) {
+        console.error('Error fetching addressable event:', error);
         return null;
     }
 }

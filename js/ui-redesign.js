@@ -201,6 +201,16 @@ async function handleFeedTabClick(feedType, event) {
                 console.warn('Livestream module not loaded');
             }
             break;
+        case 'articles':
+            // NIP-23 long-form articles feed (kind 30023)
+            console.log('Loading Articles feed...');
+            try {
+                const Articles = await import('./articles.js');
+                Articles.loadArticlesFeed();
+            } catch (err) {
+                console.error('Failed to load articles module:', err);
+            }
+            break;
     }
 }
 

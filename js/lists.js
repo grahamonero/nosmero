@@ -418,6 +418,25 @@ export function isBookmarked(noteId) {
     return lists.bookmarkedNoteIds.has(noteId);
 }
 
+// Bookmark an addressable event (NIP-23 article, livestream, list, etc.).
+// `a` value is `kind:pubkey:d-tag` per NIP-01.
+export async function bookmarkAddress(a) {
+    if (!a) return false;
+    lists.bookmarkedAddrs.add(a);
+    await publishBookmarkList();
+    return true;
+}
+
+export async function unbookmarkAddress(a) {
+    lists.bookmarkedAddrs.delete(a);
+    await publishBookmarkList();
+    return true;
+}
+
+export function isBookmarkedAddress(a) {
+    return lists.bookmarkedAddrs.has(a);
+}
+
 // ==================== MIGRATION ====================
 
 async function fetchOldMuteList() {
