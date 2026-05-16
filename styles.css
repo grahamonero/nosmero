@@ -3103,6 +3103,20 @@
     border-radius: 4px;
 }
 
+/* Article reader uses a different parent class (.article-paywall-unlocked,
+   not .paywall-unlocked), so it has no positioning context — the badge's
+   absolute `top: -10px` was escaping to the scroll container and clipping
+   off the top of the article view. Establish a relative parent and give
+   the badge room to sit inside the article flow. */
+.article-paywall-unlocked {
+    position: relative;
+    margin-top: 28px;
+}
+.article-paywall-unlocked .paywall-unlocked-badge {
+    top: -12px;
+    right: 16px;
+}
+
 .paywall-content {
     color: var(--text-primary);
     line-height: 1.6;
@@ -5191,6 +5205,44 @@ body.viewing-article-editor > .container > .right-panel {
 .article-editor-actions {
     display: flex;
     gap: 8px;
+    align-items: center;
+}
+
+/* .btn-secondary / .btn-primary are unstyled globally — scope a pill look
+   to the article composer so its action row visually matches the Write /
+   Preview tabs sitting next to it. */
+.compose-article-page .btn-secondary,
+.compose-article-page .btn-primary {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+}
+.compose-article-page .btn-secondary {
+    background: none;
+    border: 1px solid var(--border-primary);
+    color: var(--text-primary);
+}
+.compose-article-page .btn-secondary:hover:not(:disabled) {
+    border-color: var(--accent, #FF6600);
+    color: var(--accent, #FF6600);
+}
+.compose-article-page .btn-primary {
+    background: var(--accent, #FF6600);
+    border: 1px solid transparent;
+    color: #000;
+    font-weight: 600;
+}
+.compose-article-page .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+.compose-article-page .btn-secondary:disabled,
+.compose-article-page .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .article-editor-status {
@@ -5201,6 +5253,15 @@ body.viewing-article-editor > .container > .right-panel {
 }
 .article-editor--busy .article-editor-status {
     color: var(--accent, #FF6600);
+}
+.article-editor-status--error {
+    color: #f87171;
+    font-weight: 500;
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 8px 20px;
+    background: rgba(248, 113, 113, 0.08);
+    border-bottom: 1px solid rgba(248, 113, 113, 0.25);
 }
 
 .article-editor-write {

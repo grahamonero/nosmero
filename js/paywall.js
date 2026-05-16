@@ -194,7 +194,7 @@ export function formatNoteContentForOtherClients(preview, priceXmr, noteId = nul
  * @param {string} params.paymentAddress - Creator's XMR address
  * @returns {Promise<Object>} { encryptedContent, decryptionKey, preview, publicContent, priceXmr, paymentAddress }
  */
-export async function createPaywalledContent({ content, preview, priceXmr, paymentAddress }) {
+export async function createPaywalledContent({ content, preview, priceXmr, paymentAddress, existingKey }) {
     // Validate inputs
     if (!content || content.trim().length === 0) {
         throw new Error('Content is required');
@@ -215,9 +215,13 @@ export async function createPaywalledContent({ content, preview, priceXmr, payme
     // Generate preview if not provided
     const finalPreview = preview || generateAutoPreview(content);
 
-    // Generate encryption key
-    const key = await generateKey();
-    const keyBase64 = await exportKey(key);
+    // Reuse the original key on edits (existingKey passed in), otherwise
+    // generate a fresh one. Reusing the key matters for the article-edit
+    // flow: anyone who already paid for v1 has the key cached client-side
+    // and via the backend purchase record, so keeping the key constant lets
+    // their existing unlock decrypt the new content too.
+    const keyBase64 = existingKey || await exportKey(await generateKey());
+    const key = await importKey(keyBase64);
 
     // Encrypt content
     const encryptedContent = await encryptContent(content, key);
@@ -349,7 +353,18 @@ export async function getPaywallInfoBatch(noteIds) {
  * @param {string} noteId
  * @returns {Promise<{unlocked: boolean, decryptionKey?: string}>}
  */
-export async function checkUnlocked(noteId) {
+// Drop the cached unlock entry for (noteId, current user) so the next
+// checkUnlocked() round-trips to the backend. Used when a cached key fails
+// to decrypt the current ciphertext (the author rotated the key on edit).
+export function invalidateLocalUnlock(noteId) {
+    const buyerPubkey = State.publicKey;
+    if (!buyerPubkey) return;
+    try {
+        localStorage.removeItem(`paywall_unlocked_${noteId}_${buyerPubkey}`);
+    } catch (_) {}
+}
+
+export async function checkUnlocked(noteId, { forceBackend = false } = {}) {
     const buyerPubkey = State.publicKey;
     if (!buyerPubkey) {
         return { unlocked: false };
@@ -358,14 +373,16 @@ export async function checkUnlocked(noteId) {
     // Check local storage first (faster)
     // Key includes both noteId AND buyerPubkey to prevent cross-user unlock leakage
     const localKey = `paywall_unlocked_${noteId}_${buyerPubkey}`;
-    const localData = localStorage.getItem(localKey);
-    if (localData) {
-        try {
-            const parsed = JSON.parse(localData);
-            if (parsed.decryptionKey) {
-                return { unlocked: true, decryptionKey: parsed.decryptionKey };
-            }
-        } catch (e) {}
+    if (!forceBackend) {
+        const localData = localStorage.getItem(localKey);
+        if (localData) {
+            try {
+                const parsed = JSON.parse(localData);
+                if (parsed.decryptionKey) {
+                    return { unlocked: true, decryptionKey: parsed.decryptionKey };
+                }
+            } catch (e) {}
+        }
     }
 
     // Check with backend

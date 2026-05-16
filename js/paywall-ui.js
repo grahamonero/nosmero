@@ -1086,7 +1086,24 @@ export async function processPaywalledNotes(container) {
                     }
 
                     if (encryptedContent) {
-                        const content = await Paywall.decrypt(encryptedContent, unlockStatus.decryptionKey);
+                        let content;
+                        try {
+                            content = await Paywall.decrypt(encryptedContent, unlockStatus.decryptionKey);
+                        } catch (decryptErr) {
+                            // Cached key is stale (author rotated the AES key on
+                            // edit). Invalidate the local cache and retry once
+                            // against the backend's current key. Skip for the
+                            // creator — they always get the live key from
+                            // getCreatorDecryptionKey, not from local cache.
+                            if (!isCreator) {
+                                Paywall.invalidateLocalUnlock(noteId);
+                                const fresh = await Paywall.checkUnlocked(noteId, { forceBackend: true });
+                                if (!fresh?.unlocked || !fresh.decryptionKey) throw decryptErr;
+                                content = await Paywall.decrypt(encryptedContent, fresh.decryptionKey);
+                            } else {
+                                throw decryptErr;
+                            }
+                        }
                         // Update ALL matching elements
                         elements.forEach(el => {
                             // First try .post-content (used in search results)

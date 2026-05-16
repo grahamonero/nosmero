@@ -3011,7 +3011,7 @@ window.openPdfReader = (arg) => RightPanel.openPdf(arg);
 // NIP-23 article composer entry. Wired to the hamburger menu "Write Article"
 // item and any future header / floating-action entry points.
 window.openArticleEditor = async ({ draftEvent = null } = {}) => {
-    const Editor = await import('./articles-editor.js?v=6');
+    const Editor = await import('./articles-editor.js?v=10');
     Editor.openComposer({ draftEvent });
 };
 

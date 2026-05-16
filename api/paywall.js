@@ -181,12 +181,24 @@ export async function createPaywall({ noteId, creatorPubkey, paymentAddress, pri
 
     const data = await loadPaywalls();
 
-    // Check if paywall already exists
-    if (data.paywalls[noteId]) {
+    // Upsert: if a paywall for this noteId already exists and the same
+    // creator is re-publishing (article edit flow on addressable kinds —
+    // 30023:pubkey:d-slug stays stable across edits), update in place and
+    // keep sales counters. Any other pubkey trying to overwrite is rejected.
+    const existing = data.paywalls[noteId];
+    if (existing && existing.creatorPubkey !== creatorPubkey) {
         throw new Error('Paywall already exists for this note');
     }
 
-    const paywall = {
+    const paywall = existing ? {
+        ...existing,
+        paymentAddress,
+        priceXmr,
+        decryptionKey: encryptDecryptionKey(decryptionKey),
+        preview: preview || '',
+        encryptedContent: encryptedContent || '',
+        updatedAt: Date.now()
+    } : {
         noteId,
         creatorPubkey,
         paymentAddress,
@@ -202,7 +214,7 @@ export async function createPaywall({ noteId, creatorPubkey, paymentAddress, pri
     data.paywalls[noteId] = paywall;
     await savePaywalls(data);
 
-    console.log(`[Paywall] Created paywall for note ${noteId.substring(0, 8)}... Price: ${priceXmr} XMR`);
+    console.log(`[Paywall] ${existing ? 'Updated' : 'Created'} paywall for note ${noteId.substring(0, 8)}... Price: ${priceXmr} XMR`);
 
     return {
         noteId,

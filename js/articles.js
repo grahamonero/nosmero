@@ -304,6 +304,10 @@ function stripPaywallFooter(content) {
     return (content || '').replace(PAYWALL_FOOTER_PATTERN, '');
 }
 
+// Exposed so the editor can reconstruct the original body (public half +
+// decrypted locked half) when editing a published paywalled article.
+export { stripPaywallFooter };
+
 // Full-screen article reader. Hero image, title, byline, published date,
 // reading time, markdown body, comment-thread placeholder.
 //
@@ -384,6 +388,9 @@ export function renderArticleReader(event) {
                             data-article-pubkey="${escapeAttr(event.pubkey)}"
                             data-article-d="${escapeAttr(meta.identifier)}">${isBookmarked ? '★ Bookmarked' : '☆ Bookmark'}</button>
                     ${naddr ? `<button class="article-action-btn" data-action="copy-naddr" data-naddr="${escapeAttr(naddr)}">Copy link</button>` : ''}
+                    ${event.pubkey === State.publicKey ? `<button class="article-action-btn" data-action="edit-article"
+                            data-article-pubkey="${escapeAttr(event.pubkey)}"
+                            data-article-d="${escapeAttr(meta.identifier)}">✏️ Edit</button>` : ''}
                 </div>
                 ${topicsHtml}
             </header>
@@ -426,7 +433,20 @@ export async function hydrateArticlePaywall(container, event) {
         }
         if (!encryptedContent) return;
 
-        const decrypted = await Paywall.decrypt(encryptedContent, status.decryptionKey);
+        let decrypted;
+        try {
+            decrypted = await Paywall.decrypt(encryptedContent, status.decryptionKey);
+        } catch (decryptErr) {
+            // Stale local cache: the author rotated the key (article edit), so
+            // our cached decryption key doesn't match the current ciphertext.
+            // Invalidate the cache and try once more against the backend's
+            // current key. If that also fails, give up and let the locked view
+            // stand.
+            Paywall.invalidateLocalUnlock(coord);
+            const fresh = await Paywall.checkUnlocked(coord, { forceBackend: true });
+            if (!fresh?.unlocked || !fresh.decryptionKey) return;
+            decrypted = await Paywall.decrypt(encryptedContent, fresh.decryptionKey);
+        }
         revealUnlockedArticleBody(container, decrypted);
     } catch (e) {
         console.warn('[articles] paywall hydration failed:', e?.message || e);
@@ -504,6 +524,24 @@ export function wireArticleHandlers(container) {
                     console.warn('[articles] unlock modal failed:', err);
                     Utils.showNotification?.('Could not open unlock modal', 'error');
                 }
+            }
+            return;
+        }
+
+        const editBtn = ev.target.closest('[data-action="edit-article"]');
+        if (editBtn) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            ev.stopImmediatePropagation();
+            const pubkey = editBtn.dataset.articlePubkey;
+            const identifier = editBtn.dataset.articleD;
+            const cached = getCachedArticle(pubkey, identifier);
+            if (!cached) {
+                Utils.showNotification?.('Article not loaded yet — try again in a moment', 'error');
+                return;
+            }
+            if (typeof window.openArticleEditor === 'function') {
+                window.openArticleEditor({ draftEvent: cached });
             }
             return;
         }
