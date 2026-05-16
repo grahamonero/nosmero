@@ -3658,6 +3658,15 @@ window.goBackFromThread = UI.goBackFromThread;
 window.openArticleView = UI.openArticleView;
 window.openArticleReader = UI.openArticleView; // unified dispatch name shared with desktop
 window.goBackFromArticle = UI.goBackFromArticle;
+window.openPdfView = UI.openPdfView;
+window.openPdfReader = UI.openPdfView; // unified dispatch name shared with desktop
+window.goBackFromPdf = UI.goBackFromPdf;
+
+// Bootstrap PDF auto-hydration (MutationObserver-based thumbnail rendering
+// + document-level click delegation).
+import('./pdf-reader.js').then(mod => {
+    try { mod.initPdfReader(); } catch (e) { console.warn('initPdfReader failed:', e); }
+}).catch(e => console.warn('pdf-reader.js failed to load:', e));
 window.showNoteMenu = UI.showNoteMenu;
 window.copyPostLink = UI.copyPostLink;
 window.copyPostId = UI.copyPostId;
@@ -3823,6 +3832,17 @@ window.addEventListener('popstate', async (event) => {
                 }
             } catch (e) {
                 console.warn('popstate: could not restore article view', e);
+            }
+        } else if (event.state.page === 'pdf' && event.state.url) {
+            // Restore PDF reader without pushing to history again
+            try {
+                const UI = await import('./ui.js');
+                await UI.openPdfView({
+                    url: event.state.url,
+                    filename: event.state.filename || '',
+                }, true);
+            } catch (e) {
+                console.warn('popstate: could not restore PDF view', e);
             }
         } else if (event.state.page === 'home' && event.state.feed) {
             // Restore feed tab selection

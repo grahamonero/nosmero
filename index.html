@@ -114,6 +114,10 @@
                 <span class="menu-icon">★</span>
                 <span>Bookmarks</span>
             </div>
+            <div class="menu-item" onclick="closeHamburgerMenu(); handleFeedTabClick('global', null);">
+                <span class="menu-icon">👥</span>
+                <span>Suggested Follows</span>
+            </div>
             <div class="menu-item" data-tab="settings" onclick="handleMenuItemClick('settings')">
                 <span class="menu-icon">⚙️</span>
                 <span>Settings</span>
@@ -171,7 +175,6 @@
                 <a href="#" class="feed-tab active" data-feed="following" onclick="handleFeedTabClick('following', event)">Following</a>
                 <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero Notes</a>
                 <a href="#" class="feed-tab" data-feed="articles" onclick="handleFeedTabClick('articles', event)">📝 Articles</a>
-                <a href="#" class="feed-tab" data-feed="global" onclick="handleFeedTabClick('global', event)">Suggested Follows</a>
                 <a href="#" class="feed-tab" data-feed="trending" onclick="handleFeedTabClick('trending', event)">Popular Notes</a>
                 <a href="#" class="feed-tab" data-feed="tipactivity" onclick="handleFeedTabClick('tipactivity', event)">Monero Tip Activity</a>
                 <a href="#" class="feed-tab" data-feed="live" onclick="handleFeedTabClick('live', event)">📺 Live</a>
@@ -431,6 +434,17 @@
             </div>
             <div id="articlePageContent" class="article-content">
                 <!-- Article will be rendered here -->
+            </div>
+        </div>
+
+        <!-- PDF reader page (hidden by default) -->
+        <div id="pdfPage" class="pdf-page" style="display: none;">
+            <div class="thread-header">
+                <button onclick="goBackFromPdf()" style="background: none; border: none; color: #fff; cursor: pointer; font-size: 18px; margin-right: 12px;">←</button>
+                <h2>PDF</h2>
+            </div>
+            <div id="pdfPageContent" class="pdf-content">
+                <!-- PDF reader will be rendered here -->
             </div>
         </div>
 
@@ -1398,6 +1412,7 @@
                 <div class="ipfs-embed-actions">
                     <button type="submit" value="image" class="ipfs-embed-btn">🖼️ Image</button>
                     <button type="submit" value="video" class="ipfs-embed-btn">🎬 Video</button>
+                    <button type="submit" value="pdf" class="ipfs-embed-btn">📕 PDF</button>
                     <button type="submit" value="file" class="ipfs-embed-btn">📄 File</button>
                     <button type="submit" value="cancel" class="ipfs-embed-btn ipfs-embed-cancel">Cancel</button>
                 </div>
@@ -1419,6 +1434,7 @@
                 <div class="ipfs-type-radio">
                     <label><input type="radio" name="ipfsUploadKind" value="image" checked> 🖼️ Image</label>
                     <label><input type="radio" name="ipfsUploadKind" value="video"> 🎬 Video</label>
+                    <label><input type="radio" name="ipfsUploadKind" value="pdf"> 📕 PDF</label>
                     <label><input type="radio" name="ipfsUploadKind" value="file"> 📄 File</label>
                 </div>
 

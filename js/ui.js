@@ -2217,6 +2217,56 @@ export async function goBackFromArticle() {
     history.back();
 }
 
+// ==================== PDF READER (full-page) ====================
+
+/**
+ * Open the PDF reader as a full-page view.
+ * `arg` is `{ url, filename? }`.
+ */
+export async function openPdfView(arg, skipHistory = false) {
+    if (!arg || !arg.url) return;
+    try {
+        const StateModule = await import('./state.js');
+
+        if (!skipHistory) {
+            const encodedUrl = encodeURIComponent(arg.url);
+            history.pushState(
+                { page: 'pdf', url: arg.url, filename: arg.filename || '' },
+                '',
+                `/pdf?u=${encodedUrl}`
+            );
+        }
+
+        document.getElementById('feed')?.style.setProperty('display', 'none');
+        document.getElementById('messagesPage')?.style.setProperty('display', 'none');
+        document.getElementById('profilePage')?.style.setProperty('display', 'none');
+        document.getElementById('threadPage')?.style.setProperty('display', 'none');
+        document.getElementById('articlePage')?.style.setProperty('display', 'none');
+
+        const pdfPage = document.getElementById('pdfPage');
+        const pdfContent = document.getElementById('pdfPageContent');
+        if (!pdfPage || !pdfContent) {
+            console.error('PDF page elements not found');
+            return;
+        }
+        pdfPage.style.display = 'block';
+        StateModule.setCurrentPage('pdf');
+
+        const PdfReader = await import('./pdf-reader.js');
+        pdfContent.innerHTML = PdfReader.renderPdfReaderShell({
+            url: arg.url,
+            filename: arg.filename,
+        });
+        await PdfReader.mountPdfReader(pdfContent);
+    } catch (error) {
+        console.error('Error opening PDF:', error);
+    }
+}
+
+export async function goBackFromPdf() {
+    history.back();
+}
+
 // ==================== USER PROFILE VIEWING ====================
 
 function getTimeAgo(timestamp) {

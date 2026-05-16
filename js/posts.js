@@ -5018,6 +5018,7 @@ function formatBytesShort(n) {
 
 function buildEmbedUrl(baseUrl, kind) {
     if (kind === 'video') return baseUrl + '#video.mp4';
+    if (kind === 'pdf')   return baseUrl + '#document.pdf';
     if (kind === 'file')  return baseUrl;
     return baseUrl + '#image.jpg';
 }
@@ -5104,9 +5105,13 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
             quotaTotal = data.quotaTotalBytes;
             renderQuotaBar();
         } catch (e) {
-            quotaText.textContent = (e.status === 401)
-                ? 'Login required to upload to IPFS.'
-                : 'Could not load quota.';
+            if (e.status === 401) {
+                quotaText.textContent = (e.message === 'missing_authorization')
+                    ? 'Sign in to upload to IPFS.'
+                    : `Auth failed: ${e.message || 'unknown error'}`;
+            } else {
+                quotaText.textContent = 'Could not load quota.';
+            }
         }
     };
 
