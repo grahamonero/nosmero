@@ -666,6 +666,20 @@
                         </div>
                     </div>
 
+                    <!-- Bring-your-own-nsec toggle -->
+                    <div style="margin-bottom: 12px; text-align: center;">
+                        <button type="button" id="existingNsecToggleLink" class="text-btn" onclick="authUI.toggleExistingNsecSignup()" style="color: #8B5CF6; font-size: 13px; background: none; border: none; cursor: pointer; padding: 4px;">
+                            Already have an nsec? Use it →
+                        </button>
+                    </div>
+                    <div id="existingNsecForSignupContainer" class="hidden" style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.06); border-radius: 8px; border: 1px solid rgba(139, 92, 246, 0.25);">
+                        <div style="color: #8B5CF6; font-size: 12px; margin-bottom: 8px; line-height: 1.5;">
+                            Paste an existing <code style="background: #222; padding: 1px 4px; border-radius: 3px;">nsec</code> to anchor this Nosmero account to your current Nostr identity. We'll encrypt it with your password — your existing follows, posts, and reputation carry over.
+                        </div>
+                        <input type="password" id="existingNsecForSignupInput" placeholder="nsec1…" autocomplete="off"
+                               style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 13px; font-family: monospace;">
+                    </div>
+
                     <button type="submit" id="createAccountBtn" class="send-btn" onclick="authUI.handleSignup()" style="width: 100%;">
                         Create Account
                     </button>

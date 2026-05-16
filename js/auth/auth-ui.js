@@ -214,6 +214,21 @@ export async function handleSignup(e) {
     return;
   }
 
+  // Branch: if the user toggled "Already have an nsec" and pasted one, take
+  // the existing-nsec signup path instead of generating a fresh keypair.
+  // Treat any non-empty value as intent — validation happens server-side after
+  // shape check below. Toggle visibility is set by toggleExistingNsecSignup.
+  const existingNsecField = document.getElementById('existingNsecForSignupInput');
+  const existingNsecVisible = existingNsecField && !existingNsecField.closest('.hidden') && existingNsecField.offsetParent !== null;
+  const existingNsec = existingNsecVisible ? existingNsecField.value?.trim() : '';
+
+  if (existingNsec) {
+    if (!existingNsec.startsWith('nsec1')) {
+      showErrorToast('That doesn\'t look like an nsec. Existing keys start with "nsec1…"');
+      return;
+    }
+  }
+
   const createBtn = document.getElementById('createAccountBtn');
   const originalText = createBtn?.textContent;
 
@@ -223,23 +238,39 @@ export async function handleSignup(e) {
       createBtn.textContent = 'Creating account...';
     }
 
-    // Generate new Nostr keypair using nostr-tools
-    const { generateSecretKey, getPublicKey } = await import('https://esm.sh/nostr-tools@2.7.0/pure');
-    const { nsecEncode, npubEncode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
+    let nsec;
+    let npub;
 
-    const privateKeyBytes = generateSecretKey();
-    const publicKeyHex = getPublicKey(privateKeyBytes);
-    const nsec = nsecEncode(privateKeyBytes);
-    const npub = npubEncode(publicKeyHex);
+    if (existingNsec) {
+      // Bring-your-own-nsec path. Server proves ownership via NIP-98 signature.
+      const result = await authClient.signupWithNsec({
+        nsec: existingNsec,
+        username: username.toLowerCase(),
+        password
+      });
+      nsec = result.nsec;
+      npub = result.npub;
+      console.log('[Auth UI] Account created with existing nsec');
+    } else {
+      // Generate new Nostr keypair using nostr-tools
+      const { generateSecretKey, getPublicKey } = await import('https://esm.sh/nostr-tools@2.7.0/pure');
+      const { nsecEncode, npubEncode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
 
-    // Register with server. nsec is encrypted with the user's password
-    // client-side before transit; server never sees the plaintext key.
-    await authClient.signup({
-      nsec,
-      npub,
-      password,
-      username: username.toLowerCase()
-    });
+      const privateKeyBytes = generateSecretKey();
+      const publicKeyHex = getPublicKey(privateKeyBytes);
+      nsec = nsecEncode(privateKeyBytes);
+      npub = npubEncode(publicKeyHex);
+
+      // Register with server. nsec is encrypted with the user's password
+      // client-side before transit; server never sees the plaintext key.
+      await authClient.signup({
+        nsec,
+        npub,
+        password,
+        username: username.toLowerCase()
+      });
+      console.log('[Auth UI] Account created (fresh keypair)');
+    }
 
     // Save session (no email stored since it's not in DB)
     authClient.saveSession({
@@ -247,8 +278,6 @@ export async function handleSignup(e) {
       username: username.toLowerCase(),
       email_verified: false
     });
-
-    console.log('[Auth UI] Account created (username-only)');
 
     // Show the key display section (hasPassword=true since user registered with password)
     showKeyDisplay(nsec, npub, displayName, true);
@@ -261,6 +290,28 @@ export async function handleSignup(e) {
       createBtn.disabled = false;
       createBtn.textContent = originalText;
     }
+  }
+}
+
+/**
+ * Toggle the "Already have an nsec? Use it" expandable section on the signup
+ * form. Idempotent — toggles .hidden on the container and focuses the input
+ * when expanding so paste-from-clipboard works without a second click.
+ */
+export function toggleExistingNsecSignup() {
+  const container = document.getElementById('existingNsecForSignupContainer');
+  const link = document.getElementById('existingNsecToggleLink');
+  if (!container) return;
+  const isHidden = container.classList.contains('hidden');
+  if (isHidden) {
+    container.classList.remove('hidden');
+    document.getElementById('existingNsecForSignupInput')?.focus();
+    if (link) link.textContent = 'Hide existing-nsec field';
+  } else {
+    container.classList.add('hidden');
+    const input = document.getElementById('existingNsecForSignupInput');
+    if (input) input.value = '';
+    if (link) link.textContent = 'Already have an nsec? Use it →';
   }
 }
 
@@ -618,6 +669,7 @@ window.authUI = {
   handleKeysOnlySignup,
   handlePasswordReset,
   downloadNsecBackup,
+  toggleExistingNsecSignup,
   proceedToApp,
   initAuthUI
 };
