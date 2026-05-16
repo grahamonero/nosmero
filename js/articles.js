@@ -138,8 +138,13 @@ export async function queryArticles({
 } = {}) {
     if (!authors.length) return [];
 
+    // Per the NIP-65 outbox model, articles live on the AUTHOR's write
+    // relays. Until we wire per-author outbox lookup, include the current
+    // user's write relays here too — that catches the common case of
+    // viewing your own profile right after publishing.
     const readRelays = Relays.getReadRelays?.() || [];
-    const relays = [...new Set([...relayHints, ...readRelays, ...FALLBACK_RELAYS])];
+    const writeRelays = Relays.getWriteRelays?.() || [];
+    const relays = [...new Set([...relayHints, ...readRelays, ...writeRelays, ...FALLBACK_RELAYS])];
 
     const filter = {
         kinds: [ARTICLE_KIND],
@@ -192,7 +197,8 @@ export async function fetchArticleByCoord({ pubkey, identifier, relayHints = [] 
     if (cached) return cached;
 
     const readRelays = Relays.getReadRelays?.() || [];
-    const relays = [...new Set([...relayHints, ...readRelays, ...FALLBACK_RELAYS])];
+    const writeRelays = Relays.getWriteRelays?.() || [];
+    const relays = [...new Set([...relayHints, ...readRelays, ...writeRelays, ...FALLBACK_RELAYS])];
 
     return new Promise((resolve) => {
         let newest = null;
@@ -289,8 +295,22 @@ export function renderArticleCard(event, { compact = false } = {}) {
     `;
 }
 
+// Footer line appended to event.content for paywalled articles. We strip it
+// from the displayed public body so the locked-content UI doesn't render the
+// fallback footer alongside the unlock button.
+const PAYWALL_FOOTER_PATTERN = /\n\n---\n\n\*🔒 Continue reading — unlock for [\d.]+ XMR:[^*\n]*\*\s*$/;
+
+function stripPaywallFooter(content) {
+    return (content || '').replace(PAYWALL_FOOTER_PATTERN, '');
+}
+
 // Full-screen article reader. Hero image, title, byline, published date,
-// reading time, markdown body, comment-thread placeholder (slice 1 wires it).
+// reading time, markdown body, comment-thread placeholder.
+//
+// If the article carries paywall tags (kind 30023 + ['paywall', ...] +
+// ['encrypted', ...]), the body shows the public portion above and a locked
+// container below that hooks into the existing paywall unlock flow keyed by
+// the addressable coordinate "30023:pubkey:d-slug".
 export function renderArticleReader(event) {
     cacheArticle(event);
     const meta = parseArticleMetadata(event);
@@ -301,14 +321,22 @@ export function renderArticleReader(event) {
     const addrTag = `${ARTICLE_KIND}:${event.pubkey}:${meta.identifier}`;
     const isBookmarked = Lists.isBookmarkedAddress?.(addrTag) === true;
 
+    // Detect paywall via tag presence — same shape we use on kind 1.
+    const paywallTag = event.tags?.find(t => t[0] === 'paywall');
+    const isPaywalled = Boolean(paywallTag);
+    const priceXmr = isPaywalled ? parseFloat(paywallTag[1]) || 0 : 0;
+    const coord = articleCoord(event.pubkey, meta.identifier);
+
+    const publicMarkdown = isPaywalled ? stripPaywallFooter(event.content) : (event.content || '');
+
     // Defer markdown render to Utils.parseContent so we reuse the full pipeline
     // (sanitization + image/nostr-embed handling).
     let bodyHtml = '';
     try {
-        bodyHtml = Utils.parseContent(event.content || '', false);
+        bodyHtml = Utils.parseContent(publicMarkdown, false);
     } catch (e) {
         console.warn('Article body render failed, falling back to plain text:', e);
-        bodyHtml = `<pre>${escapeAttr(event.content || '')}</pre>`;
+        bodyHtml = `<pre>${escapeAttr(publicMarkdown)}</pre>`;
     }
 
     const heroHtml = cover
@@ -321,8 +349,27 @@ export function renderArticleReader(event) {
             .join('')}</div>`
         : '';
 
+    // For paywalled articles, the locked container uses the addressable
+    // coordinate as its data-note-id. The existing paywall-ui unlock flow
+    // looks up the encrypted blob via /api/paywall/info/<coord>, which we
+    // registered at publish time keyed by the same coord.
+    const priceStr = priceXmr ? priceXmr.toFixed(12).replace(/\.?0+$/, '') : '';
+    const lockedHtml = isPaywalled
+        ? `
+            <div class="paywall-locked article-paywall-locked" data-note-id="${escapeAttr(coord)}">
+                <div class="paywall-overlay">
+                    <div class="paywall-lock-icon">🔒</div>
+                    <div class="paywall-price">${escapeAttr(priceStr)} XMR</div>
+                    <button class="paywall-unlock-btn" data-action="unlock-article" data-coord="${escapeAttr(coord)}">
+                        Unlock with XMR
+                    </button>
+                </div>
+            </div>
+        `
+        : '';
+
     return `
-        <article class="article-reader" data-article-pubkey="${escapeAttr(event.pubkey)}" data-article-d="${escapeAttr(meta.identifier)}"${naddr ? ` data-naddr="${escapeAttr(naddr)}"` : ''}>
+        <article class="article-reader" data-article-pubkey="${escapeAttr(event.pubkey)}" data-article-d="${escapeAttr(meta.identifier)}"${naddr ? ` data-naddr="${escapeAttr(naddr)}"` : ''}${isPaywalled ? ' data-paywall-coord="' + escapeAttr(coord) + '"' : ''}>
             ${heroHtml}
             <header class="article-reader-header">
                 <h1 class="article-reader-title">${escapeAttr(meta.title || 'Untitled')}</h1>
@@ -343,6 +390,7 @@ export function renderArticleReader(event) {
             <div class="article-reader-body markdown-body">
                 ${bodyHtml}
             </div>
+            ${lockedHtml}
             <section class="article-reader-comments" data-article-comments-host="1">
                 <h2 class="article-comments-title">Comments</h2>
                 <div class="article-comments-loading">Loading comments…</div>
@@ -350,6 +398,58 @@ export function renderArticleReader(event) {
         </article>
     `;
 }
+
+// Hook called by the article-reader host (right-panel.js / mobile equivalent)
+// AFTER renderArticleReader has been injected into the DOM. If the article is
+// paywalled and the user has already unlocked it, swap the locked section out
+// for the decrypted body so they don't have to click unlock again.
+export async function hydrateArticlePaywall(container, event) {
+    const paywallTag = event?.tags?.find(t => t[0] === 'paywall');
+    if (!paywallTag) return;
+
+    const meta = parseArticleMetadata(event);
+    const coord = articleCoord(event.pubkey, meta.identifier);
+
+    try {
+        const Paywall = await import('./paywall.js');
+        const status = await Paywall.checkUnlocked(coord);
+        if (!status?.unlocked) return;
+
+        const encryptedTag = event.tags.find(t => t[0] === 'encrypted');
+        let encryptedContent = encryptedTag?.[1] || null;
+        if (!encryptedContent) {
+            // Fallback: backend stored it (older publish paths).
+            const info = await fetch(`/api/paywall/info/${encodeURIComponent(coord)}`)
+                .then(r => r.json())
+                .catch(() => null);
+            encryptedContent = info?.paywall?.encryptedContent || null;
+        }
+        if (!encryptedContent) return;
+
+        const decrypted = await Paywall.decrypt(encryptedContent, status.decryptionKey);
+        revealUnlockedArticleBody(container, decrypted);
+    } catch (e) {
+        console.warn('[articles] paywall hydration failed:', e?.message || e);
+    }
+}
+
+// Replace the locked container inside the reader with rendered decrypted
+// markdown. Used both by hydrateArticlePaywall (on load if already unlocked)
+// and by the unlock click handler (after a successful payment).
+function revealUnlockedArticleBody(container, decryptedMarkdown) {
+    const locked = container.querySelector('.article-paywall-locked');
+    if (!locked) return;
+    let html;
+    try {
+        html = Utils.parseContent(decryptedMarkdown || '', false);
+    } catch (e) {
+        html = `<pre>${escapeAttr(decryptedMarkdown || '')}</pre>`;
+    }
+    locked.outerHTML = `<div class="article-paywall-unlocked markdown-body"><div class="paywall-unlocked-badge">✓ Unlocked</div>${html}</div>`;
+}
+
+// Exported so the unlock-click handler in wireArticleHandlers can call it.
+export { revealUnlockedArticleBody };
 
 // ==================== EVENT WIRING ====================
 
@@ -387,6 +487,24 @@ export function wireArticleHandlers(container) {
             const pubkey = bookmarkBtn.dataset.articlePubkey;
             const identifier = bookmarkBtn.dataset.articleD;
             await toggleArticleBookmark({ pubkey, identifier, button: bookmarkBtn });
+            return;
+        }
+
+        const unlockBtn = ev.target.closest('[data-action="unlock-article"]');
+        if (unlockBtn) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            ev.stopImmediatePropagation();
+            const coord = unlockBtn.dataset.coord;
+            if (coord) {
+                try {
+                    const PaywallUI = await import('./paywall-ui.js');
+                    await PaywallUI.showUnlockModal(coord);
+                } catch (err) {
+                    console.warn('[articles] unlock modal failed:', err);
+                    Utils.showNotification?.('Could not open unlock modal', 'error');
+                }
+            }
             return;
         }
 
@@ -484,6 +602,30 @@ function toggleArticleBookmark({ pubkey, identifier, button }) {
 
 // ==================== FEED LOADER ====================
 
+// "Write an Article" CTA — only shown to logged-in users; clicking opens the
+// composer page. Same dispatch as the hamburger entry.
+function writeArticleCtaHtml() {
+    if (!State.publicKey) return '';
+    return `
+        <div class="articles-feed-cta">
+            <button class="articles-feed-write-btn" data-action="open-article-editor">
+                📝 Write an Article
+            </button>
+        </div>
+    `;
+}
+
+function wireWriteArticleCta(container) {
+    const btn = container?.querySelector('[data-action="open-article-editor"]');
+    if (!btn) return;
+    btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        if (typeof window.openArticleEditor === 'function') {
+            window.openArticleEditor();
+        }
+    });
+}
+
 // Render the Articles feed tab into the main #feed container. Mirrors the
 // pattern of loadTrendingAllFeed et al: replace innerHTML with loading state,
 // query, then re-replace with rendered cards.
@@ -504,9 +646,11 @@ export async function loadArticlesFeed() {
 
     if (!authors.length) {
         feed.innerHTML = `
+            ${writeArticleCtaHtml()}
             <div class="empty-feed-message">
                 <p>No articles yet. Follow some users who write long-form to populate this feed.</p>
             </div>`;
+        wireWriteArticleCta(feed);
         return;
     }
 
@@ -528,9 +672,11 @@ export async function loadArticlesFeed() {
 
     if (!articles.length) {
         feed.innerHTML = `
+            ${writeArticleCtaHtml()}
             <div class="empty-feed-message">
                 <p>No articles found for the people you follow.</p>
             </div>`;
+        wireWriteArticleCta(feed);
         return;
     }
 
@@ -545,6 +691,207 @@ export async function loadArticlesFeed() {
     } catch (_) {}
 
     const html = articles.map(ev => renderArticleCard(ev)).join('');
-    feed.innerHTML = `<div class="articles-feed">${html}</div>`;
+    feed.innerHTML = `${writeArticleCtaHtml()}<div class="articles-feed">${html}</div>`;
     wireArticleHandlers(feed);
+    wireWriteArticleCta(feed);
+}
+
+// ==================== PUBLISH ====================
+
+// Generate a stable d-tag slug. New articles get a kebab-case slug derived
+// from the title plus 4 random hex chars to avoid collisions (multiple drafts
+// titled "Untitled" stay distinct). The 4-char suffix also means we don't have
+// to query relays to check uniqueness before publishing.
+export function generateSlug(title) {
+    const base = (title || 'untitled')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60) || 'untitled';
+    const rand = Array.from(crypto.getRandomValues(new Uint8Array(2)))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+    return `${base}-${rand}`;
+}
+
+// Build the NIP-23 tag set from metadata fields. Used by both publish paths.
+function buildArticleTags({ identifier, title, summary, image, topics, publishedAt }) {
+    const tags = [
+        ['d', identifier],
+        ['title', title || ''],
+    ];
+    if (summary) tags.push(['summary', summary]);
+    if (image) tags.push(['image', image]);
+    if (publishedAt) tags.push(['published_at', String(publishedAt)]);
+    if (Array.isArray(topics)) {
+        for (const t of topics) {
+            const clean = String(t || '').trim().toLowerCase().replace(/^#/, '');
+            if (clean) tags.push(['t', clean]);
+        }
+    }
+    tags.push(['client', 'nosmero']);
+    return tags;
+}
+
+// Internal: sign + publish to write relays, awaiting all relays so silent
+// rejections surface. Throws if zero relays accept.
+async function signAndPublish(template) {
+    const signed = await Utils.signEvent(template);
+    const relays = Relays.getWriteRelays?.() || [];
+    if (!relays.length) throw new Error('No write relays configured');
+    const pubPromises = State.pool.publish(relays, signed);
+    const results = await Promise.allSettled(pubPromises);
+    const accepted = results.filter(r => r.status === 'fulfilled').length;
+    const rejected = results.length - accepted;
+    if (rejected > 0) {
+        results.forEach((r, i) => {
+            if (r.status === 'rejected') {
+                console.warn(`[articles] relay ${relays[i]} rejected:`, r.reason?.message || r.reason);
+            }
+        });
+    }
+    if (accepted === 0) {
+        throw new Error(`No relay accepted the article event (${rejected} rejections)`);
+    }
+    return signed;
+}
+
+// Publish a paywall-free article. Returns the signed event.
+//   identifier: d-tag slug. If absent, generated from title.
+//   title, summary, image, topics, body: NIP-23 fields.
+//   publishedAt: unix seconds — pass the original published_at on edits so
+//     it stays stable; pass null for first publish (we set it to created_at).
+export async function publishArticle({
+    identifier,
+    title,
+    summary = '',
+    image = '',
+    topics = [],
+    body = '',
+    publishedAt = null,
+}) {
+    if (!State.publicKey) throw new Error('Must be logged in to publish');
+    if (!body || !body.trim()) throw new Error('Article body is required');
+
+    const slug = identifier || generateSlug(title);
+    const createdAt = Math.floor(Date.now() / 1000);
+    const pubAt = publishedAt || createdAt;
+
+    const template = {
+        kind: ARTICLE_KIND,
+        created_at: createdAt,
+        tags: buildArticleTags({ identifier: slug, title, summary, image, topics, publishedAt: pubAt }),
+        content: body,
+    };
+
+    const signed = await signAndPublish(template);
+    cacheArticle(signed);
+    return signed;
+}
+
+// Publish a draft (kind 30024). Same shape as publishArticle but lands on a
+// different kind so it stays out of the public Articles feed. Drafts share
+// the d-tag with the eventual kind 30023 publish so the coordinate is stable
+// across draft → publish.
+export async function publishDraft({
+    identifier,
+    title,
+    summary = '',
+    image = '',
+    topics = [],
+    body = '',
+}) {
+    if (!State.publicKey) throw new Error('Must be logged in to save drafts');
+
+    const slug = identifier || generateSlug(title);
+    const createdAt = Math.floor(Date.now() / 1000);
+
+    const template = {
+        kind: DRAFT_KIND,
+        created_at: createdAt,
+        // Drafts include the same tags as the article so the existing
+        // parseArticleMetadata helper works on them too.
+        tags: buildArticleTags({ identifier: slug, title, summary, image, topics, publishedAt: null }),
+        content: body,
+    };
+
+    return await signAndPublish(template);
+}
+
+// Query the logged-in user's drafts (kind 30024). Returns latest version per
+// d-tag, newest first. Mirrors the queryArticles pattern.
+export async function queryDrafts({ timeoutMs = 4000 } = {}) {
+    if (!State.publicKey) return [];
+
+    const relays = Relays.getWriteRelays?.() || [];
+    if (!relays.length) return [];
+
+    return new Promise((resolve) => {
+        const collected = new Map();
+        const timeout = setTimeout(() => {
+            try { sub.close(); } catch (_) {}
+            resolve(finalize());
+        }, timeoutMs);
+
+        const sub = State.pool.subscribeMany(relays, [{
+            kinds: [DRAFT_KIND],
+            authors: [State.publicKey],
+            limit: 50,
+        }], {
+            onevent(event) {
+                const meta = parseArticleMetadata(event);
+                if (!meta.identifier) return;
+                const key = coordKey(event.pubkey, meta.identifier);
+                const existing = collected.get(key);
+                if (!existing || event.created_at > existing.created_at) {
+                    collected.set(key, event);
+                }
+            },
+            oneose() {},
+        });
+
+        function finalize() {
+            const list = Array.from(collected.values());
+            list.sort((a, b) => b.created_at - a.created_at);
+            return list;
+        }
+    });
+}
+
+// Issue a NIP-09 deletion request for a draft. Per NIP-09, addressable events
+// are deleted by referencing the coordinate, not the event id, so this also
+// kills any older revisions of the same draft.
+export async function deleteDraft(identifier) {
+    if (!State.publicKey) throw new Error('Must be logged in');
+    if (!identifier) throw new Error('Identifier required');
+
+    const a = `${DRAFT_KIND}:${State.publicKey}:${identifier}`;
+    const template = {
+        kind: 5,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+            ['a', a],
+            ['k', String(DRAFT_KIND)],
+        ],
+        content: 'draft discarded',
+    };
+    return await signAndPublish(template);
+}
+
+// Build the public content body for a paywalled article. Public part renders
+// as the user-written markdown (everything above the paywall break); a short
+// unlock footer is appended so other clients see a readable note.
+//   publicMarkdown: the plaintext part of the body
+//   priceXmr: number
+//   naddr: the article's naddr1 for the unlock link (optional)
+export function buildPaywalledPublicContent(publicMarkdown, priceXmr, naddr) {
+    const priceStr = Number(priceXmr).toFixed(12).replace(/\.?0+$/, '');
+    const url = naddr ? `https://nosmero.com/?article=${naddr}` : 'https://nosmero.com';
+    return `${publicMarkdown}\n\n---\n\n*🔒 Continue reading — unlock for ${priceStr} XMR: ${url}*`;
+}
+
+// Addressable coordinate string for an article. Used as the paywall lookup
+// key so unlocks survive article edits (event id changes, coord doesn't).
+export function articleCoord(pubkey, identifier) {
+    return `${ARTICLE_KIND}:${pubkey}:${identifier}`;
 }

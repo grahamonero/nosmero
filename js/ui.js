@@ -2189,6 +2189,11 @@ export async function openArticleView(arg, skipHistory = false) {
         articleContent.innerHTML = Articles.renderArticleReader(event);
         Articles.wireArticleHandlers(articleContent);
 
+        // If paywalled and the user already unlocked, swap in the decrypted body.
+        Articles.hydrateArticlePaywall?.(articleContent, event).catch(err => {
+            console.warn('Paywall hydration failed:', err);
+        });
+
         // Hydrate any embeds inside the article body (e.g. quoted nevents/naddrs)
         try {
             const Utils = await import('./utils.js');

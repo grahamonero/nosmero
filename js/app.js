@@ -860,6 +860,10 @@ async function loadUserProfile() {
                             style="padding: 10px 20px; border-radius: 20px; border: 1px solid #333; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; cursor: pointer; font-weight: bold;">
                         Posts
                     </button>
+                    <button id="profileTabArticles" class="profile-tab" onclick="switchProfileTab('articles')"
+                            style="padding: 10px 20px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer;">
+                        Articles
+                    </button>
                     <button id="profileTabAbout" class="profile-tab" onclick="switchProfileTab('about')"
                             style="padding: 10px 20px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer;">
                         About
@@ -1342,6 +1346,28 @@ async function displayMoneroAddressInProfile(profile) {
     }
 }
 
+// Load logged-in user's kind 30023 articles into the own-profile Articles tab.
+async function loadOwnProfileArticles() {
+    const profileContent = document.getElementById('profileContent');
+    if (!profileContent || !State.publicKey) return;
+    profileContent.innerHTML = '<div style="text-align: center; color: #888; padding: 40px;">Loading articles…</div>';
+    try {
+        const Articles = await import('./articles.js');
+        const events = await Articles.queryArticles({ authors: [State.publicKey], limit: 30 });
+        if (!events.length) {
+            profileContent.innerHTML = '<div style="text-align: center; color: #888; padding: 40px;">No articles yet. Write one from the hamburger menu.</div>';
+            return;
+        }
+        profileContent.innerHTML = `<div class="articles-feed" style="padding: 12px;">${
+            events.map(ev => Articles.renderArticleCard(ev)).join('')
+        }</div>`;
+        Articles.wireArticleHandlers(profileContent);
+    } catch (e) {
+        console.error('loadOwnProfileArticles failed:', e);
+        profileContent.innerHTML = '<div style="text-align: center; color: #aaa; padding: 40px;">Failed to load articles.</div>';
+    }
+}
+
 // Load user's posts
 async function loadUserPosts() {
     console.log('Loading user posts for:', State.publicKey);
@@ -1770,6 +1796,9 @@ function switchProfileTab(tab) {
     switch (tab) {
         case 'posts':
             loadUserPosts();
+            break;
+        case 'articles':
+            loadOwnProfileArticles();
             break;
         case 'about':
             const userProfile = State.profileCache[State.publicKey] || {};
@@ -3658,6 +3687,10 @@ window.goBackFromThread = UI.goBackFromThread;
 window.openArticleView = UI.openArticleView;
 window.openArticleReader = UI.openArticleView; // unified dispatch name shared with desktop
 window.goBackFromArticle = UI.goBackFromArticle;
+window.openArticleEditor = async ({ draftEvent = null } = {}) => {
+    const Editor = await import('./articles-editor.js?v=6');
+    Editor.openComposer({ draftEvent });
+};
 window.openPdfView = UI.openPdfView;
 window.openPdfReader = UI.openPdfView; // unified dispatch name shared with desktop
 window.goBackFromPdf = UI.goBackFromPdf;
