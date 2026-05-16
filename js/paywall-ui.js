@@ -1006,8 +1006,21 @@ async function revealContent(noteId, decryptionKey) {
             throw new Error('Encrypted content not found');
         }
 
-        // Decrypt
-        const content = await Paywall.decrypt(encryptedContent, decryptionKey);
+        // Decrypt. If the cached key is stale (author rotated the AES key on
+        // edit), invalidate it and re-fetch from the backend, then retry.
+        // Heals the case where the user clicks Unlock on a previously-paid
+        // article whose ciphertext has since been re-encrypted.
+        let content;
+        try {
+            content = await Paywall.decrypt(encryptedContent, decryptionKey);
+        } catch (decryptErr) {
+            Paywall.invalidateLocalUnlock(noteId);
+            const fresh = await Paywall.checkUnlocked(noteId, { forceBackend: true });
+            if (!fresh?.unlocked || !fresh.decryptionKey || fresh.decryptionKey === decryptionKey) {
+                throw decryptErr;
+            }
+            content = await Paywall.decrypt(encryptedContent, fresh.decryptionKey);
+        }
 
         // Replace locked container with unlocked content
         container.outerHTML = Paywall.renderUnlockedContent(content);
