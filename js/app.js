@@ -204,7 +204,19 @@ async function handleHashRouting() {
                         } else if (decoded.type === 'nprofile') {
                             window.viewUserProfilePage(decoded.data.pubkey);
                         } else if (decoded.type === 'naddr') {
-                            console.log('📍 naddr deep-link (not yet routable):', decoded.data);
+                            // Route NIP-23 articles to the article reader; any
+                            // other addressable kind falls through to the
+                            // unknown-kind log so we can wire those later.
+                            if (decoded.data.kind === 30023 && typeof window.openArticleReader === 'function') {
+                                console.log('📍 Opening article from naddr deep-link:', decoded.data);
+                                window.openArticleReader({
+                                    pubkey: decoded.data.pubkey,
+                                    identifier: decoded.data.identifier || '',
+                                    relayHints: decoded.data.relays || [],
+                                });
+                            } else {
+                                console.log('📍 naddr deep-link (kind not yet routable):', decoded.data);
+                            }
                         }
                     }
                 }, 500);
@@ -682,11 +694,14 @@ async function handleNavigation(event) {
             // Messages badge will be cleared by selectConversation() when a conversation is opened
             break;
         case 'notifications':
-            await Messages.loadNotifications();
-            // Clear unread notifications counter and update last viewed time
+            // Optimistically hide the badge while events stream in.
+            // renderNotifications() will advance lastViewedNotificationTime to the
+            // max timestamp of rendered items once they arrive, so late events
+            // (still streaming after this click) properly count as unread on the
+            // next refresh.
             State.setUnreadNotifications(0);
-            State.setLastViewedNotificationTime(Math.floor(Date.now() / 1000));
             Messages.updateNotificationBadge();
+            await Messages.loadNotifications();
             break;
         case 'profile':
             await loadUserProfile();
@@ -776,38 +791,76 @@ async function loadBookmarksPage() {
 
     try {
         const Lists = await import('./lists.js');
-        const ids = Array.from(Lists.lists.bookmarkedNoteIds);
-        if (ids.length === 0) {
-            list.innerHTML = `<div style="color: #888; padding: 32px; text-align: center; border: 1px dashed #333; border-radius: 8px;">No bookmarks yet. Open any note's ⋯ menu and tap "☆ Bookmark".</div>`;
+        const noteIds = Array.from(Lists.lists.bookmarkedNoteIds);
+        // Addressable bookmarks (NIP-51 `a` tags) — currently kind 30023 articles,
+        // forward-compatible for other addressable kinds.
+        const addrs = Array.from(Lists.lists.bookmarkedAddrs);
+        const articleCoords = addrs
+            .map(s => {
+                const parts = String(s).split(':');
+                if (parts.length < 3) return null;
+                const kind = parseInt(parts[0], 10);
+                if (!Number.isFinite(kind)) return null;
+                return { kind, pubkey: parts[1], identifier: parts.slice(2).join(':') };
+            })
+            .filter(c => c && c.kind === 30023);
+
+        if (noteIds.length === 0 && articleCoords.length === 0) {
+            list.innerHTML = `<div style="color: #888; padding: 32px; text-align: center; border: 1px dashed #333; border-radius: 8px;">No bookmarks yet. Open any note's ⋯ menu and tap "☆ Bookmark", or ★ Bookmark an article.</div>`;
             return;
         }
-        list.innerHTML = `<div style="color: #888; font-size: 13px; padding: 8px 0;">Loading ${ids.length} bookmark${ids.length === 1 ? '' : 's'}…</div>`;
 
-        // Fetch any uncached events
-        const cached = ids.map(id => State.eventCache?.[id] || State.posts?.find(p => p.id === id)).filter(Boolean);
-        const missingIds = ids.filter(id => !cached.find(e => e.id === id));
+        const totalCount = noteIds.length + articleCoords.length;
+        list.innerHTML = `<div style="color: #888; font-size: 13px; padding: 8px 0;">Loading ${totalCount} bookmark${totalCount === 1 ? '' : 's'}…</div>`;
+
+        // --- Fetch kind-1 notes ---
+        const cached = noteIds.map(id => State.eventCache?.[id] || State.posts?.find(p => p.id === id)).filter(Boolean);
+        const missingIds = noteIds.filter(id => !cached.find(e => e.id === id));
         let fetched = [];
         if (missingIds.length > 0) {
             const Relays = await import('./relays.js');
             try {
                 fetched = await State.pool.querySync(Relays.getReadRelays(), { ids: missingIds, limit: missingIds.length });
             } catch (e) {
-                console.warn('Bookmark fetch error:', e);
+                console.warn('Bookmark note fetch error:', e);
             }
         }
-        const events = [...cached, ...fetched].sort((a, b) => b.created_at - a.created_at);
+        const noteEvents = [...cached, ...fetched];
 
-        if (events.length === 0) {
-            list.innerHTML = `<div style="color: #888; padding: 32px; text-align: center;">Your bookmarks couldn't be loaded — relays didn't return any of the ${ids.length} note ID${ids.length === 1 ? '' : 's'}.</div>`;
+        // --- Fetch kind-30023 articles in parallel ---
+        let articleEvents = [];
+        if (articleCoords.length > 0) {
+            try {
+                const Articles = await import('./articles.js');
+                const fetches = articleCoords.map(c => Articles.fetchArticleByCoord(c).catch(() => null));
+                articleEvents = (await Promise.all(fetches)).filter(Boolean);
+            } catch (e) {
+                console.warn('Bookmark article fetch error:', e);
+            }
+        }
+
+        const allEvents = [...noteEvents, ...articleEvents].sort((a, b) => b.created_at - a.created_at);
+
+        if (allEvents.length === 0) {
+            list.innerHTML = `<div style="color: #888; padding: 32px; text-align: center;">Your bookmarks couldn't be loaded — relays didn't return any of the ${totalCount} item${totalCount === 1 ? '' : 's'}.</div>`;
             return;
         }
 
-        // Prefetch author profiles before rendering
-        const authors = [...new Set(events.map(e => e.pubkey))];
+        // Prefetch author profiles for all events before rendering
+        const authors = [...new Set(allEvents.map(e => e.pubkey))];
         try { await Posts.fetchProfiles(authors); } catch {}
 
-        const rendered = await Promise.all(events.map(e => Posts.renderSinglePost(e, 'feed').catch(() => '')));
+        // Render: kind-30023 → article card; everything else → renderSinglePost
+        const Articles = await import('./articles.js');
+        const rendered = await Promise.all(allEvents.map(async (e) => {
+            if (e.kind === 30023) {
+                return Articles.renderArticleCard(e);
+            }
+            return Posts.renderSinglePost(e, 'feed').catch(() => '');
+        }));
         list.innerHTML = rendered.filter(Boolean).join('');
+        // Wire article-card clicks (the kind-1 posts already have their own handlers via render path)
+        Articles.wireArticleHandlers(list);
     } catch (e) {
         console.error('Bookmarks load failed:', e);
         list.innerHTML = `<div style="color: #f87171;">Could not load bookmarks: ${e?.message || e}</div>`;

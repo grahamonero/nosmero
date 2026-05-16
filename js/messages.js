@@ -1085,6 +1085,10 @@ export async function fetchNotifications() {
         }
 
         // Subscribe to enabled notification types
+        // Late events (arriving after oneose from slow relays) trigger a debounced
+        // re-process so the badge count picks them up too.
+        let initialProcessed = false;
+        let reprocessTimer = null;
         const sub = State.pool.subscribeMany(relaysToQuery, filters, {
             onevent(event) {
                 if (!processedIds.has(event.id) && event.pubkey !== State.publicKey) {
@@ -1102,16 +1106,26 @@ export async function fetchNotifications() {
                         originalNoteId: originalNoteId
                     });
                     processedIds.add(event.id);
+
+                    if (initialProcessed) {
+                        clearTimeout(reprocessTimer);
+                        reprocessTimer = setTimeout(() => {
+                            debugLog('Re-processing notifications after late event(s):', notificationEvents.length);
+                            processNotifications(notificationEvents);
+                        }, 1000);
+                    }
                 }
             },
             oneose() {
                 debugLog('Received', notificationEvents.length, 'notification events');
+                initialProcessed = true;
                 processNotifications(notificationEvents);
             }
         });
-        
+
         // Close subscription after 8 seconds
         setTimeout(() => {
+            clearTimeout(reprocessTimer);
             sub.close();
         }, TIMEOUTS.SUBSCRIPTION_LONG);
         
@@ -1487,6 +1501,18 @@ export function updateMessagesBadge() {
 // - getNotificationIcon() for type-based icon selection
 // - getNotificationActionText() for action description
 export function renderNotifications(notificationItems = []) {
+    // If the user is actively on the Notifications page, advance
+    // lastViewedNotificationTime to the max timestamp of currently-rendered
+    // items BEFORE computing unread. This way late events (arriving after the
+    // user clicked the bell) properly count as unread on the next render
+    // instead of being silently "marked viewed" by an early-set now() timestamp.
+    if (State.currentPage === 'notifications' && notificationItems.length > 0) {
+        const maxTimestamp = Math.max(...notificationItems.map(n => n.timestamp || 0));
+        if (maxTimestamp > State.lastViewedNotificationTime) {
+            State.setLastViewedNotificationTime(maxTimestamp);
+        }
+    }
+
     // Count unread notifications (newer than last viewed time)
     const unreadCount = notificationItems.filter(notification => {
         return notification.timestamp > State.lastViewedNotificationTime;

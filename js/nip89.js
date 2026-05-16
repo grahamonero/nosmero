@@ -182,8 +182,12 @@ export function eventToBech32(event) {
  * Returns a card with placeholder text; the card will be progressively
  * enhanced with handler deep-links once `hydrateUnknownKindCard` runs.
  */
-export function renderUnknownKindCard(event) {
-    const bech32 = eventToBech32(event);
+export function renderUnknownKindCard(event, preferredBech32 = null) {
+    // Prefer caller-supplied bech32 (e.g. an naddr1 that was already in the
+    // source content). For addressable kinds (30000-39999) naddr is the
+    // correct entity to substitute into NIP-89 handler URL templates;
+    // eventToBech32 would otherwise re-encode as nevent.
+    const bech32 = preferredBech32 || eventToBech32(event);
     const kindLabel = describeKind(event.kind);
     const dataAttr = bech32 ? ` data-bech32="${Utils.escapeHtml(bech32)}"` : '';
 

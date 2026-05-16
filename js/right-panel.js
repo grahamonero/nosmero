@@ -268,12 +268,30 @@ const RightPanel = {
         const params = new URLSearchParams(window.location.search);
         const thread = params.get('thread');
         const profile = params.get('profile');
+        const article = params.get('article');
         const panel = params.get('panel');
 
         if (thread) {
             this.openThread(thread, false);
         } else if (profile) {
             this.openProfile(profile, false);
+        } else if (article) {
+            // Decode the naddr → {pubkey, identifier, relayHints} and open the
+            // article reader. Article data isn't a simple ID so it round-trips
+            // as a naddr1 in the URL.
+            try {
+                const { nip19 } = window.NostrTools;
+                const decoded = nip19.decode(article);
+                if (decoded.type === 'naddr' && decoded.data.kind === 30023) {
+                    this.openArticle({
+                        pubkey: decoded.data.pubkey,
+                        identifier: decoded.data.identifier || '',
+                        relayHints: decoded.data.relays || [],
+                    }, false);
+                }
+            } catch (e) {
+                console.warn('Could not decode ?article naddr on init:', e?.message || e);
+            }
         } else if (panel) {
             this.openView(panel, null, false);
         }
@@ -288,6 +306,7 @@ const RightPanel = {
         // Clear previous panel params
         url.searchParams.delete('thread');
         url.searchParams.delete('profile');
+        url.searchParams.delete('article');
         url.searchParams.delete('panel');
 
         // Set new param based on view
@@ -295,6 +314,32 @@ const RightPanel = {
             url.searchParams.set('thread', data);
         } else if (view === 'profile' && data) {
             url.searchParams.set('profile', data);
+        } else if (view === 'article' && data) {
+            // Serialize article coord as the naddr1 — that round-trips cleanly
+            // when the user shares the URL.
+            let naddr = null;
+            try {
+                if (data && data.kind === 30023) {
+                    const { nip19 } = window.NostrTools;
+                    naddr = nip19.naddrEncode({
+                        kind: 30023,
+                        pubkey: data.pubkey,
+                        identifier: (data.tags || []).find(t => t[0] === 'd')?.[1] || '',
+                    });
+                } else if (data && data.pubkey && data.identifier !== undefined) {
+                    const { nip19 } = window.NostrTools;
+                    naddr = nip19.naddrEncode({
+                        kind: 30023,
+                        pubkey: data.pubkey,
+                        identifier: data.identifier,
+                        relays: data.relayHints || [],
+                    });
+                }
+            } catch (e) {
+                console.warn('updateURL: naddr encode failed', e);
+            }
+            if (naddr) url.searchParams.set('article', naddr);
+            else url.searchParams.set('panel', 'article');
         } else if (view !== 'default') {
             url.searchParams.set('panel', view);
         }
@@ -1093,6 +1138,9 @@ const RightPanel = {
             case 'profile':
                 this.renderProfile(data);
                 break;
+            case 'article':
+                this.renderArticle(data);
+                break;
             case 'settings':
                 this.renderSettings();
                 break;
@@ -1118,6 +1166,15 @@ const RightPanel = {
      */
     openThread(noteId, updateUrl = true) {
         this.openView('thread', noteId, updateUrl);
+    },
+
+    /**
+     * Open NIP-23 article view.
+     * `arg` is either a full kind-30023 event, or a coordinate object
+     * `{ pubkey, identifier, relayHints? }`. The reader fetches if needed.
+     */
+    openArticle(arg, updateUrl = true) {
+        this.openView('article', arg, updateUrl);
     },
 
     /**
@@ -1197,6 +1254,98 @@ const RightPanel = {
         // Update URL
         if (updateUrl) {
             this.updateURL('default', null);
+        }
+    },
+
+    /**
+     * Render NIP-23 article in panel.
+     * Accepts either a full kind-30023 event or a coordinate
+     * `{ pubkey, identifier, relayHints? }`.
+     */
+    async renderArticle(arg) {
+        if (!arg) return;
+        if (!this.content) {
+            console.error('renderArticle: content element not found');
+            return;
+        }
+
+        this.setTitle('Article');
+
+        let section = this.content.querySelector('.right-panel-article');
+        if (!section) {
+            section = document.createElement('div');
+            section.className = 'right-panel-section right-panel-article';
+            this.content.appendChild(section);
+        }
+        section.classList.add('active');
+        section.innerHTML = '<div class="loading" style="padding: 20px;">Loading article…</div>';
+
+        if (this.defaultFeed) {
+            this.defaultFeed.style.display = 'none';
+        }
+
+        try {
+            const Articles = await import('./articles.js');
+            let event = arg;
+
+            // If we got a coordinate (no .kind), fetch by it.
+            if (!event || event.kind !== 30023) {
+                const coord = arg.pubkey && arg.identifier !== undefined
+                    ? arg
+                    : null;
+                if (!coord) {
+                    section.innerHTML = '<div style="padding: 20px; color: var(--danger);">Bad article reference</div>';
+                    return;
+                }
+                event = await Articles.fetchArticleByCoord({
+                    pubkey: coord.pubkey,
+                    identifier: coord.identifier,
+                    relayHints: coord.relayHints || [],
+                });
+            }
+
+            if (!event) {
+                section.innerHTML = '<div style="padding: 20px; color: var(--danger);">Article not found on any relay</div>';
+                return;
+            }
+
+            // Make sure the author profile is loaded so the byline isn't a
+            // truncated pubkey.
+            try {
+                const State = window.NostrState;
+                if (State && !State.profileCache?.[event.pubkey]) {
+                    const Posts = await import('./posts.js');
+                    await Posts.fetchProfiles([event.pubkey]).catch(() => {});
+                }
+            } catch (_) {}
+
+            section.innerHTML = Articles.renderArticleReader(event);
+            Articles.wireArticleHandlers(section);
+
+            // Hydrate any embedded notes / images inside the article body via
+            // the existing embedded-event loader.
+            try {
+                const Utils = await import('./utils.js');
+                if (Utils.processEmbeddedNotes) {
+                    section.id = section.id || 'rightPanelArticleSection';
+                    await Utils.processEmbeddedNotes(section.id);
+                }
+            } catch (e) {
+                console.warn('Article body embed hydration failed:', e?.message || e);
+            }
+
+            // Mount NIP-22 comment thread (kind 1111) below the article.
+            try {
+                const Comments = await import('./comments.js');
+                Comments.mountCommentThread(section, event).catch(err => {
+                    console.warn('Comment thread mount failed:', err);
+                });
+            } catch (e) {
+                console.warn('comments.js failed to load:', e?.message || e);
+            }
+        } catch (error) {
+            console.error('Error loading article:', error);
+            section.innerHTML = '<div style="padding: 20px; color: var(--danger);">Failed to load article</div>';
         }
     },
 
@@ -1662,12 +1811,14 @@ const RightPanel = {
                         <button onclick="viewUserProfilePage('${pubkey}')" style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; border-radius: 6px; color: #FF6600; padding: 6px 12px; cursor: pointer; font-size: 13px;">View Full Profile</button>
                     </div>
                 </div>
-                <div style="border-top: 1px solid var(--border-color); padding: 8px 16px; background: rgba(0,0,0,0.2);">
-                    <span style="color: #888; font-size: 13px;">Recent Notes</span>
+                <div class="panel-profile-tabs" style="border-top: 1px solid var(--border-color); padding: 0; background: rgba(0,0,0,0.2); display: flex; gap: 0;">
+                    <button class="panel-profile-tab active" data-profile-tab="notes" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid var(--accent-color, #f60); color: #ddd; font-size: 13px; cursor: pointer;">Notes</button>
+                    <button class="panel-profile-tab" data-profile-tab="articles" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #888; font-size: 13px; cursor: pointer;">Articles</button>
                 </div>
                 <div id="panelProfilePosts" style="padding: 0;">
                     <div class="loading" style="padding: 20px; text-align: center;">Loading notes...</div>
                 </div>
+                <div id="panelProfileArticles" style="padding: 0; display: none;"></div>
             `;
 
             // Update follow button state
@@ -1675,6 +1826,9 @@ const RightPanel = {
 
             // Load Monero address
             this.loadPanelMoneroAddress(pubkey);
+
+            // Wire Notes/Articles tab switching
+            this.wireProfileTabSwitcher(pubkey);
 
             // Add trust badge
             try {
@@ -1763,6 +1917,73 @@ const RightPanel = {
     /**
      * Fetch and display user posts in panel (with pagination support)
      */
+    /**
+     * Wire click handlers for the Notes/Articles tab bar on a profile view.
+     * Idempotent — re-wires if the panel re-renders.
+     */
+    wireProfileTabSwitcher(pubkey) {
+        const tabs = this.content?.querySelectorAll('.panel-profile-tab');
+        if (!tabs || !tabs.length) return;
+        const notesBox = document.getElementById('panelProfilePosts');
+        const articlesBox = document.getElementById('panelProfileArticles');
+        let articlesLoaded = false;
+
+        const activate = (which) => {
+            tabs.forEach(t => {
+                const isActive = t.dataset.profileTab === which;
+                t.classList.toggle('active', isActive);
+                t.style.color = isActive ? '#ddd' : '#888';
+                t.style.borderBottomColor = isActive
+                    ? 'var(--accent-color, #f60)'
+                    : 'transparent';
+            });
+            if (notesBox) notesBox.style.display = (which === 'notes') ? '' : 'none';
+            if (articlesBox) articlesBox.style.display = (which === 'articles') ? '' : 'none';
+
+            if (which === 'articles' && !articlesLoaded) {
+                articlesLoaded = true;
+                this.fetchPanelProfileArticles(pubkey).catch(e => {
+                    console.warn('Failed to fetch panel profile articles:', e);
+                    if (articlesBox) {
+                        articlesBox.innerHTML = '<div style="padding: 20px; color: #aaa;">Failed to load articles.</div>';
+                    }
+                });
+            }
+        };
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                activate(tab.dataset.profileTab);
+            });
+        });
+    },
+
+    /**
+     * Fetch and render kind-30023 articles for a profile.
+     */
+    async fetchPanelProfileArticles(pubkey) {
+        const box = document.getElementById('panelProfileArticles');
+        if (!box) return;
+        box.innerHTML = '<div class="loading" style="padding: 20px; text-align: center;">Loading articles…</div>';
+
+        try {
+            const Articles = await import('./articles.js');
+            const events = await Articles.queryArticles({ authors: [pubkey], limit: 30 });
+            if (!events.length) {
+                box.innerHTML = '<div style="padding: 20px; color: #888; text-align: center;">No articles yet.</div>';
+                return;
+            }
+            box.innerHTML = `<div class="articles-feed" style="padding: 12px;">${
+                events.map(ev => Articles.renderArticleCard(ev)).join('')
+            }</div>`;
+            Articles.wireArticleHandlers(box);
+        } catch (e) {
+            console.error('fetchPanelProfileArticles failed:', e);
+            box.innerHTML = '<div style="padding: 20px; color: #aaa;">Failed to load articles.</div>';
+        }
+    },
+
     async fetchPanelProfilePosts(pubkey, loadMore = false) {
         const container = document.getElementById('panelProfilePosts');
         if (!container) return;
@@ -2720,6 +2941,12 @@ const RightPanel = {
 // Global functions for onclick
 window.closeRightPanel = () => RightPanel.close();
 window.rightPanelGoBack = () => RightPanel.goBack();
+
+// NIP-23 article reader dispatch. articles.js openArticleByCoord calls this
+// after resolving a card click; hash routing in app.js calls it for naddr URLs.
+// On mobile (right panel not visible) RightPanel.openArticle falls back to
+// fallbackToModal, which is patched separately for the mobile build.
+window.openArticleReader = (eventOrCoord) => RightPanel.openArticle(eventOrCoord);
 
 // Export for module usage
 window.RightPanel = RightPanel;
