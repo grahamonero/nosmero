@@ -2968,6 +2968,99 @@
     right: 16px;
 }
 
+/* ============ NIP-84 Highlights ============ */
+
+/* Floating selection toolbar — appears above selected text in article body */
+.highlight-selection-toolbar {
+    position: absolute;
+    z-index: 9999;
+    display: none;
+    user-select: none;
+}
+.highlight-selection-btn {
+    background: #1a1a1a;
+    border: 1px solid var(--accent-color, #FF6600);
+    color: var(--accent-color, #FF6600);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+    white-space: nowrap;
+}
+.highlight-selection-btn:hover {
+    background: var(--accent-color, #FF6600);
+    color: #000;
+}
+
+/* Heatmap marks in article body — translucent yellow, deeper as more readers
+   highlight the same passage. */
+mark.highlight-heatmap {
+    background: rgba(255, 235, 100, 0.18);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+    cursor: help;
+    transition: background 120ms ease;
+}
+mark.highlight-heatmap--warm {
+    background: rgba(255, 215, 80, 0.30);
+}
+mark.highlight-heatmap--hot {
+    background: rgba(255, 195, 60, 0.45);
+}
+mark.highlight-heatmap:hover {
+    background: rgba(255, 215, 80, 0.55);
+}
+
+/* Highlight cards (profile Highlights tab) */
+.highlight-card {
+    border: 1px solid var(--border-color, #333);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    background: rgba(255, 255, 255, 0.02);
+}
+.highlight-card-text {
+    margin: 0 0 10px;
+    padding: 0 0 0 12px;
+    border-left: 3px solid rgba(255, 235, 100, 0.6);
+    color: var(--text-primary, #eee);
+    font-style: italic;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.highlight-card-comment {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 6px;
+    color: var(--text-primary, #ddd);
+    font-size: 14px;
+    line-height: 1.55;
+}
+.highlight-card-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-secondary, #888);
+}
+.highlight-card-source {
+    background: none;
+    border: none;
+    color: var(--accent-color, #FF6600);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+}
+.highlight-card-source:hover {
+    text-decoration: underline;
+}
+
 .paywall-content {
     color: var(--text-primary);
     line-height: 1.6;

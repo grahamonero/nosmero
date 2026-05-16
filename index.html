@@ -865,6 +865,19 @@
         </div>
     </div>
 
+    <!-- Highlight Modal (NIP-84) -->
+    <div class="modal" id="highlightModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">📌 Publish Highlight</div>
+            <blockquote id="highlightPreview" style="padding: 12px 14px; background: rgba(255, 235, 100, 0.08); border-left: 3px solid rgba(255, 235, 100, 0.6); border-radius: 4px; margin: 0 0 16px; font-style: italic; color: #ddd; line-height: 1.55; max-height: 200px; overflow-y: auto;"></blockquote>
+            <textarea id="highlightComment" placeholder="Add a comment (optional)" maxlength="500" style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px; resize: vertical; box-sizing: border-box;"></textarea>
+            <div class="modal-actions">
+                <button class="close-btn" id="highlightCancelBtn" type="button">Cancel</button>
+                <button class="send-btn" id="highlightPublishBtn" type="button">Publish</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Repost Modal -->
     <div class="modal" id="repostModal">
         <div class="modal-content">
