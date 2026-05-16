@@ -77,6 +77,10 @@
                 <span class="menu-icon">✏️</span>
                 <span>Create Note</span>
             </div>
+            <div class="menu-item" onclick="openArticleEditor(); closeHamburgerMenu();" id="menuWriteArticleBtn" style="display: none;">
+                <span class="menu-icon">📝</span>
+                <span>Write Article</span>
+            </div>
             <!-- Auth Options (shown when anonymous) -->
             <div id="menuLoginOptions" style="display: none; margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
                 <div class="menu-item" onclick="showCreateAccountModal(); closeHamburgerMenu();">
@@ -405,6 +409,79 @@
 
         <!-- Bookmarks page (hidden by default) -->
         <div id="bookmarksPage" class="bookmarks-page" style="display: none;"></div>
+
+        <!-- Article composer (hidden by default) -->
+        <div id="composeArticlePage" class="compose-article-page" style="display: none;">
+            <div class="article-editor-header">
+                <button id="articleBackBtn" class="article-editor-back" aria-label="Back">←</button>
+                <h2 class="article-editor-title">Write article</h2>
+                <div class="article-editor-tabs">
+                    <button id="articleWriteTabBtn" class="article-tab article-tab--active" type="button">Write</button>
+                    <button id="articlePreviewTabBtn" class="article-tab" type="button">Preview</button>
+                </div>
+                <div class="article-editor-actions">
+                    <div class="article-drafts-menu-wrap">
+                        <button id="articleDraftsBtn" class="btn-secondary" type="button" aria-haspopup="true" aria-expanded="false">📁 Drafts</button>
+                        <div id="articleDraftsMenu" class="article-drafts-menu" style="display: none;">
+                            <button id="articleNewDraftBtn" class="article-drafts-menu-new" type="button">+ New draft</button>
+                            <div id="articleDraftsList" class="article-drafts-menu-list"></div>
+                        </div>
+                    </div>
+                    <button id="articleClearBtn" class="btn-secondary" type="button" title="Clear form">🗑️ Clear</button>
+                    <button id="articleSaveDraftBtn" class="btn-secondary" type="button">Save draft</button>
+                    <button id="articlePublishBtn" class="btn-primary" type="button">Publish</button>
+                </div>
+            </div>
+            <div id="articleEditorStatus" class="article-editor-status" aria-live="polite"></div>
+
+            <div id="articleEditorWrite" class="article-editor-write">
+                <div class="article-editor-cover">
+                    <div id="articleCoverPreview" class="article-cover-preview">
+                        <span class="article-cover-placeholder">Cover image</span>
+                    </div>
+                    <button id="articleCoverUploadBtn" class="btn-secondary" type="button">Upload cover</button>
+                </div>
+
+                <input id="articleTitle" class="article-title-input" type="text" placeholder="Title" maxlength="200" />
+                <input id="articleSummary" class="article-summary-input" type="text" placeholder="One-sentence summary (shown in feeds)" maxlength="300" />
+                <input id="articleTopics" class="article-topics-input" type="text" placeholder="Topics, space-separated (e.g. #monero #privacy)" />
+
+                <fieldset id="articlePaywallSection" class="article-paywall-section">
+                    <legend>
+                        <label class="article-paywall-toggle-label">
+                            <input id="articlePaywallToggle" type="checkbox" />
+                            🔒 Paywall this article
+                        </label>
+                    </legend>
+                    <div class="article-paywall-fields">
+                        <p class="article-paywall-hint">Insert the 🔒 break in your body (toolbar button) to mark where locked content starts. Everything above the break is public; everything below is encrypted until a reader pays.</p>
+                        <label class="article-paywall-field">
+                            <span>Price (XMR)</span>
+                            <input id="articlePaywallPrice" type="number" step="0.00001" min="0.00001" placeholder="0.01" />
+                        </label>
+                        <label class="article-paywall-field">
+                            <span>Payment address</span>
+                            <input id="articlePaywallAddress" type="text" placeholder="Your Monero address (4… or 8…)" />
+                        </label>
+                    </div>
+                </fieldset>
+
+                <div class="article-editor-toolbar">
+                    <button class="article-fmt-btn" data-fmt="bold" type="button" title="Bold (Ctrl+B)"><strong>B</strong></button>
+                    <button class="article-fmt-btn" data-fmt="italic" type="button" title="Italic (Ctrl+I)"><em>I</em></button>
+                    <button class="article-fmt-btn" data-fmt="link" type="button" title="Link (Ctrl+K)">🔗</button>
+                    <button class="article-fmt-btn" data-fmt="h2" type="button" title="Heading">H</button>
+                    <button class="article-fmt-btn" data-fmt="code" type="button" title="Code">{ }</button>
+                    <button class="article-fmt-btn" data-fmt="quote" type="button" title="Quote">❝</button>
+                    <button class="article-fmt-btn" data-fmt="list" type="button" title="List">•</button>
+                    <button id="articleInsertPaywallBreakBtn" class="article-fmt-btn" type="button" title="Insert paywall break">🔒</button>
+                </div>
+
+                <textarea id="articleBody" class="article-body-textarea" placeholder="Write your article in markdown…" rows="20"></textarea>
+            </div>
+
+            <div id="articleEditorPreview" class="article-editor-preview" style="display: none;"></div>
+        </div>
 
         <!-- Settings page (hidden by default) -->
         <div id="settingsPage" class="settings-page" style="display: none;">

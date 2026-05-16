@@ -117,6 +117,71 @@ function purgeUnfollowedUserPosts(pubkey) {
 
 // ==================== PROFILE VIEWING ====================
 
+// Wire Notes/Articles tab switching on the full-page profile. Mirrors the
+// right-panel profile's pattern: lazy-load articles on first click, swap
+// visibility of the two containers. Idempotent.
+function wireProfilePageTabs(pubkey) {
+    const tabs = document.querySelectorAll('.profile-tab');
+    if (!tabs || !tabs.length) return;
+    const notesBox = document.getElementById('userPostsContainer');
+    const articlesBox = document.getElementById('userArticlesContainer');
+    let articlesLoaded = false;
+
+    const activate = (which) => {
+        tabs.forEach(t => {
+            const isActive = t.dataset.profileTab === which;
+            t.classList.toggle('active', isActive);
+            t.style.color = isActive
+                ? 'var(--text-primary)'
+                : 'var(--text-secondary, #888)';
+            t.style.borderBottomColor = isActive
+                ? 'var(--accent-color, #f60)'
+                : 'transparent';
+        });
+        if (notesBox) notesBox.style.display = (which === 'notes') ? '' : 'none';
+        if (articlesBox) articlesBox.style.display = (which === 'articles') ? '' : 'none';
+
+        if (which === 'articles' && !articlesLoaded) {
+            articlesLoaded = true;
+            fetchUserArticles(pubkey).catch(e => {
+                console.warn('Failed to fetch profile articles:', e);
+                if (articlesBox) {
+                    articlesBox.innerHTML = '<div style="padding: 24px; color: #aaa; text-align: center;">Failed to load articles.</div>';
+                }
+            });
+        }
+    };
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            activate(tab.dataset.profileTab);
+        });
+    });
+}
+
+// Fetch and render kind-30023 articles for the full-page profile view.
+async function fetchUserArticles(pubkey) {
+    const box = document.getElementById('userArticlesContainer');
+    if (!box) return;
+    box.innerHTML = '<div style="padding: 24px; text-align: center; color: #888;">Loading articles…</div>';
+    try {
+        const Articles = await import('../articles.js');
+        const events = await Articles.queryArticles({ authors: [pubkey], limit: 30 });
+        if (!events.length) {
+            box.innerHTML = '<div style="padding: 24px; color: #888; text-align: center;">No articles yet.</div>';
+            return;
+        }
+        box.innerHTML = `<div class="articles-feed" style="padding: 12px;">${
+            events.map(ev => Articles.renderArticleCard(ev)).join('')
+        }</div>`;
+        Articles.wireArticleHandlers(box);
+    } catch (e) {
+        console.error('fetchUserArticles failed:', e);
+        box.innerHTML = '<div style="padding: 24px; color: #aaa; text-align: center;">Failed to load articles.</div>';
+    }
+}
+
 async function fetchUserPosts(pubkey) {
     try {
         // Import required modules
@@ -632,13 +697,20 @@ export async function viewUserProfilePage(pubkey) {
                         <button onclick="copyUserNpub('${pubkey}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 8px 16px; cursor: pointer; font-size: 14px;">📋 Copy npub</button>
                     </div>
                 </div>
+                <div class="profile-tabs" style="border-top: 1px solid var(--border-color); margin-top: 16px; display: flex; gap: 0;">
+                    <button class="profile-tab active" data-profile-tab="notes" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid var(--accent-color, #f60); color: var(--text-primary); font-size: 14px; cursor: pointer;">Notes</button>
+                    <button class="profile-tab" data-profile-tab="articles" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary, #888); font-size: 14px; cursor: pointer;">Articles</button>
+                </div>
                 <div id="userPostsContainer" style="word-break: break-word; overflow-wrap: break-word; max-width: 100%;">
                     <div style="text-align: center; color: #666; padding: 40px;">
                         <p>Loading user posts...</p>
                     </div>
                 </div>
+                <div id="userArticlesContainer" style="display: none; word-break: break-word; overflow-wrap: break-word; max-width: 100%;"></div>
             </div>
         `;
+
+        wireProfilePageTabs(pubkey);
 
         // Update follow button state
         await updateFollowButton(pubkey);

@@ -1333,6 +1333,12 @@ const RightPanel = {
             section.innerHTML = Articles.renderArticleReader(event);
             Articles.wireArticleHandlers(section);
 
+            // If the article is paywalled and the user already paid, swap in
+            // the decrypted body immediately. No-op for non-paywalled articles.
+            Articles.hydrateArticlePaywall?.(section, event).catch(err => {
+                console.warn('Paywall hydration failed:', err);
+            });
+
             // Hydrate any embedded notes / images inside the article body via
             // the existing embedded-event loader.
             try {
@@ -3001,6 +3007,13 @@ window.openArticleReader = (eventOrCoord) => RightPanel.openArticle(eventOrCoord
 // PDF reader dispatch. pdf-reader.js initPdfReader() document-level click
 // listener calls this when any [data-action="open-pdf"] is clicked.
 window.openPdfReader = (arg) => RightPanel.openPdf(arg);
+
+// NIP-23 article composer entry. Wired to the hamburger menu "Write Article"
+// item and any future header / floating-action entry points.
+window.openArticleEditor = async ({ draftEvent = null } = {}) => {
+    const Editor = await import('./articles-editor.js?v=6');
+    Editor.openComposer({ draftEvent });
+};
 
 // Bootstrap PDF auto-hydration once at module load — sets up the
 // MutationObserver that finds .pdf-card elements as they're inserted into

@@ -491,6 +491,7 @@ export async function updateHeaderUIForAuthState() {
     const createAccountBtn = document.getElementById('headerCreateAccountBtn');
     const createNoteBtn = document.getElementById('headerCreateNoteBtn');
     const menuCreateNoteBtn = document.getElementById('menuCreateNoteBtn');
+    const menuWriteArticleBtn = document.getElementById('menuWriteArticleBtn');
     const menuLogoutBtn = document.getElementById('menuLogoutBtn');
     const menuLoginOptions = document.getElementById('menuLoginOptions');
     const menuUserInfo = document.getElementById('menuUserInfo');
@@ -507,6 +508,7 @@ export async function updateHeaderUIForAuthState() {
         if (createAccountBtn) createAccountBtn.style.display = 'none';
         if (createNoteBtn) createNoteBtn.style.display = 'flex';
         if (menuCreateNoteBtn) menuCreateNoteBtn.style.display = 'flex';
+        if (menuWriteArticleBtn) menuWriteArticleBtn.style.display = 'flex';
         if (menuLogoutBtn) menuLogoutBtn.style.display = 'flex';
         if (menuLoginOptions) menuLoginOptions.style.display = 'none';
         if (notificationsBtn) notificationsBtn.style.display = 'flex';
@@ -561,6 +563,7 @@ export async function updateHeaderUIForAuthState() {
         if (createAccountBtn) createAccountBtn.style.display = 'flex';
         if (createNoteBtn) createNoteBtn.style.display = 'none';
         if (menuCreateNoteBtn) menuCreateNoteBtn.style.display = 'none';
+        if (menuWriteArticleBtn) menuWriteArticleBtn.style.display = 'none';
         if (menuLogoutBtn) menuLogoutBtn.style.display = 'none';
         if (menuLoginOptions) menuLoginOptions.style.display = 'block';
         if (menuUserInfo) menuUserInfo.style.display = 'none';
