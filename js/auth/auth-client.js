@@ -422,163 +422,120 @@ export async function migrateToV2({ username, password, nsec }) {
 }
 
 /**
- * Request password reset email
+ * Reset a forgotten password using the user's backed-up nsec.
  *
- * @param {string} email - Email address
- * @returns {Promise<Object>} API response
- */
-export async function forgotPassword(email) {
-  const response = await fetch(`${API_BASE}/forgot-password`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email })
-  });
-
-  return response.json();
-}
-
-/**
- * Get info needed for password reset
+ * The server can't email a reset link in the v2 model — it never sees the
+ * plaintext nsec, so it can't re-encrypt the ncryptsec under a new password
+ * on the user's behalf. The user must supply the nsec themselves. We then:
+ *   1. Re-encrypt the nsec under the new password (NIP-49) → new ncryptsec
+ *   2. Re-derive the deterministic salt + PBKDF2 hash for the new password
+ *   3. Sign a NIP-98 request with the supplied nsec (proves account control)
+ *   4. POST to /reset-with-nsec — server bcrypt-wraps and writes the new row
  *
- * SECURITY IMPROVEMENTS:
- * - Validates token format and expiration before use
- * - Enforces HTTPS connection
- *
- * @param {string} token - Reset token from email
- * @returns {Promise<Object>} { email, npub }
- */
-export async function getResetInfo(token) {
-  // SECURITY: Enforce HTTPS
-  enforceHTTPS();
-
-  // SECURITY: Validate token format before sending to server
-  validateToken(token);
-
-  const response = await fetch(`${API_BASE}/reset-password-info?token=${encodeURIComponent(token)}`);
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.error || 'Invalid or expired reset link');
-  }
-
-  return data;
-}
-
-/**
- * Reset password with token
- * Note: User must provide their nsec to re-encrypt with new password
- *
- * SECURITY IMPROVEMENTS:
- * - Enforces HTTPS connection
- * - Validates reset token before use
- * - Hashes new password client-side before transmission
- * - Private key (nsec) stays on client, only encrypted version sent
+ * The signature is built inline rather than via signedFetch because the user
+ * isn't logged in yet; signedFetch's signEvent reads from session State.
  *
  * @param {Object} params
- * @param {string} params.token - Reset token from email
- * @param {string} params.nsec - Private key to re-encrypt (stays on client)
- * @param {string} params.newPassword - New password
- * @returns {Promise<Object>} API response
+ * @param {string} params.username - Account username
+ * @param {string} params.nsec - User's pasted nsec (NEVER sent to server)
+ * @param {string} params.newPassword - New password the user is setting
+ * @returns {Promise<{ npub, username, ncryptsec, nsec }>} Ready to feed into
+ *   completeLoginWithNsec — caller is logged in as soon as this resolves.
  */
-export async function resetPassword({ token, nsec, newPassword }) {
-  // SECURITY: Enforce HTTPS
+export async function resetPasswordWithNsec({ username, nsec, newPassword }) {
   enforceHTTPS();
 
-  // SECURITY: Validate token format
-  validateToken(token);
+  if (!username || !nsec || !newPassword) {
+    throw new Error('username, nsec, and newPassword are required');
+  }
 
   const passwordValidation = nip49.validatePassword(newPassword);
   if (!passwordValidation.valid) {
     throw new Error(passwordValidation.error);
   }
 
-  // Encrypt nsec with new password (client-side only)
-  const new_ncryptsec = await nip49.encrypt(nsec, newPassword);
+  // Decode nsec → secret key bytes + derive npub. nostr-tools is loaded at
+  // the same version used elsewhere in the auth flow (handleSignup) so behavior
+  // matches signup/login.
+  const { decode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
+  const { getPublicKey, finalizeEvent } = await import('https://esm.sh/nostr-tools@2.7.0/pure');
+  const { npubEncode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
 
-  // SECURITY: Hash new password client-side
-  const { hash: newPasswordHash, salt: newPasswordSalt } = await hashPassword(newPassword);
+  let secretKeyBytes;
+  try {
+    const decoded = decode(nsec.trim());
+    if (decoded.type !== 'nsec') {
+      throw new Error('Pasted key is not an nsec');
+    }
+    secretKeyBytes = decoded.data; // Uint8Array
+  } catch (err) {
+    throw new Error('Invalid nsec format');
+  }
+  const pubkeyHex = getPublicKey(secretKeyBytes);
+  const npub = npubEncode(pubkeyHex);
 
-  const response = await fetch(`${API_BASE}/reset-password`, {
+  // Re-encrypt nsec under the new password (NIP-49). The plaintext nsec is
+  // the same; only the encryption wrapping changes.
+  const newNcryptsec = await nip49.encrypt(nsec.trim(), newPassword);
+
+  // Re-derive deterministic salt + PBKDF2 hash for the new password.
+  const newSalt = await deriveDeterministicSalt(username);
+  const { hash: newPasswordHash } = await hashPassword(newPassword, newSalt);
+
+  // Build the request body, sign a NIP-98 event over (URL, method, payload)
+  // using the supplied nsec, attach as Authorization header.
+  const bodyJson = JSON.stringify({
+    username,
+    new_password_hash: newPasswordHash,
+    new_password_salt: newSalt,
+    new_ncryptsec: newNcryptsec
+  });
+  const url = new URL(`${API_BASE}/reset-with-nsec`, window.location.origin).toString();
+  const payloadHash = await sha256Hex(bodyJson);
+  const eventTemplate = {
+    kind: 27235,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['u', url],
+      ['method', 'POST'],
+      ['payload', payloadHash]
+    ],
+    content: ''
+  };
+  const signedEvent = finalizeEvent(eventTemplate, secretKeyBytes);
+  const authHeader = 'Nostr ' + btoa(JSON.stringify(signedEvent));
+
+  const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      token,
-      newPasswordHash,      // Hashed password instead of plain text
-      newPasswordSalt,      // Salt for new password
-      new_ncryptsec
-      // REMOVED: new_password - NEVER send plain text password
-    })
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': authHeader
+    },
+    body: bodyJson
   });
 
   const data = await response.json();
-
   if (!response.ok) {
-    throw new Error(data.error || 'Password reset failed');
+    throw new Error(data.error || `Reset failed (HTTP ${response.status})`);
   }
 
-  return data;
+  // Caller still has the plaintext nsec, just return it alongside server
+  // response so the UI can hand it directly to completeLoginWithNsec.
+  return {
+    nsec: nsec.trim(),
+    npub: data.npub || npub,
+    username: data.username || username,
+    ncryptsec: data.ncryptsec || newNcryptsec
+  };
 }
 
-/**
- * Add email/password recovery to existing Nostr account
- *
- * SECURITY IMPROVEMENTS:
- * - Enforces HTTPS connection
- * - Hashes password client-side before transmission
- * - Private key (nsec) is never sent to server
- *
- * @param {Object} params
- * @param {string} params.nsec - Current private key (NEVER sent to server)
- * @param {string} params.npub - Public key
- * @param {string} params.password - New password
- * @param {string} [params.email] - Optional email
- * @param {string} [params.username] - Optional username
- * @returns {Promise<Object>} API response
- */
-export async function addRecovery({ nsec, npub, password, email, username }) {
-  // SECURITY: Enforce HTTPS
-  enforceHTTPS();
-
-  if (!nsec || !npub || !password) {
-    throw new Error('nsec, npub, and password are required');
-  }
-
-  if (!email && !username) {
-    throw new Error('Either email or username is required');
-  }
-
-  const passwordValidation = nip49.validatePassword(password);
-  if (!passwordValidation.valid) {
-    throw new Error(passwordValidation.error);
-  }
-
-  // Encrypt nsec with password (client-side only)
-  const ncryptsec = await nip49.encrypt(nsec, password);
-
-  // SECURITY: Hash password client-side
-  const { hash: passwordHash, salt: passwordSalt } = await hashPassword(password);
-
-  const response = await fetch(`${API_BASE}/add-recovery`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      npub,
-      ncryptsec,
-      passwordHash,      // Hashed password instead of plain text
-      passwordSalt,      // Salt for password verification
-      email: email || undefined,
-      username: username || undefined
-      // REMOVED: password - NEVER send plain text password
-    })
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.error || 'Failed to add recovery');
-  }
-
-  return data;
+// Local SHA-256-hex helper, kept module-private — mirrors the helper in
+// signed-fetch.js. Not exported; only used by resetPasswordWithNsec above.
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 /**

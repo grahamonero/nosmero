@@ -1969,14 +1969,19 @@ async function loadSettings_OLD_DISABLED() {
                         </p>
                     </div>
                 </div>
+                <div style="margin-top: 15px; padding: 10px 12px; background: rgba(255, 102, 0, 0.08); border-radius: 8px; border-left: 3px solid #FF6600;">
+                    <div style="color: #FFB070; font-size: 12px; line-height: 1.5;">
+                        <strong>Back this up.</strong> If you forget your password and don't have your nsec saved, your account cannot be recovered — there is no email reset link.
+                    </div>
+                </div>
                 <div style="margin-top: 15px;">
-                    <button onclick="exportPrivateKey()" 
+                    <button onclick="exportPrivateKey()"
                             style="padding: 10px 20px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">
-                        🔑 Export Private Key
+                        🔑 Show / Copy / Download
                     </button>
                 </div>
             </div>
-            
+
             <!-- Posting Settings -->
             <div style="margin-bottom: 40px; background: #1a1a1a; padding: 20px; border-radius: 12px;">
                 <h3 style="color: #fff; margin-bottom: 20px;">📝 Posting & Zaps</h3>
@@ -2536,22 +2541,29 @@ function exportPrivateKey() {
                 background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; 
                 z-index: 10000;
             `;
+            const accountLabel = (window.State?.userMetadata?.username || window.State?.userMetadata?.name || 'nosmero').replace(/[^a-zA-Z0-9_-]/g, '');
             modal.innerHTML = `
                 <div style="background: #1a1a1a; padding: 30px; border-radius: 12px; max-width: 500px; text-align: center;">
-                    <h3 style="color: #FF6600; margin-bottom: 20px;">🔑 Your Private Key</h3>
-                    <div style="background: #333; padding: 15px; border-radius: 8px; word-break: break-all; font-family: monospace; margin-bottom: 20px; color: #fff;">
+                    <h3 style="color: #FF6600; margin-bottom: 16px;">🔑 Your Private Key</h3>
+                    <div style="background: #333; padding: 15px; border-radius: 8px; word-break: break-all; font-family: monospace; margin-bottom: 16px; color: #fff; font-size: 13px;">
                         ${nsec}
                     </div>
-                    <div style="margin-bottom: 20px; color: #ccc; font-size: 14px;">
-                        ⚠️ Keep this safe! Anyone with this key can control your account.
+                    <div style="margin-bottom: 20px; padding: 10px 12px; background: rgba(255, 102, 0, 0.08); border-radius: 8px; border-left: 3px solid #FF6600; text-align: left;">
+                        <div style="color: #FFB070; font-size: 13px; line-height: 1.5;">
+                            ⚠️ This is your account backup. Save it in a password manager or download the file. If you lose your password and don't have this nsec, your account cannot be recovered.
+                        </div>
                     </div>
-                    <div style="display: flex; gap: 10px; justify-content: center;">
-                        <button onclick="navigator.clipboard.writeText('${nsec}'); this.textContent='Copied!'" 
-                                style="padding: 10px 20px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                    <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                        <button onclick="navigator.clipboard.writeText('${nsec}'); this.textContent='Copied!'"
+                                style="padding: 10px 16px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">
                             📋 Copy
                         </button>
-                        <button onclick="this.closest('.modal').remove()" 
-                                style="padding: 10px 20px; background: #666; border: none; color: #fff; border-radius: 6px; cursor: pointer;">
+                        <button onclick="window.authUI?.downloadNsecBackup('${nsec}', '${accountLabel}')"
+                                style="padding: 10px 16px; background: #8B5CF6; border: none; color: #fff; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                            💾 Download Backup
+                        </button>
+                        <button onclick="this.closest('.modal').remove()"
+                                style="padding: 10px 16px; background: #666; border: none; color: #fff; border-radius: 6px; cursor: pointer;">
                             Close
                         </button>
                     </div>

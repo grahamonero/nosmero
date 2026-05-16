@@ -137,7 +137,7 @@ export function showLoginModalWithLogin() {
         document.getElementById('returningUserSection')?.classList.remove('hidden');
         // Update header
         const header = document.getElementById('loginModalHeader');
-        if (header) header.textContent = 'Log In';
+        if (header) header.textContent = 'Sign In to Nosmero';
         document.getElementById('emailOrUsernameInput')?.focus();
     }
 }
@@ -151,7 +151,7 @@ export function showCreateAccountModal() {
         document.getElementById('newUserSection')?.classList.remove('hidden');
         // Update header
         const header = document.getElementById('loginModalHeader');
-        if (header) header.textContent = 'Create Account';
+        if (header) header.textContent = 'Join Nosmero';
         document.getElementById('displayNameInput')?.focus();
     }
 }
@@ -180,7 +180,7 @@ export function backToLoginOptions() {
     document.getElementById('loginMainButtons')?.classList.remove('hidden');
     document.getElementById('returningUserSection')?.classList.remove('hidden');
     const header = document.getElementById('loginModalHeader');
-    if (header) header.textContent = 'Log In';
+    if (header) header.textContent = 'Sign In to Nosmero';
 }
 
 // Make functions globally available
