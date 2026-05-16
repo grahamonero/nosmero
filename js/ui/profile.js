@@ -125,7 +125,9 @@ function wireProfilePageTabs(pubkey) {
     if (!tabs || !tabs.length) return;
     const notesBox = document.getElementById('userPostsContainer');
     const articlesBox = document.getElementById('userArticlesContainer');
+    const highlightsBox = document.getElementById('userHighlightsContainer');
     let articlesLoaded = false;
+    let highlightsLoaded = false;
 
     const activate = (which) => {
         tabs.forEach(t => {
@@ -140,6 +142,7 @@ function wireProfilePageTabs(pubkey) {
         });
         if (notesBox) notesBox.style.display = (which === 'notes') ? '' : 'none';
         if (articlesBox) articlesBox.style.display = (which === 'articles') ? '' : 'none';
+        if (highlightsBox) highlightsBox.style.display = (which === 'highlights') ? '' : 'none';
 
         if (which === 'articles' && !articlesLoaded) {
             articlesLoaded = true;
@@ -147,6 +150,15 @@ function wireProfilePageTabs(pubkey) {
                 console.warn('Failed to fetch profile articles:', e);
                 if (articlesBox) {
                     articlesBox.innerHTML = '<div style="padding: 24px; color: #aaa; text-align: center;">Failed to load articles.</div>';
+                }
+            });
+        }
+        if (which === 'highlights' && !highlightsLoaded) {
+            highlightsLoaded = true;
+            fetchUserHighlights(pubkey).catch(e => {
+                console.warn('Failed to fetch profile highlights:', e);
+                if (highlightsBox) {
+                    highlightsBox.innerHTML = '<div style="padding: 24px; color: #aaa; text-align: center;">Failed to load highlights.</div>';
                 }
             });
         }
@@ -158,6 +170,28 @@ function wireProfilePageTabs(pubkey) {
             activate(tab.dataset.profileTab);
         });
     });
+}
+
+// Fetch and render kind-9802 highlights for the full-page profile view (NIP-84).
+async function fetchUserHighlights(pubkey) {
+    const box = document.getElementById('userHighlightsContainer');
+    if (!box) return;
+    box.innerHTML = '<div style="padding: 24px; text-align: center; color: #888;">Loading highlights…</div>';
+    try {
+        const Highlights = await import('../highlights.js?v=2');
+        const events = await Highlights.fetchHighlightsByAuthor(pubkey, { limit: 50 });
+        if (!events.length) {
+            box.innerHTML = '<div style="padding: 24px; color: #888; text-align: center;">No highlights yet.</div>';
+            return;
+        }
+        box.innerHTML = `<div class="highlights-feed" style="padding: 12px;">${
+            events.map(ev => Highlights.renderHighlightCard(ev)).join('')
+        }</div>`;
+        Highlights.wireHighlightHandlers(box);
+    } catch (e) {
+        console.error('fetchUserHighlights failed:', e);
+        box.innerHTML = '<div style="padding: 24px; color: #aaa; text-align: center;">Failed to load highlights.</div>';
+    }
 }
 
 // Fetch and render kind-30023 articles for the full-page profile view.
@@ -700,6 +734,7 @@ export async function viewUserProfilePage(pubkey) {
                 <div class="profile-tabs" style="border-top: 1px solid var(--border-color); margin-top: 16px; display: flex; gap: 0;">
                     <button class="profile-tab active" data-profile-tab="notes" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid var(--accent-color, #f60); color: var(--text-primary); font-size: 14px; cursor: pointer;">Notes</button>
                     <button class="profile-tab" data-profile-tab="articles" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary, #888); font-size: 14px; cursor: pointer;">Articles</button>
+                    <button class="profile-tab" data-profile-tab="highlights" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary, #888); font-size: 14px; cursor: pointer;">Highlights</button>
                 </div>
                 <div id="userPostsContainer" style="word-break: break-word; overflow-wrap: break-word; max-width: 100%;">
                     <div style="text-align: center; color: #666; padding: 40px;">
@@ -707,6 +742,7 @@ export async function viewUserProfilePage(pubkey) {
                     </div>
                 </div>
                 <div id="userArticlesContainer" style="display: none; word-break: break-word; overflow-wrap: break-word; max-width: 100%;"></div>
+                <div id="userHighlightsContainer" style="display: none; word-break: break-word; overflow-wrap: break-word; max-width: 100%;"></div>
             </div>
         `;
 

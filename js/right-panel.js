@@ -1339,6 +1339,25 @@ const RightPanel = {
                 console.warn('Paywall hydration failed:', err);
             });
 
+            // NIP-84 highlights: install the selection toolbar so the reader
+            // can publish kind 9802 over arbitrary passages, and fetch existing
+            // highlights for a heatmap overlay. Both fire async — heatmap is
+            // delayed slightly so it runs after paywall hydration mounts the
+            // decrypted body (otherwise we'd only mark the public preview).
+            (async () => {
+                try {
+                    const Highlights = await import('./highlights.js?v=2');
+                    Highlights.installSelectionToolbar(section, event);
+                    setTimeout(() => {
+                        Highlights.applyHeatmap(section, event).catch(e =>
+                            console.warn('Heatmap apply failed:', e?.message || e)
+                        );
+                    }, 800);
+                } catch (e) {
+                    console.warn('Highlights module load failed:', e?.message || e);
+                }
+            })();
+
             // Hydrate any embedded notes / images inside the article body via
             // the existing embedded-event loader.
             try {
@@ -1870,11 +1889,13 @@ const RightPanel = {
                 <div class="panel-profile-tabs" style="border-top: 1px solid var(--border-color); padding: 0; background: rgba(0,0,0,0.2); display: flex; gap: 0;">
                     <button class="panel-profile-tab active" data-profile-tab="notes" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid var(--accent-color, #f60); color: #ddd; font-size: 13px; cursor: pointer;">Notes</button>
                     <button class="panel-profile-tab" data-profile-tab="articles" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #888; font-size: 13px; cursor: pointer;">Articles</button>
+                    <button class="panel-profile-tab" data-profile-tab="highlights" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #888; font-size: 13px; cursor: pointer;">Highlights</button>
                 </div>
                 <div id="panelProfilePosts" style="padding: 0;">
                     <div class="loading" style="padding: 20px; text-align: center;">Loading notes...</div>
                 </div>
                 <div id="panelProfileArticles" style="padding: 0; display: none;"></div>
+                <div id="panelProfileHighlights" style="padding: 0; display: none;"></div>
             `;
 
             // Update follow button state
@@ -1982,7 +2003,9 @@ const RightPanel = {
         if (!tabs || !tabs.length) return;
         const notesBox = document.getElementById('panelProfilePosts');
         const articlesBox = document.getElementById('panelProfileArticles');
+        const highlightsBox = document.getElementById('panelProfileHighlights');
         let articlesLoaded = false;
+        let highlightsLoaded = false;
 
         const activate = (which) => {
             tabs.forEach(t => {
@@ -1995,6 +2018,7 @@ const RightPanel = {
             });
             if (notesBox) notesBox.style.display = (which === 'notes') ? '' : 'none';
             if (articlesBox) articlesBox.style.display = (which === 'articles') ? '' : 'none';
+            if (highlightsBox) highlightsBox.style.display = (which === 'highlights') ? '' : 'none';
 
             if (which === 'articles' && !articlesLoaded) {
                 articlesLoaded = true;
@@ -2002,6 +2026,15 @@ const RightPanel = {
                     console.warn('Failed to fetch panel profile articles:', e);
                     if (articlesBox) {
                         articlesBox.innerHTML = '<div style="padding: 20px; color: #aaa;">Failed to load articles.</div>';
+                    }
+                });
+            }
+            if (which === 'highlights' && !highlightsLoaded) {
+                highlightsLoaded = true;
+                this.fetchPanelProfileHighlights(pubkey).catch(e => {
+                    console.warn('Failed to fetch panel profile highlights:', e);
+                    if (highlightsBox) {
+                        highlightsBox.innerHTML = '<div style="padding: 20px; color: #aaa;">Failed to load highlights.</div>';
                     }
                 });
             }
@@ -2013,6 +2046,30 @@ const RightPanel = {
                 activate(tab.dataset.profileTab);
             });
         });
+    },
+
+    /**
+     * Fetch and render kind-9802 highlights for a profile (NIP-84).
+     */
+    async fetchPanelProfileHighlights(pubkey) {
+        const box = document.getElementById('panelProfileHighlights');
+        if (!box) return;
+        box.innerHTML = '<div class="loading" style="padding: 20px; text-align: center;">Loading highlights…</div>';
+        try {
+            const Highlights = await import('./highlights.js?v=2');
+            const events = await Highlights.fetchHighlightsByAuthor(pubkey, { limit: 50 });
+            if (!events.length) {
+                box.innerHTML = '<div style="padding: 20px; color: #888; text-align: center;">No highlights yet.</div>';
+                return;
+            }
+            box.innerHTML = `<div class="highlights-feed" style="padding: 12px;">${
+                events.map(ev => Highlights.renderHighlightCard(ev)).join('')
+            }</div>`;
+            Highlights.wireHighlightHandlers(box);
+        } catch (e) {
+            console.error('fetchPanelProfileHighlights failed:', e);
+            box.innerHTML = '<div style="padding: 20px; color: #aaa;">Failed to load highlights.</div>';
+        }
     },
 
     /**

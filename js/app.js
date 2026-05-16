@@ -930,6 +930,10 @@ async function loadUserProfile() {
                             style="padding: 10px 20px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer;">
                         Articles
                     </button>
+                    <button id="profileTabHighlights" class="profile-tab" onclick="switchProfileTab('highlights')"
+                            style="padding: 10px 20px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer;">
+                        Highlights
+                    </button>
                     <button id="profileTabAbout" class="profile-tab" onclick="switchProfileTab('about')"
                             style="padding: 10px 20px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #fff; cursor: pointer;">
                         About
@@ -1397,6 +1401,28 @@ async function displayMoneroAddressInProfile(profile) {
                 <span style="margin-right: 6px;">💰</span>Error loading XMR address
             </div>
         `;
+    }
+}
+
+// Load logged-in user's NIP-84 highlights into the own-profile Highlights tab.
+async function loadOwnProfileHighlights() {
+    const profileContent = document.getElementById('profileContent');
+    if (!profileContent || !State.publicKey) return;
+    profileContent.innerHTML = '<div style="text-align: center; color: #888; padding: 40px;">Loading highlights…</div>';
+    try {
+        const Highlights = await import('./highlights.js?v=2');
+        const events = await Highlights.fetchHighlightsByAuthor(State.publicKey, { limit: 50 });
+        if (!events.length) {
+            profileContent.innerHTML = '<div style="text-align: center; color: #888; padding: 40px;">No highlights yet. Select text inside any article and click 📌 to highlight.</div>';
+            return;
+        }
+        profileContent.innerHTML = `<div class="highlights-feed" style="padding: 12px;">${
+            events.map(ev => Highlights.renderHighlightCard(ev)).join('')
+        }</div>`;
+        Highlights.wireHighlightHandlers(profileContent);
+    } catch (e) {
+        console.error('loadOwnProfileHighlights failed:', e);
+        profileContent.innerHTML = '<div style="text-align: center; color: #aaa; padding: 40px;">Failed to load highlights.</div>';
     }
 }
 
@@ -1875,6 +1901,9 @@ function switchProfileTab(tab) {
             break;
         case 'articles':
             loadOwnProfileArticles();
+            break;
+        case 'highlights':
+            loadOwnProfileHighlights();
             break;
         case 'about':
             const userProfile = State.profileCache[State.publicKey] || {};
