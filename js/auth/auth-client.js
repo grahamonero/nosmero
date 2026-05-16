@@ -529,6 +529,93 @@ export async function resetPasswordWithNsec({ username, nsec, newPassword }) {
   };
 }
 
+/**
+ * Create a username/password account anchored to an EXISTING nsec the user
+ * already controls. Mirrors `signup()` except the nsec is supplied (not
+ * generated) and the server proves ownership via NIP-98 instead of trusting
+ * the npub from the body.
+ *
+ * @param {Object} params
+ * @param {string} params.nsec - User's existing nsec (NEVER sent to server)
+ * @param {string} params.username - Desired Nosmero username
+ * @param {string} params.password - Password for this account
+ * @returns {Promise<{ nsec, npub, username, ncryptsec }>} Ready to feed into
+ *   completeLoginWithNsec — caller is logged in as soon as this resolves.
+ */
+export async function signupWithNsec({ nsec, username, password }) {
+  enforceHTTPS();
+
+  if (!nsec || !username || !password) {
+    throw new Error('nsec, username, and password are required');
+  }
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    throw new Error('Username must be 3-20 characters (letters, numbers, underscore)');
+  }
+  const passwordValidation = nip49.validatePassword(password);
+  if (!passwordValidation.valid) {
+    throw new Error(passwordValidation.error);
+  }
+
+  const { decode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
+  const { getPublicKey, finalizeEvent } = await import('https://esm.sh/nostr-tools@2.7.0/pure');
+  const { npubEncode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
+
+  let secretKeyBytes;
+  try {
+    const decoded = decode(nsec.trim());
+    if (decoded.type !== 'nsec') throw new Error('Pasted key is not an nsec');
+    secretKeyBytes = decoded.data;
+  } catch (_) {
+    throw new Error('Invalid nsec format');
+  }
+  const pubkeyHex = getPublicKey(secretKeyBytes);
+  const npub = npubEncode(pubkeyHex);
+
+  // Encrypt the user's nsec under their chosen password (NIP-49) and derive
+  // the v2 deterministic salt + PBKDF2 hash — same shape as regular signup.
+  const ncryptsec = await nip49.encrypt(nsec.trim(), password);
+  const salt = await deriveDeterministicSalt(username);
+  const { hash: passwordHash } = await hashPassword(password, salt);
+
+  const bodyJson = JSON.stringify({
+    username: username.toLowerCase(),
+    ncryptsec,
+    passwordHash,
+    passwordSalt: salt
+  });
+  const url = new URL(`${API_BASE}/signup-with-nsec`, window.location.origin).toString();
+  const payloadHash = await sha256Hex(bodyJson);
+  const eventTemplate = {
+    kind: 27235,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['u', url],
+      ['method', 'POST'],
+      ['payload', payloadHash]
+    ],
+    content: ''
+  };
+  const signedEvent = finalizeEvent(eventTemplate, secretKeyBytes);
+  const authHeader = 'Nostr ' + btoa(JSON.stringify(signedEvent));
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+    body: bodyJson
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || `Signup failed (HTTP ${response.status})`);
+  }
+
+  return {
+    nsec: nsec.trim(),
+    npub: data.npub || npub,
+    username: data.username || username.toLowerCase(),
+    ncryptsec: data.ncryptsec || ncryptsec
+  };
+}
+
 // Local SHA-256-hex helper, kept module-private — mirrors the helper in
 // signed-fetch.js. Not exported; only used by resetPasswordWithNsec above.
 async function sha256Hex(str) {

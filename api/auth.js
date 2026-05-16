@@ -261,6 +261,90 @@ router.post('/signup', signupLimiter, async (req, res) => {
 });
 
 /**
+ * POST /api/auth/signup-with-nsec
+ *
+ * Create a username/password account anchored to an EXISTING nsec the user
+ * already controls (e.g., imported from Damus, Amethyst, another Nostr client).
+ * Mirrors /signup except:
+ *   - The npub is not generated server-side or trusted from the body — it's
+ *     derived from the NIP-98 signing pubkey. This is the ownership proof:
+ *     only someone who holds the nsec can produce this signature.
+ *   - Re-runs the same uniqueness checks (npub, username) as /signup so a
+ *     given Nostr identity maps to at most one Nosmero username/password row.
+ *
+ * Body: {
+ *   username: string (required),
+ *   ncryptsec: string (required - nsec encrypted client-side with password),
+ *   passwordHash: string (required - PBKDF2 hash, hex),
+ *   passwordSalt: string (required - hex; v2 deterministic salt expected)
+ * }
+ */
+router.post('/signup-with-nsec', signupLimiter, requireNip98(), async (req, res) => {
+  try {
+    const { username, ncryptsec, passwordHash, passwordSalt } = req.body;
+
+    if (!username || !ncryptsec || !passwordHash || !passwordSalt) {
+      return res.status(400).json({
+        success: false,
+        error: 'username, ncryptsec, passwordHash, and passwordSalt required'
+      });
+    }
+    if (!isValidUsername(username)) {
+      return res.status(400).json({ success: false, error: 'Invalid username format' });
+    }
+    if (!isValidNcryptsec(ncryptsec)) {
+      return res.status(400).json({ success: false, error: 'Invalid ncryptsec format' });
+    }
+    if (!/^[a-f0-9]{64}$/i.test(passwordHash)) {
+      return res.status(400).json({ success: false, error: 'Invalid passwordHash format' });
+    }
+    if (!/^([a-f0-9]{32}|[a-f0-9]{64})$/i.test(passwordSalt)) {
+      return res.status(400).json({ success: false, error: 'Invalid passwordSalt format' });
+    }
+
+    // Derive npub from the NIP-98 signing pubkey. This is what proves the
+    // caller controls this Nostr identity — we don't trust a body field.
+    const { npubEncode } = await import('nostr-tools/nip19');
+    const npub = npubEncode(req.nip98.pubkey);
+
+    if (npubExists(npub)) {
+      return res.status(409).json({
+        success: false,
+        error: 'This Nostr identity already has a Nosmero account'
+      });
+    }
+    if (usernameExists(username)) {
+      return res.status(409).json({
+        success: false,
+        error: 'Username already taken'
+      });
+    }
+
+    // createUser handles bcrypt-wrapping the password_hash and marks version=2
+    const user = createUser({
+      npub,
+      email: null,
+      username,
+      ncryptsec,
+      password_hash: passwordHash,
+      password_salt: passwordSalt
+    });
+    console.log(`[Auth] Signup with existing nsec: ${username} (${npub.slice(0, 12)}…)`);
+
+    return res.json({
+      success: true,
+      user_id: user.id,
+      npub,
+      username,
+      ncryptsec
+    });
+  } catch (error) {
+    console.error('[Auth] Signup-with-nsec error:', error?.message || error);
+    return res.status(500).json({ success: false, error: 'Signup failed' });
+  }
+});
+
+/**
  * POST /api/auth/get-salt
  *
  * Get user's password salt for client-side hashing before login.
