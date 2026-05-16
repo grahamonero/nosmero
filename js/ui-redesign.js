@@ -434,7 +434,14 @@ function showLoginOptions() {
     document.body.appendChild(modal);
 }
 
-// Helper function to update menu user info
+// Helper function to update menu user info.
+//
+// Idempotent across repeat calls: only mutates DOM properties whose values
+// actually changed. updateHeaderUIForAuthState is called several times during
+// login (initNavigation immediate + 500ms + 2s delayed + post-login). Without
+// the equality checks, each call re-assigns menuUserPic.src to the same
+// string — which in some browsers triggers a paint reset and produces a
+// visible flicker on the avatar.
 function updateMenuUserInfo(profile, shortNpub) {
     const userName = profile?.name || profile?.display_name || shortNpub || 'Anonymous';
     const profilePic = sanitizeImageUrl(profile?.picture);
@@ -443,19 +450,22 @@ function updateMenuUserInfo(profile, shortNpub) {
     const menuUserNpub = document.getElementById('menuUserNpub');
     const menuUserPic = document.getElementById('menuUserPic');
 
-    if (menuUserName) {
+    if (menuUserName && menuUserName.textContent !== userName) {
         menuUserName.textContent = userName;
     }
 
-    if (menuUserNpub) {
+    if (menuUserNpub && menuUserNpub.textContent !== shortNpub) {
         menuUserNpub.textContent = shortNpub;
     }
 
     if (menuUserPic) {
-        menuUserPic.src = profilePic;
-        // Handle image load errors
+        if (menuUserPic.getAttribute('src') !== profilePic) {
+            menuUserPic.src = profilePic;
+        }
         menuUserPic.onerror = function() {
-            this.src = '/default-avatar.png';
+            if (this.getAttribute('src') !== '/default-avatar.png') {
+                this.src = '/default-avatar.png';
+            }
         };
     }
 }

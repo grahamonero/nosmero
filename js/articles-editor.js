@@ -16,6 +16,7 @@ import * as State from './state.js';
 import * as Utils from './utils.js';
 import * as Articles from './articles.js';
 import * as Paywall from './paywall.js';
+import { signedFetch } from './signed-fetch.js';
 
 const AUTOSAVE_INTERVAL_MS = 30_000;
 const LOCALSTORAGE_KEY = 'nosmero:article-editor:scratch';
@@ -232,7 +233,7 @@ async function hydratePaywalledBodyForEdit(event) {
     const coord = `${Articles.ARTICLE_KIND}:${event.pubkey}:${meta.identifier}`;
     setBusy(true, 'Loading locked content…');
     try {
-        const keyResp = await fetch(
+        const keyResp = await signedFetch(
             `/api/paywall/creator-key/${encodeURIComponent(coord)}/${encodeURIComponent(event.pubkey)}`
         );
         const keyData = await keyResp.json().catch(() => ({}));

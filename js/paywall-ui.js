@@ -10,6 +10,7 @@
 import * as State from './state.js';
 import * as Paywall from './paywall.js';
 import * as Utils from './utils.js';
+import { signedFetch } from './signed-fetch.js';
 
 // Current unlock state
 let currentUnlockNoteId = null;
@@ -191,13 +192,13 @@ function renderPaymentMethodSelection(paywall, hasWallet, isUnlocked) {
                         <span class="method-badge">Instant</span>
                     </button>
                 ` : `
-                    <a href="/wallet.html" class="paywall-method-btn setup">
+                    <button class="paywall-method-btn setup" onclick="NostrPaywall.closeModal(); openWalletModal();">
                         <span class="method-icon">💰</span>
                         <span class="method-details">
                             <span class="method-title">Set Up Nosmero Tip Jar</span>
                             <span class="method-desc">Recommended for instant unlocks</span>
                         </span>
-                    </a>
+                    </button>
                 `}
 
                 <button class="paywall-method-btn" onclick="NostrPaywall.selectPaymentMethod('external')">
@@ -505,7 +506,7 @@ export async function submitExternalPayment() {
     `;
 
     try {
-        const response = await fetch('/api/paywall/verify', {
+        const response = await signedFetch('/api/paywall/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -664,7 +665,7 @@ async function checkPaymentConfirmation(payment) {
     if (checkBtn) checkBtn.disabled = true;
 
     try {
-        const response = await fetch('/api/paywall/verify', {
+        const response = await signedFetch('/api/paywall/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -734,7 +735,7 @@ export async function checkAllPendingPayments() {
         }
 
         try {
-            const response = await fetch('/api/paywall/verify', {
+            const response = await signedFetch('/api/paywall/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -949,7 +950,7 @@ async function getCreatorDecryptionKey(noteId, creatorPubkey) {
         }
 
         // URL encode to prevent injection
-        const response = await fetch(`/api/paywall/creator-key/${encodeURIComponent(noteId)}/${encodeURIComponent(creatorPubkey)}`);
+        const response = await signedFetch(`/api/paywall/creator-key/${encodeURIComponent(noteId)}/${encodeURIComponent(creatorPubkey)}`);
         const data = await response.json();
         if (data.success && data.decryption_key) {
             return data.decryption_key;

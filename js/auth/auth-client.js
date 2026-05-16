@@ -13,6 +13,7 @@
  */
 
 import * as nip49 from './nip49.js';
+import { signedFetch } from '../signed-fetch.js';
 
 const API_BASE = '/api/auth';
 
@@ -20,6 +21,29 @@ const API_BASE = '/api/auth';
 const PBKDF2_ITERATIONS = 100000; // OWASP recommended minimum
 const PBKDF2_SALT_LENGTH = 16; // bytes
 const TOKEN_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+// Public domain-separator for deriving per-user PBKDF2 salts deterministically
+// (salt = SHA-256(username + AUTH_PEPPER)). Must match server's api/config.js
+// AUTH_PEPPER exactly. NOT secret — visible in the client bundle by design;
+// the client needs it to compute the salt locally without a /get-salt round-
+// trip (which leaked account existence). Its job is rainbow-table separation,
+// not secrecy. Rotating it would force every user to reset their password.
+const AUTH_PEPPER = 'nosmero.com/auth/v2';
+
+/**
+ * Derive a deterministic salt from a username using the public AUTH_PEPPER.
+ * Same value on every login so the client can compute it without asking
+ * the server, eliminating the /get-salt enumeration vector for v2 users.
+ *
+ * @param {string} username
+ * @returns {Promise<string>} 64-char hex SHA-256
+ */
+async function deriveDeterministicSalt(username) {
+  const normalized = String(username || '').toLowerCase().trim();
+  const input = new TextEncoder().encode(normalized + AUTH_PEPPER);
+  const buf = await crypto.subtle.digest('SHA-256', input);
+  return bytesToHex(new Uint8Array(buf));
+}
 
 /**
  * SECURITY: Hash password client-side using PBKDF2 with SHA-256
@@ -233,9 +257,11 @@ export async function signup({ nsec, npub, password, username, createBackup = fa
   // Encrypt nsec with password using NIP-49 (stored locally only)
   const ncryptsec = await nip49.encrypt(nsec, password);
 
-  // SECURITY: Hash password client-side using PBKDF2
-  // This prevents plain-text password from being transmitted
-  const { hash: passwordHash, salt: passwordSalt } = await hashPassword(password);
+  // V2 auth: derive PBKDF2 salt deterministically from username + AUTH_PEPPER
+  // instead of a server-supplied random salt. Eliminates the /get-salt round-
+  // trip that leaked account existence via response status.
+  const passwordSalt = await deriveDeterministicSalt(username);
+  const { hash: passwordHash } = await hashPassword(password, passwordSalt);
 
   // SECURITY: Send ONLY encrypted key and hashed password - NEVER send nsec or plain password
   const response = await fetch(`${API_BASE}/signup`, {
@@ -247,7 +273,6 @@ export async function signup({ nsec, npub, password, username, createBackup = fa
       passwordHash,      // Hashed password instead of plain text
       passwordSalt,      // Salt for password verification
       username
-      // REMOVED: backupEmail, nsecForBackup - NEVER send nsec to server
     })
   });
 
@@ -287,36 +312,54 @@ export async function login(identifier, password) {
     throw new Error('Email/username and password required');
   }
 
-  // SECURITY: First, get the user's salt from server
-  const saltResponse = await fetch(`${API_BASE}/get-salt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier })
-  });
+  // Strategy:
+  //   1. Username-based login: try v2 deterministic-salt flow first (no
+  //      /get-salt round-trip). If the server says 401, fall through to
+  //      the legacy /get-salt path — that's a v1 user OR genuine bad
+  //      credentials; the legacy path is the source of truth either way.
+  //   2. Email-based login: always uses legacy /get-salt (we don't derive
+  //      deterministic salt from emails — v2 signup is username-keyed).
+  const isEmail = identifier.includes('@');
+  const usernameLikely = isEmail ? null : identifier;
 
-  const saltData = await saltResponse.json();
+  let data = null;
+  let response = null;
 
-  if (!saltResponse.ok) {
-    throw new Error(saltData.error || 'Failed to get authentication data');
+  if (usernameLikely) {
+    const v2Salt = await deriveDeterministicSalt(usernameLikely);
+    const { hash: v2Hash } = await hashPassword(password, v2Salt);
+    response = await fetch(`${API_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, passwordHash: v2Hash })
+    });
+    if (response.ok) {
+      data = await response.json();
+    }
+    // 401 → silently fall through to legacy flow. Could be v1 user, or
+    // could be genuine bad creds — the legacy attempt below settles it.
   }
 
-  // SECURITY: Hash password with user's salt
-  const { hash: passwordHash } = await hashPassword(password, saltData.salt);
-
-  // SECURITY: Send hashed password, not plain text
-  const response = await fetch(`${API_BASE}/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      identifier,
-      passwordHash  // Hashed password instead of plain text
-    })
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.error || 'Login failed');
+  if (!data) {
+    const saltResponse = await fetch(`${API_BASE}/get-salt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier })
+    });
+    const saltData = await saltResponse.json();
+    if (!saltResponse.ok) {
+      throw new Error(saltData.error || 'Failed to get authentication data');
+    }
+    const { hash: passwordHash } = await hashPassword(password, saltData.salt);
+    response = await fetch(`${API_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, passwordHash })
+    });
+    data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Login failed');
+    }
   }
 
   // Decrypt ncryptsec to get nsec (happens CLIENT-SIDE only)
@@ -328,8 +371,54 @@ export async function login(identifier, password) {
     ncryptsec: data.ncryptsec,
     email: data.email,
     username: data.username,
-    email_verified: data.email_verified
+    email_verified: data.email_verified,
+    // True when the server detects this was a v1 (legacy random-salt + raw
+    // PBKDF2) account. Caller should fire migrateToV2() in the background
+    // after the session is established.
+    migrationNeeded: data.migration_needed === true
   };
+}
+
+/**
+ * Silent v1 → v2 credentials upgrade.
+ *
+ * Called after a successful v1 login when the server flagged
+ * `migration_needed: true`. Re-derives the salt deterministically, re-hashes
+ * the password, re-encrypts the nsec with the new password+salt, and POSTs
+ * to /api/auth/migrate-credentials (NIP-98 signed with the just-decrypted
+ * nsec so the server can verify the caller controls the account).
+ *
+ * Failure is non-fatal — the user is already logged in; the next login will
+ * retry the migration. Caller should log warnings, not throw to the UI.
+ *
+ * @param {Object} params
+ * @param {string} params.username
+ * @param {string} params.password - The password the user just typed at login
+ * @param {string} params.nsec - The just-decrypted plaintext nsec
+ */
+export async function migrateToV2({ username, password, nsec }) {
+  if (!username) throw new Error('Username required for v2 migration');
+  if (!password || !nsec) throw new Error('password and nsec required');
+
+  const newSalt = await deriveDeterministicSalt(username);
+  const { hash: newPasswordHash } = await hashPassword(password, newSalt);
+  const newNcryptsec = await nip49.encrypt(nsec, password);
+
+  const response = await signedFetch(`${API_BASE}/migrate-credentials`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      new_password_hash: newPasswordHash,
+      new_password_salt: newSalt,
+      new_ncryptsec: newNcryptsec
+    })
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Migration HTTP ${response.status}`);
+  }
+  return response.json();
 }
 
 /**

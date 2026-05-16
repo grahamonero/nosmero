@@ -17,6 +17,85 @@ import {
     userMoneroAddress
 } from './state.js';
 
+// ==================== CONSTANTS ====================
+
+const DEBUG = false;
+const PIN_MIN_LENGTH = 4;
+const PIN_MAX_LENGTH = 8;
+const PUBKEY_HEX_LENGTH = 64;
+const PRIVKEY_HEX_LENGTH = 64;
+const LOGOUT_NOTIFICATION_DELAY_MS = 1500;
+const AMBER_DISCONNECT_MAX_RETRIES = 3;
+const AMBER_DISCONNECT_RETRY_DELAY_MS = 2000;
+
+// Module-level handler for PIN input Enter key (allows proper removeEventListener)
+function handlePinEnterKey(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        submitPin();
+    }
+}
+
+// ==================== LOGIN FINALIZATION HELPER ====================
+
+/**
+ * Common login finalization steps shared by all login methods.
+ * Called after keys are set in state and localStorage.
+ */
+async function finalizeLogin() {
+    // Load user's NIP-65 relay list. Prefer pubkey-keyed localStorage so the
+    // user's announced/local-only state survives a relogin on the same
+    // device; fall back to fetching from the network on a fresh device.
+    try {
+        const Relays = await import('./relays.js');
+        await Relays.loadUserRelayList();
+    } catch (error) {
+        console.error('Error loading NIP-65 relay list:', error);
+    }
+
+    // Update disclosed tips widget for logged-in state
+    try {
+        const Posts = await import('./posts.js');
+        await Posts.updateWidgetForAuthState();
+    } catch (error) {
+        console.error('Error updating disclosed tips widget:', error);
+    }
+
+    // Clear the feed display before starting authenticated session
+    const feed = document.getElementById('feed');
+    const homeFeedList = document.getElementById('homeFeedList');
+    if (feed) {
+        feed.innerHTML = '<div class="loading">Loading your feed...</div>';
+    }
+    if (homeFeedList) {
+        homeFeedList.innerHTML = '';
+    }
+
+    // Clear all home feed state to prevent anonymous posts from persisting
+    if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
+        window.NostrPosts.clearHomeFeedState();
+    }
+
+    // Hide login modal
+    const loginModal = document.getElementById('loginModal');
+    if (loginModal) {
+        loginModal.classList.remove('show');
+    }
+
+    // Start the application with the new session
+    if (window.startApplication) {
+        await window.startApplication();
+    } else {
+        window.location.reload();
+    }
+
+    // NIP-89 handler announcement (debounced to once per week).
+    // Fire-and-forget so login isn't delayed.
+    import('./nip89.js')
+        .then(NIP89 => NIP89.publishHandlerAnnouncement())
+        .catch(e => console.warn('NIP-89 announcement skipped:', e?.message || e));
+}
+
 // ==================== SECURE KEY STORAGE ====================
 
 // Clear all user-specific settings to ensure clean state for new users
@@ -64,45 +143,44 @@ function clearUserSettings() {
 // Store encrypted private key
 export async function storeSecurePrivateKey(privateKey, pin) {
     if (!pin) {
-        // Fallback to unencrypted for backward compatibility
-        localStorage.setItem('nostr-private-key', privateKey);
-        return;
+        throw new Error('PIN is required to encrypt private key');
     }
-    
-    try {
-        const encrypted = await encryptData(privateKey, pin);
-        localStorage.setItem('nostr-private-key-encrypted', encrypted);
-        localStorage.setItem('encryption-enabled', 'true');
-        // Remove unencrypted version if it exists
-        localStorage.removeItem('nostr-private-key');
-    } catch (error) {
-        console.error('Encryption failed:', error);
-        // Fallback to unencrypted
-        localStorage.setItem('nostr-private-key', privateKey);
-    }
+
+    const encrypted = await encryptData(privateKey, pin);
+    localStorage.setItem('nostr-private-key-encrypted', encrypted);
+    localStorage.setItem('encryption-enabled', 'true');
+    // Remove unencrypted version if it exists
+    localStorage.removeItem('nostr-private-key');
 }
 
 // Retrieve and decrypt private key
 export async function getSecurePrivateKey(pin) {
     const isEncrypted = localStorage.getItem('encryption-enabled') === 'true';
-    
+
     if (!isEncrypted) {
         // Return unencrypted key for backward compatibility
         return localStorage.getItem('nostr-private-key');
     }
-    
+
     const encryptedKey = localStorage.getItem('nostr-private-key-encrypted');
     if (!encryptedKey || !pin) return null;
-    
+
     try {
-        return await decryptData(encryptedKey, pin);
+        const decryptedKey = await decryptData(encryptedKey, pin);
+
+        // Store in sessionStorage so page reloads within same session don't require PIN
+        if (decryptedKey) {
+            sessionStorage.setItem('nostr-session-key', decryptedKey);
+        }
+
+        return decryptedKey;
     } catch (error) {
         console.error('Failed to decrypt private key:', error);
         return null;
     }
 }
 
-// Get session key (already decrypted key stored in sessionStorage)
+// Check if session key is available (for page reloads within same session)
 export function getSessionKey() {
     return sessionStorage.getItem('nostr-session-key');
 }
@@ -146,15 +224,15 @@ export async function createNewAccount() {
         }
 
         // Prompt for PIN to encrypt the private key (mandatory for security)
-        console.log('🔐 Prompting for PIN to secure new account...');
+        if (DEBUG) console.log('Prompting for PIN to secure new account...');
         const pin = await showPinModal('create');
         if (!pin) {
-            console.log('PIN entry cancelled, aborting account creation');
+            if (DEBUG) console.log('PIN entry cancelled, aborting account creation');
             alert('Account creation cancelled. A PIN is required to secure your private key.');
             return;
         }
 
-        console.log('✅ Encrypting private key with PIN...');
+        if (DEBUG) console.log('Encrypting private key with PIN...');
 
         // Store encrypted private key
         await storeSecurePrivateKey(privateKey, pin);
@@ -165,28 +243,26 @@ export async function createNewAccount() {
         // Generate and set public key
         const derivedPublicKey = getPublicKey(privateKey);
         setPublicKey(derivedPublicKey);
-
-        // Save pubkey to localStorage for wallet and other modules
         localStorage.setItem('nostr-public-key', derivedPublicKey);
+
+        // Mark login method
+        localStorage.setItem('login-method', 'nsec');
 
         // Convert to nsec format for user display - use the original Uint8Array for encoding
         const nsec = nip19.nsecEncode(secretKey instanceof Uint8Array ? secretKey : privateKey);
 
-        showNotification(`Account created and secured with PIN! Save your backup: ${nsec.substring(0, 20)}...`, 'success');
-
-        // Clear all home feed state to prevent anonymous posts from persisting
-        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
-            window.NostrPosts.clearHomeFeedState();
-        }
-
-        // Start the application with the new session
-        if (window.startApplication) {
-            await window.startApplication();
+        // Show the nsec backup modal so user can copy/save their key
+        if (window.NostrUI && window.NostrUI.showGeneratedKeyModal) {
+            window.NostrUI.showGeneratedKeyModal(nsec);
         } else {
-            // Fallback: reload the page
-            window.location.reload();
+            // Fallback: show in alert if modal not available
+            alert(`IMPORTANT - Save your private key:\n\n${nsec}\n\nThis cannot be recovered if lost!`);
         }
-        
+
+        showNotification('Account created! Make sure to save your private key backup.', 'success');
+
+        await finalizeLogin();
+
     } catch (error) {
         console.error('Account creation error:', error);
         alert('Failed to create account: ' + error.message);
@@ -245,8 +321,9 @@ export async function loginWithNsec() {
         }
 
         // Validate the decoded hex key before storing it
-        if (typeof normalizedKey !== 'string' || normalizedKey.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(normalizedKey)) {
-            console.error('Validation failed - type:', typeof normalizedKey, 'length:', normalizedKey ? normalizedKey.length : 'null');
+        const hexPattern = new RegExp(`^[0-9a-fA-F]{${PRIVKEY_HEX_LENGTH}}$`);
+        if (typeof normalizedKey !== 'string' || normalizedKey.length !== PRIVKEY_HEX_LENGTH || !hexPattern.test(normalizedKey)) {
+            if (DEBUG) console.error('Validation failed - type:', typeof normalizedKey, 'length:', normalizedKey ? normalizedKey.length : 'null');
             alert('Invalid private key - decoded format is incorrect');
             return;
         }
@@ -261,16 +338,16 @@ export async function loginWithNsec() {
         }
 
         // All validation passed - now prompt for PIN to encrypt the key
-        console.log('✅ Private key validated, prompting for PIN...');
+        if (DEBUG) console.log('Private key validated, prompting for PIN...');
 
         // Show PIN modal and wait for PIN entry
         const pin = await showPinModal('create');
         if (!pin) {
-            console.log('PIN entry cancelled');
+            if (DEBUG) console.log('PIN entry cancelled');
             return;
         }
 
-        console.log('🔐 Encrypting private key with PIN...');
+        if (DEBUG) console.log('Encrypting private key with PIN...');
 
         // Store encrypted private key
         await storeSecurePrivateKey(normalizedKey, pin);
@@ -281,8 +358,6 @@ export async function loginWithNsec() {
         // Generate and set public key
         const derivedPublicKey = getPublicKey(normalizedKey);
         setPublicKey(derivedPublicKey);
-
-        // Save pubkey to localStorage for wallet and other modules
         localStorage.setItem('nostr-public-key', derivedPublicKey);
 
         // Mark login method
@@ -290,50 +365,7 @@ export async function loginWithNsec() {
 
         showNotification('Login successful! Your key is encrypted with your PIN.', 'success');
 
-        // Load user's NIP-65 relay list after successful login
-        try {
-            const Relays = await import('./relays.js');
-            await Relays.loadUserRelayList();
-        } catch (error) {
-            console.error('Error loading NIP-65 relay list:', error);
-        }
-
-        // Update disclosed tips widget for logged-in state
-        try {
-            const Posts = await import('./posts.js');
-            await Posts.updateWidgetForAuthState();
-        } catch (error) {
-            console.error('Error updating disclosed tips widget:', error);
-        }
-
-        // Clear the anonymous feed display before starting authenticated session
-        const feed = document.getElementById('feed');
-        const homeFeedList = document.getElementById('homeFeedList');
-        if (feed) {
-            feed.innerHTML = '<div class="loading">Loading your feed...</div>';
-        }
-        if (homeFeedList) {
-            homeFeedList.innerHTML = '';
-        }
-
-        // Clear all home feed state to prevent anonymous posts from persisting
-        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
-            window.NostrPosts.clearHomeFeedState();
-        }
-
-        // Hide login modal before starting the application
-        const loginModal = document.getElementById('loginModal');
-        if (loginModal) {
-            loginModal.classList.remove('show');
-        }
-
-        // Start the application with the new session
-        if (window.startApplication) {
-            await window.startApplication();
-        } else {
-            // Fallback: reload the page
-            window.location.reload();
-        }
+        await finalizeLogin();
 
     } catch (error) {
         console.error('Login error:', error);
@@ -342,6 +374,7 @@ export async function loginWithNsec() {
 }
 
 // Complete login with nsec (used by email/password auth after decryption)
+// This function is called after the nsec has been retrieved from server and decrypted
 // Options:
 //   skipPin: boolean - if true, skip PIN setup and store key in sessionStorage only (for password users)
 export async function completeLoginWithNsec(nsec, displayName = null, options = {}) {
@@ -378,26 +411,27 @@ export async function completeLoginWithNsec(nsec, displayName = null, options = 
         }
 
         // Validate the decoded hex key
-        if (typeof normalizedKey !== 'string' || normalizedKey.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(normalizedKey)) {
+        const hexPattern = new RegExp(`^[0-9a-fA-F]{${PRIVKEY_HEX_LENGTH}}$`);
+        if (typeof normalizedKey !== 'string' || normalizedKey.length !== PRIVKEY_HEX_LENGTH || !hexPattern.test(normalizedKey)) {
             throw new Error('Invalid private key - decoded format is incorrect');
         }
 
         if (skipPin) {
             // For password users: store in sessionStorage only (no PIN, no localStorage)
             // User will re-authenticate with password when browser closes
-            console.log('🔐 Password login - storing key in session only (no PIN)');
+            if (DEBUG) console.log('Password login - storing key in session only (no PIN)');
             sessionStorage.setItem('nostr-session-key', normalizedKey);
             localStorage.setItem('login-method', 'email_password');
         } else {
             // For nsec users: prompt for PIN and encrypt in localStorage
-            console.log('🔐 Prompting for PIN to secure key locally...');
+            if (DEBUG) console.log('Prompting for PIN to secure key locally...');
             const pin = await showPinModal('create');
             if (!pin) {
-                console.log('PIN entry cancelled');
+                if (DEBUG) console.log('PIN entry cancelled');
                 return false;
             }
 
-            console.log('🔐 Encrypting private key with PIN...');
+            if (DEBUG) console.log('Encrypting private key with PIN...');
             await storeSecurePrivateKey(normalizedKey, pin);
             localStorage.setItem('login-method', 'nsec');
         }
@@ -416,36 +450,68 @@ export async function completeLoginWithNsec(nsec, displayName = null, options = 
             showNotification('Login successful! Your key is encrypted with your PIN.', 'success');
         }
 
-        // Load user's NIP-65 relay list
-        try {
-            const Relays = await import('./relays.js');
-            await Relays.loadUserRelayList();
-        } catch (error) {
-            console.error('Error loading NIP-65 relay list:', error);
-        }
+        await finalizeLogin();
 
-        // Clear the anonymous feed display
-        const feed = document.getElementById('feed');
-        if (feed) {
-            feed.innerHTML = '<div class="loading">Loading your feed...</div>';
-        }
+        // For fresh signups, publish a kind-0 profile event with the chosen
+        // display name. completeLoginWithNsec is called with displayName ONLY
+        // during signup (login flow passes null), so this only fires once
+        // per account at account-creation time.
+        if (displayName) {
+            const profileNow = Math.floor(Date.now() / 1000);
+            const seededProfile = {
+                name: displayName,
+                display_name: displayName,
+                pubkey: State.publicKey,
+                created_at: profileNow,  // ← critical: loadUserProfileData's stale-event guard
+                                         // drops relay kind-0s older than this timestamp,
+                                         // so an empty-relay race won't overwrite our seed
+            };
 
-        // Clear home feed state
-        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
-            window.NostrPosts.clearHomeFeedState();
-        }
+            // Seed in-memory cache so the hamburger + cached-read paths see
+            // the display name immediately, without waiting for the relay
+            // round-trip on the publish below.
+            State.profileCache[State.publicKey] = seededProfile;
 
-        // Hide login modal
-        const loginModal = document.getElementById('loginModal');
-        if (loginModal) {
-            loginModal.classList.remove('show');
-        }
+            // Also save to localStorage — loadProfileFromLocalStorage reads
+            // this on the full-page Profile route as a pre-fetch cache.
+            try {
+                localStorage.setItem(`profile-${State.publicKey}`, JSON.stringify(seededProfile));
+            } catch (_) {}
 
-        // Start the application
-        if (window.startApplication) {
-            await window.startApplication();
-        } else {
-            window.location.reload();
+            // Re-render the hamburger menu's logged-in-user widget now that
+            // the cache has the name. Without this it stays at whatever it
+            // showed during the logged-out initNavigation pass ("Anonymous").
+            try { window.updateHeaderUIForAuthState?.(); } catch (_) {}
+
+            // Publish kind-0 to relays. Awaited so it completes before this
+            // function returns — modal was already closed in proceedToApp
+            // (which runs the disable + classList.remove('show') before
+            // calling us), so the user doesn't see this delay. They see the
+            // app + the seeded profile while the publish lands.
+            try {
+                const Relays = await import('./relays.js');
+                const Utils = await import('./utils.js');
+                const event = {
+                    kind: 0,
+                    created_at: profileNow,
+                    tags: [],
+                    content: JSON.stringify({
+                        name: displayName,
+                        display_name: displayName
+                    })
+                };
+                const signed = await Utils.signEvent(event);
+                const writeRelays = Relays.getWriteRelays?.() || [];
+                if (writeRelays.length) {
+                    const results = await Promise.allSettled(window.NostrState.pool.publish(writeRelays, signed));
+                    const accepted = results.filter(r => r.status === 'fulfilled').length;
+                    if (DEBUG) console.log(`[Auth] Published initial kind-0 profile (name="${displayName}") to ${accepted}/${writeRelays.length} relays`);
+                }
+            } catch (e) {
+                // Non-fatal — user can edit profile via Settings later, and
+                // the seeded cache + localStorage entry keeps the UI happy.
+                console.warn('[Auth] Initial kind-0 publish failed:', e?.message || e);
+            }
         }
 
         return true;
@@ -475,7 +541,7 @@ export async function loginWithExtension() {
         clearUserSettings();
 
         const pubKey = await window.nostr.getPublicKey();
-        console.log('🔑 Got public key from extension:', pubKey);
+        if (DEBUG) console.log('Got public key from extension:', pubKey);
 
         if (!pubKey) {
             alert('Extension did not provide a public key. Please:\n\n1. Make sure you have approved the connection request\n2. Check your extension settings\n3. Try refreshing the page and logging in again');
@@ -483,48 +549,13 @@ export async function loginWithExtension() {
         }
 
         setPublicKey(pubKey);
-        console.log('✅ Set public key in State');
-        console.log('✅ State.publicKey is now:', State.publicKey);
-        console.log('✅ publicKey (direct import) is now:', publicKey);
-
         setPrivateKey('extension'); // Special marker for extension users
         localStorage.setItem('nostr-private-key', 'extension');
         localStorage.setItem('nostr-public-key', pubKey);
 
         showNotification('Extension login successful!', 'success');
 
-        // Load user's NIP-65 relay list after successful login
-        try {
-            console.log('📡 About to import relay list...');
-            console.log('📡 State.publicKey before import:', State.publicKey);
-            const Relays = await import('./relays.js');
-            console.log('📡 Relays module imported');
-            console.log('📡 State.publicKey after module import:', State.publicKey);
-            await Relays.loadUserRelayList();
-        } catch (error) {
-            console.error('Error loading NIP-65 relay list:', error);
-        }
-
-        // Update disclosed tips widget for logged-in state
-        try {
-            const Posts = await import('./posts.js');
-            await Posts.updateWidgetForAuthState();
-        } catch (error) {
-            console.error('Error updating disclosed tips widget:', error);
-        }
-
-        // Clear all home feed state to prevent anonymous posts from persisting
-        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
-            window.NostrPosts.clearHomeFeedState();
-        }
-
-        // Start the application with the new session
-        if (window.startApplication) {
-            await window.startApplication();
-        } else {
-            // Fallback: reload the page
-            window.location.reload();
-        }
+        await finalizeLogin();
 
     } catch (error) {
         alert('Failed to connect to extension: ' + error.message);
@@ -571,7 +602,7 @@ export async function loginWithAmber() {
         // Connect to Amber and get user's public key
         const userPubkey = await Amber.connect(bunkerURI);
 
-        if (!userPubkey || userPubkey.length !== 64) {
+        if (!userPubkey || userPubkey.length !== PUBKEY_HEX_LENGTH) {
             throw new Error('Failed to get valid public key from Amber');
         }
 
@@ -580,39 +611,14 @@ export async function loginWithAmber() {
         setPrivateKey('amber'); // Special marker for Amber users
         localStorage.setItem('nostr-private-key', 'amber');
         localStorage.setItem('nostr-public-key', userPubkey);
-        localStorage.setItem('amber-bunker-uri', bunkerURI); // Store for reconnection
+        // NOTE: Bunker URI contains connection secrets. Stored in localStorage for session
+        // persistence across browser restarts. Cleared on logout. Consider sessionStorage
+        // if stricter security is needed (user would need to re-authenticate each session).
+        localStorage.setItem('amber-bunker-uri', bunkerURI);
 
         showNotification('Connected to Amber!', 'success');
 
-        // Load user's NIP-65 relay list after successful login
-        try {
-            const Relays = await import('./relays.js');
-            await Relays.loadUserRelayList();
-        } catch (error) {
-            console.error('Error loading NIP-65 relay list:', error);
-        }
-
-        // Update disclosed tips widget
-        try {
-            if (window.NostrPosts && window.NostrPosts.updateDisclosedTipsWidget) {
-                await window.NostrPosts.updateDisclosedTipsWidget();
-            }
-        } catch (error) {
-            console.error('Error updating disclosed tips widget:', error);
-        }
-
-        // Clear all home feed state to prevent anonymous posts from persisting
-        if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
-            window.NostrPosts.clearHomeFeedState();
-        }
-
-        // Start the application with the new session
-        if (window.startApplication) {
-            await window.startApplication();
-        } else {
-            // Fallback: reload the page
-            window.location.reload();
-        }
+        await finalizeLogin();
 
     } catch (error) {
         console.error('Amber login error:', error);
@@ -636,12 +642,12 @@ export async function initNostrLogin() {
     const needsNostrLogin = localStorage.getItem('nostr-private-key') === 'nsec-app';
 
     if (needsNostrLogin) {
-        console.log('🔄 nsec.app session detected, loading nostr-login...');
+        if (DEBUG) console.log('nsec.app session detected, loading nostr-login...');
         try {
             await loadNostrLogin();
-            console.log('✅ nostr-login loaded, waiting for auto-restore...');
+            if (DEBUG) console.log('nostr-login loaded, waiting for auto-restore...');
         } catch (error) {
-            console.error('❌ Failed to load nostr-login:', error);
+            console.error('Failed to load nostr-login:', error);
         }
     }
 
@@ -652,7 +658,6 @@ export async function initNostrLogin() {
             try {
                 // nostr-login provides window.nostr API after successful OAuth
                 if (!window.nostr) {
-                    console.error('❌ window.nostr not available after nlAuth');
                     throw new Error('window.nostr not available after nostr-login');
                 }
 
@@ -672,37 +677,7 @@ export async function initNostrLogin() {
 
                 showNotification('nsec.app login successful!', 'success');
 
-                // Load user's NIP-65 relay list. Prefer pubkey-keyed
-                // localStorage so local-only relays survive relogin.
-                try {
-                    const Relays = await import('./relays.js');
-                    await Relays.loadUserRelayList();
-                } catch (error) {
-                    console.error('Error loading NIP-65 relay list:', error);
-                }
-
-                // Clear the login UI display before starting authenticated session
-                const feed = document.getElementById('feed');
-                const homeFeedList = document.getElementById('homeFeedList');
-                if (feed) {
-                    feed.innerHTML = '<div class="loading">Loading your feed...</div>';
-                }
-                if (homeFeedList) {
-                    homeFeedList.innerHTML = '';
-                }
-
-                // Clear all home feed state to prevent anonymous posts from persisting
-                if (window.NostrPosts && window.NostrPosts.clearHomeFeedState) {
-                    window.NostrPosts.clearHomeFeedState();
-                }
-
-                // Start the application with the new session
-                if (window.startApplication) {
-                    await window.startApplication();
-                } else {
-                    // Fallback: reload the page
-                    window.location.reload();
-                }
+                await finalizeLogin();
 
             } catch (error) {
                 console.error('nostr-login authentication error:', error);
@@ -749,30 +724,29 @@ export async function logout() {
 
     // Disconnect Amber if active (WITH RETRY LOGIC)
     if (getPrivateKeyForSigning() === 'amber') {
-        console.log('🔌 Disconnecting from Amber...');
+        if (DEBUG) console.log('Disconnecting from Amber...');
 
         let disconnectSuccess = false;
-        const maxRetries = 3;
 
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        for (let attempt = 1; attempt <= AMBER_DISCONNECT_MAX_RETRIES; attempt++) {
             try {
                 const Amber = await import('./amber.js');
                 await Amber.disconnect();
                 disconnectSuccess = true;
-                console.log('✅ Amber disconnected successfully');
+                if (DEBUG) console.log('Amber disconnected successfully');
                 break;
             } catch (error) {
-                console.error(`❌ Amber disconnect attempt ${attempt}/${maxRetries} failed:`, error);
+                console.error(`Amber disconnect attempt ${attempt}/${AMBER_DISCONNECT_MAX_RETRIES} failed:`, error);
 
-                if (attempt < maxRetries) {
-                    console.log(`⏳ Waiting 2 seconds before retry...`);
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                if (attempt < AMBER_DISCONNECT_MAX_RETRIES) {
+                    if (DEBUG) console.log(`Waiting ${AMBER_DISCONNECT_RETRY_DELAY_MS}ms before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, AMBER_DISCONNECT_RETRY_DELAY_MS));
                 }
             }
         }
 
         if (!disconnectSuccess) {
-            console.warn('⚠️ All disconnect attempts failed, proceeding with logout anyway');
+            console.warn('All Amber disconnect attempts failed, proceeding with logout anyway');
         }
     }
 
@@ -782,6 +756,15 @@ export async function logout() {
     localStorage.removeItem('encryption-enabled');
     localStorage.removeItem('nostr-private-key-encrypted');
     localStorage.removeItem('amber-bunker-uri');
+
+    // Clear tip queue - user-specific data shouldn't persist across logout
+    localStorage.removeItem('zapQueue');
+    if (State.setZapQueue) {
+        State.setZapQueue([]);
+    }
+
+    // Clear session key (used for same-session page navigation without PIN)
+    clearSessionKey();
 
     // Use comprehensive settings clearing function
     clearUserSettings();
@@ -808,8 +791,8 @@ export async function logout() {
     updateUIForLogout();
 
     // Update disclosed tips widget for anonymous state
-    if (window.Posts && Posts.updateWidgetForAuthState) {
-        Posts.updateWidgetForAuthState();
+    if (window.Posts && window.Posts.updateWidgetForAuthState) {
+        window.Posts.updateWidgetForAuthState();
     }
 
     showNotification('Logged out successfully', 'success');
@@ -817,7 +800,7 @@ export async function logout() {
     // Reload page after a brief delay to enable anonymous browsing with default follows
     setTimeout(() => {
         window.location.reload();
-    }, 1500); // 1.5 second delay to show the notification
+    }, LOGOUT_NOTIFICATION_DELAY_MS);
 }
 
 // Update UI elements for logout state
@@ -886,22 +869,15 @@ export function showPinModal(mode = 'create') {
         // Show modal
         modal.style.display = 'flex';
 
-        // Add Enter key listeners to both inputs
-        const handleEnterKey = (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitPin();
-            }
-        };
-
+        // Add Enter key listeners to both inputs (using module-level handler for proper cleanup)
         if (pinInput) {
-            pinInput.removeEventListener('keypress', handleEnterKey);
-            pinInput.addEventListener('keypress', handleEnterKey);
+            pinInput.removeEventListener('keypress', handlePinEnterKey);
+            pinInput.addEventListener('keypress', handlePinEnterKey);
         }
 
         if (pinConfirmInput) {
-            pinConfirmInput.removeEventListener('keypress', handleEnterKey);
-            pinConfirmInput.addEventListener('keypress', handleEnterKey);
+            pinConfirmInput.removeEventListener('keypress', handlePinEnterKey);
+            pinConfirmInput.addEventListener('keypress', handlePinEnterKey);
         }
 
         // Focus on first input
@@ -925,8 +901,8 @@ export function submitPin() {
     const pin = pinInput.value.trim();
 
     // Validate PIN length
-    if (pin.length < 4 || pin.length > 8) {
-        alert('PIN must be 4-8 characters');
+    if (pin.length < PIN_MIN_LENGTH || pin.length > PIN_MAX_LENGTH) {
+        alert(`PIN must be ${PIN_MIN_LENGTH}-${PIN_MAX_LENGTH} characters`);
         return;
     }
 
