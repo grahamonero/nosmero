@@ -221,6 +221,86 @@ export function loadFromEvent(event) {
     return true;
 }
 
+// When editing a published paywalled article, `event.content` is only the
+// public preview + the auto-generated "🔒 Continue reading…" footer — the
+// real locked half lives encrypted in the `['encrypted', ...]` tag (or on
+// the backend keyed by the addressable coord). Fetch the creator key, decrypt,
+// then reassemble the body with the PAYWALL_BREAK_MARKER so the author can
+// edit the full article.
+async function hydratePaywalledBodyForEdit(event) {
+    const meta = Articles.parseArticleMetadata(event);
+    const coord = `${Articles.ARTICLE_KIND}:${event.pubkey}:${meta.identifier}`;
+    setBusy(true, 'Loading locked content…');
+    try {
+        const keyResp = await fetch(
+            `/api/paywall/creator-key/${encodeURIComponent(coord)}/${encodeURIComponent(event.pubkey)}`
+        );
+        const keyData = await keyResp.json().catch(() => ({}));
+        if (!keyData?.success || !keyData?.decryption_key) {
+            throw new Error(keyData?.error || 'Backend would not release the creator key');
+        }
+
+        // Prefer the encrypted blob from the event tags (always present on
+        // articles published by the current editor); fall back to the backend
+        // record if a relay stripped the tag.
+        let encryptedContent = event.tags?.find(t => t[0] === 'encrypted')?.[1] || null;
+        if (!encryptedContent) {
+            const infoResp = await fetch(`/api/paywall/info/${encodeURIComponent(coord)}`);
+            const infoData = await infoResp.json().catch(() => ({}));
+            encryptedContent = infoData?.paywall?.encryptedContent || null;
+            if (!encryptedContent) {
+                throw new Error('Encrypted blob missing from both event tags and backend');
+            }
+        }
+
+        const lockedMarkdown = await Paywall.decrypt(encryptedContent, keyData.decryption_key);
+        const publicMarkdown = Articles.stripPaywallFooter(event.content || '');
+        editorState.body = `${publicMarkdown}\n\n${PAYWALL_BREAK_MARKER}\n\n${lockedMarkdown}`;
+        // Stash the original key so re-publish can reuse it instead of
+        // rotating — prior buyers' cached unlocks stay valid against the
+        // new ciphertext.
+        editorState.paywall.originalDecryptionKey = keyData.decryption_key;
+        editorState.dirty = false;
+        syncFormFromState();
+    } catch (e) {
+        console.error('[articles-editor] hydratePaywalledBodyForEdit failed:', e);
+        // Recovery mode: replace the "Loading…" placeholder with an empty
+        // locked half + a recovery marker so the user knows to re-paste
+        // their content. Without this, publishing would write the literal
+        // "Loading locked content…" string as the new encrypted body.
+        // Common cause: a prior publish attempt succeeded at the relay step
+        // but failed at the backend-register step (pre-upsert backend), so
+        // the relay's ciphertext is encrypted with a key the backend doesn't
+        // hold. Republishing fresh (without existingKey) heals the state.
+        const publicHalf = Articles.stripPaywallFooter(event.content || '');
+        editorState.body = `${publicHalf}\n\n${PAYWALL_BREAK_MARKER}\n\n${HYDRATION_RECOVERY_MARKER}`;
+        editorState.paywall.hydrationFailed = true;
+        editorState.paywall.originalDecryptionKey = undefined;
+        editorState.dirty = false;
+        syncFormFromState();
+        const banner = $('articleEditorStatus');
+        if (banner) {
+            banner.textContent = '⚠ Could not decrypt your existing locked content. Paste your original locked content below the 🔒 break, then Publish — this resets the paywall key (any existing buyers will need to re-unlock).';
+            banner.classList.add('article-editor-status--error');
+        }
+        Utils.showNotification?.(`Could not load locked content: ${e?.message || e}`, 'error');
+    } finally {
+        // Don't clear the status banner in the failure case — let the
+        // recovery message stay visible.
+        if (!editorState.paywall.hydrationFailed) setBusy(false);
+        else {
+            const page = $('composeArticlePage');
+            if (page) page.classList.remove('article-editor--busy');
+            const saveBtn = $('articleSaveDraftBtn');
+            const publishBtn = $('articlePublishBtn');
+            if (saveBtn) saveBtn.disabled = false;
+            if (publishBtn) publishBtn.disabled = false;
+        }
+    }
+}
+
+const HYDRATION_RECOVERY_MARKER = '[paste your original locked content here]';
+
 // Read paywall config off an event we're editing, so the toggle/price/address
 // fields repopulate. Published articles carry the tags; drafts shouldn't —
 // drafts publish unencrypted with paywall config held only in scratch.
@@ -391,17 +471,22 @@ async function publishWithPaywall() {
     if (!publicMarkdown) {
         throw new Error('Add some public-readable content above the paywall break.');
     }
-    if (!lockedMarkdown) {
-        throw new Error('Add locked content below the paywall break — otherwise the paywall serves nothing.');
+    if (!lockedMarkdown || lockedMarkdown.includes(HYDRATION_RECOVERY_MARKER) || lockedMarkdown.includes('Loading locked content')) {
+        throw new Error('Replace the recovery placeholder below the 🔒 break with your actual locked content before publishing.');
     }
 
-    // Encrypt the locked portion with a fresh AES-256-GCM key per the
-    // existing per-note paywall scheme.
+    // Encrypt the locked portion with AES-256-GCM. On edit (mode is
+    // editing-published AND hydration captured the original key) reuse the
+    // key so prior buyers' unlocks keep decrypting; otherwise generate a
+    // fresh one for first publish.
     const paywallPayload = await Paywall.createPaywalledContent({
         content: lockedMarkdown,
         preview: editorState.summary || publicMarkdown.slice(0, 280),
         priceXmr,
         paymentAddress,
+        existingKey: editorState.mode === 'editing-published'
+            ? editorState.paywall.originalDecryptionKey
+            : undefined,
     });
 
     // Compute naddr for the unlock pointer footer so other clients can deep
@@ -480,6 +565,11 @@ async function publishWithPaywall() {
 // new backend plumbing.
 export async function uploadCoverImage(file) {
     if (!file) return;
+    // Autosave only ticks every 30s, so anything typed in the body/title/
+    // topics fields since the last tick lives only in the DOM. Capture it
+    // before we mutate editorState, or syncFormFromState() at the end will
+    // happily paint stale (blank) values back over the user's text.
+    syncStateFromForm();
     setBusy(true, 'Uploading cover…');
     try {
         const stripped = (await Utils.stripImageMetadata?.(file)) ?? file;
@@ -526,8 +616,17 @@ export function openComposer({ draftEvent = null, restoreScratch = true } = {}) 
         return;
     }
 
+    let needsPaywallHydration = null;
     if (draftEvent) {
         loadFromEvent(draftEvent);
+        // Paywalled article being edited: stash a "loading" placeholder so
+        // the form paints something meaningful while we fetch the creator
+        // key + decrypt. Real body lands when hydration resolves below.
+        if (editorState.mode === 'editing-published' && editorState.paywall.enabled) {
+            const publicHalf = Articles.stripPaywallFooter(draftEvent.content || '');
+            editorState.body = `${publicHalf}\n\n${PAYWALL_BREAK_MARKER}\n\n_Loading locked content…_`;
+            needsPaywallHydration = draftEvent;
+        }
     } else {
         resetState();
         if (restoreScratch) {
@@ -564,6 +663,9 @@ export function openComposer({ draftEvent = null, restoreScratch = true } = {}) 
     startAutosave();
     showPage();
     prefillDefaultPaymentAddress().catch(e => console.warn('[articles-editor] prefill XMR addr failed:', e));
+    if (needsPaywallHydration) {
+        hydratePaywalledBodyForEdit(needsPaywallHydration);
+    }
 }
 
 // If the user has a default Monero address configured in Settings (kind 0

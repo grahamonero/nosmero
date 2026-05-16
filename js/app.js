@@ -3688,7 +3688,7 @@ window.openArticleView = UI.openArticleView;
 window.openArticleReader = UI.openArticleView; // unified dispatch name shared with desktop
 window.goBackFromArticle = UI.goBackFromArticle;
 window.openArticleEditor = async ({ draftEvent = null } = {}) => {
-    const Editor = await import('./articles-editor.js?v=6');
+    const Editor = await import('./articles-editor.js?v=10');
     Editor.openComposer({ draftEvent });
 };
 window.openPdfView = UI.openPdfView;
