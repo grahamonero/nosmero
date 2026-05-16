@@ -49,12 +49,12 @@ export function showNostrOptions() {
 }
 
 /**
- * Show forgot password form
+ * Show forgot-password form (nsec-paste reset flow)
  */
 export function showForgotPassword() {
   hideAllSections();
   document.getElementById('forgotPasswordSection')?.classList.remove('hidden');
-  document.getElementById('forgotEmailInput')?.focus();
+  document.getElementById('resetUsernameInput')?.focus();
 }
 
 /**
@@ -362,18 +362,49 @@ export async function proceedToApp() {
   }
 }
 
-// ==================== Forgot Password ====================
+// ==================== Forgot Password (nsec-paste reset) ====================
 
 /**
- * Handle forgot password form submission
+ * Handle forgot-password form submission. The user pastes their backed-up
+ * nsec, chooses a new password; we re-encrypt the nsec under the new password
+ * and atomically swap the stored ncryptsec + password hash. On success we
+ * log them straight in with the recovered nsec — no second login round-trip.
  */
-export async function handleForgotPassword(e) {
+export async function handlePasswordReset(e) {
   if (e) e.preventDefault();
 
-  const email = document.getElementById('forgotEmailInput')?.value?.trim();
+  const username = document.getElementById('resetUsernameInput')?.value?.trim().toLowerCase();
+  const nsec = document.getElementById('resetNsecInput')?.value?.trim();
+  const newPassword = document.getElementById('resetNewPasswordInput')?.value;
+  const confirmPassword = document.getElementById('resetConfirmPasswordInput')?.value;
 
-  if (!email) {
-    showErrorToast('Please enter your email address');
+  if (!username) {
+    showErrorToast('Please enter your username');
+    return;
+  }
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    showErrorToast('Username must be 3-20 characters (letters, numbers, underscore)');
+    return;
+  }
+  if (!nsec) {
+    showErrorToast('Please paste your nsec backup');
+    return;
+  }
+  if (!nsec.startsWith('nsec1')) {
+    showErrorToast('That doesn\'t look like an nsec. Backups start with "nsec1…"');
+    return;
+  }
+  if (!newPassword) {
+    showErrorToast('Please choose a new password');
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    showErrorToast('Passwords do not match');
+    return;
+  }
+  const passwordValidation = nip49.validatePassword(newPassword);
+  if (!passwordValidation.valid) {
+    showErrorToast(passwordValidation.error);
     return;
   }
 
@@ -383,24 +414,94 @@ export async function handleForgotPassword(e) {
   try {
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Sending...';
+      submitBtn.textContent = 'Resetting…';
     }
 
-    await authClient.forgotPassword(email);
+    const result = await authClient.resetPasswordWithNsec({ username, nsec, newPassword });
 
-    showSuccessToast('If an account exists, a reset link has been sent');
-    backToMainLogin();
+    authClient.saveSession({
+      npub: result.npub,
+      username: result.username,
+      email_verified: false
+    });
 
+    showSuccessToast('Password reset. Logging you in…');
+
+    // Hand the recovered nsec straight to the existing login completion path,
+    // same as a fresh username/password login. skipPin because the new
+    // password is now the access gate.
+    if (window.completeLoginWithNsec) {
+      await window.completeLoginWithNsec(result.nsec, null, { skipPin: true });
+    } else {
+      window.location.reload();
+    }
   } catch (error) {
-    // Don't reveal if email exists
-    showSuccessToast('If an account exists, a reset link has been sent');
-    backToMainLogin();
+    console.error('[Auth UI] Password reset error:', error);
+    showErrorToast(error.message || 'Password reset failed');
   } finally {
     if (submitBtn) {
       submitBtn.disabled = false;
       submitBtn.textContent = originalText;
     }
   }
+}
+
+/**
+ * Download the user's nsec as a plaintext backup file. Triggered from the
+ * post-signup "Save Your nsec!" screen and the Settings export panel.
+ * Frames the file as a Nosmero account backup so non-Nostr-native users have
+ * a mental model — the file's contents ARE the nsec, just with context wrapped
+ * around it for when they open it later and forget what it's for.
+ *
+ * Plaintext (not encrypted) by design: an encrypted backup that the user
+ * forgets the password to is no better than no backup. The whole point of
+ * "back up your nsec" is to survive password loss.
+ *
+ * @param {string} nsec - The plaintext nsec to write to the file
+ * @param {string} [accountLabel] - Optional username/display-name for filename
+ */
+export function downloadNsecBackup(nsec, accountLabel) {
+  if (!nsec || !nsec.startsWith('nsec1')) {
+    showErrorToast('No nsec to back up');
+    return;
+  }
+  const safeLabel = (accountLabel || 'account')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 32) || 'account';
+  const date = new Date().toISOString().slice(0, 10);
+  const filename = `nosmero-backup-${safeLabel}-${date}.txt`;
+
+  const contents = `NOSMERO ACCOUNT BACKUP
+======================
+
+This file contains your Nostr private key (nsec). It is the ONLY way to
+recover your Nosmero account if you forget your password — Nosmero cannot
+reset it for you. Keep this file safe:
+
+  • Store it in a password manager (recommended) or an encrypted vault
+  • Anyone with this file controls your account — treat it like a key
+  • Do not email it to yourself or store it in plain text in the cloud
+
+Your nsec:
+
+${nsec}
+
+Account: ${accountLabel || '(unknown)'}
+Saved:   ${new Date().toISOString()}
+
+You can also paste this nsec into any Nostr client (Damus, Amethyst,
+Primal, iris, nostrudel, etc.) to use the same identity.
+`;
+
+  const blob = new Blob([contents], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  showSuccessToast('Backup downloaded — store it somewhere safe');
 }
 
 // ==================== Availability Checks ====================
@@ -471,25 +572,6 @@ export function checkUsernameAvailability(username) {
   }, 500);
 }
 
-// ==================== Toggle Recovery Options ====================
-
-/**
- * Toggle visibility of recovery options based on checkboxes
- */
-export function toggleRecoveryOptions() {
-  const addEmail = document.getElementById('addEmailCheckbox')?.checked;
-  const addPassword = document.getElementById('addPasswordCheckbox')?.checked;
-  const recoveryFields = document.getElementById('recoveryFieldsSection');
-
-  if (recoveryFields) {
-    if (addEmail || addPassword) {
-      recoveryFields.classList.remove('hidden');
-    } else {
-      recoveryFields.classList.add('hidden');
-    }
-  }
-}
-
 // ==================== Initialize ====================
 
 /**
@@ -502,17 +584,13 @@ export function initAuthUI() {
   // Signup form
   document.getElementById('signupForm')?.addEventListener('submit', handleSignup);
 
-  // Forgot password form
-  document.getElementById('forgotPasswordForm')?.addEventListener('submit', handleForgotPassword);
+  // Forgot password form (nsec-paste reset)
+  document.getElementById('forgotPasswordForm')?.addEventListener('submit', handlePasswordReset);
 
   // Username availability check
   document.getElementById('signupUsernameInput')?.addEventListener('input', (e) => {
     checkUsernameAvailability(e.target.value);
   });
-
-  // Recovery option checkboxes
-  document.getElementById('addEmailCheckbox')?.addEventListener('change', toggleRecoveryOptions);
-  document.getElementById('addPasswordCheckbox')?.addEventListener('change', toggleRecoveryOptions);
 
   // Enter key handlers
   document.getElementById('emailOrUsernameInput')?.addEventListener('keypress', (e) => {
@@ -538,9 +616,9 @@ window.authUI = {
   handleLogin,
   handleSignup,
   handleKeysOnlySignup,
-  handleForgotPassword,
+  handlePasswordReset,
+  downloadNsecBackup,
   proceedToApp,
-  toggleRecoveryOptions,
   initAuthUI
 };
 

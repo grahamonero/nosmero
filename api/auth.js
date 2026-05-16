@@ -6,7 +6,6 @@
  */
 
 import { Router } from 'express';
-import bcrypt from 'bcrypt';
 import rateLimit from 'express-rate-limit';
 import {
   createUser,
@@ -14,9 +13,8 @@ import {
   getSaltByIdentifier,
   getUserByEmail,
   getUserByNpub,
+  getUserByUsername,
   updateLastLogin,
-  updateUserRecovery,
-  updateNcryptsec,
   verifyUserEmail,
   emailExists,
   usernameExists,
@@ -25,13 +23,13 @@ import {
   getValidToken,
   markTokenUsed,
   verifyPasswordHash,
-  migrateCredentialsToV2
+  migrateCredentialsToV2,
+  resetPasswordWithNsec
 } from './db.js';
-import { sendVerificationEmail, sendPasswordResetEmail } from './email.js';
+import { sendVerificationEmail } from './email.js';
 import { requireNip98 } from './middleware/nip98.js';
 
 const router = Router();
-const BCRYPT_ROUNDS = 12;
 
 // Rate limiters
 const signupLimiter = rateLimit({
@@ -438,343 +436,86 @@ router.get('/verify-email', async (req, res) => {
 });
 
 /**
- * POST /api/auth/forgot-password
+ * POST /api/auth/reset-with-nsec
  *
- * Request password reset email.
- * Always returns success to prevent email enumeration.
+ * Reset a forgotten password using the user's backed-up nsec. This is the
+ * only recovery path in the v2 auth model — there is no email-based reset
+ * because the server never has the plaintext nsec, so it can't re-encrypt
+ * the ncryptsec under a new password on the user's behalf. The user must
+ * supply the nsec themselves.
  *
- * Body: { email: string }
+ * Authentication: NIP-98. The signing pubkey is the auth check — only
+ * someone who has the account's nsec can produce a valid signature, and we
+ * verify the signing pubkey matches the user row identified by `username`.
+ *
+ * Body: { username, new_password_hash, new_password_salt, new_ncryptsec }
+ *   - new_password_hash: PBKDF2(new_password, SHA256(username + AUTH_PEPPER))
+ *   - new_password_salt: SHA256(username + AUTH_PEPPER) — deterministic
+ *   - new_ncryptsec: nsec re-encrypted with the new password (NIP-49)
+ *
+ * Effect: bcrypt-wraps the new hash, atomically writes password_hash +
+ * password_salt + ncryptsec + bumps version to 2. Legacy v1 users who reset
+ * naturally migrate to v2 as a side effect.
  */
-router.post('/forgot-password', passwordResetLimiter, async (req, res) => {
+router.post('/reset-with-nsec', passwordResetLimiter, requireNip98(), async (req, res) => {
   try {
-    const { email } = req.body;
+    const {
+      username,
+      new_password_hash: newPasswordHash,
+      new_password_salt: newPasswordSalt,
+      new_ncryptsec: newNcryptsec
+    } = req.body;
 
-    if (!email || !isValidEmail(email)) {
-      return res.json({ success: true });  // Don't reveal invalid email
-    }
-
-    const user = getUserByEmail(email.toLowerCase());
-
-    if (user) {
-      try {
-        const token = createToken(user.id, 'reset', 60 * 60);  // 1 hour
-        await sendPasswordResetEmail(email, token);
-        console.log(`[Auth] Password reset email sent to ${email}`);
-      } catch (emailError) {
-        console.error('[Auth] Failed to send password reset email:', emailError.message);
-      }
-    }
-
-    // Always return success to prevent enumeration
-    return res.json({
-      success: true,
-      message: 'If an account exists with this email, a reset link has been sent.'
-    });
-
-  } catch (error) {
-    console.error('[Auth] Forgot password error:', error);
-    return res.json({ success: true });  // Don't reveal errors
-  }
-});
-
-/**
- * POST /api/auth/reset-password
- *
- * Reset password using token from email.
- * Client re-encrypts nsec with new password before sending.
- * Client performs PBKDF2 hashing of new password before sending.
- *
- * Body: {
- *   token: string,
- *   newPasswordHash: string,
- *   newPasswordSalt: string,
- *   new_ncryptsec: string
- * }
- */
-router.post('/reset-password', async (req, res) => {
-  try {
-    const { token, newPasswordHash, newPasswordSalt, new_ncryptsec } = req.body;
-
-    if (!token || !newPasswordHash || !newPasswordSalt || !new_ncryptsec) {
+    if (!username || !newPasswordHash || !newPasswordSalt || !newNcryptsec) {
       return res.status(400).json({
         success: false,
-        error: 'Token, newPasswordHash, newPasswordSalt, and new encrypted key required'
+        error: 'username, new_password_hash, new_password_salt, and new_ncryptsec required'
       });
     }
 
-    // Validate passwordHash format
+    if (!isValidUsername(username)) {
+      return res.status(400).json({ success: false, error: 'Invalid username format' });
+    }
     if (!/^[a-f0-9]{64}$/i.test(newPasswordHash)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid newPasswordHash format'
-      });
+      return res.status(400).json({ success: false, error: 'Invalid new_password_hash format' });
     }
-
-    // Validate passwordSalt format (accept both 32-hex legacy and 64-hex v2 deterministic)
     if (!/^([a-f0-9]{32}|[a-f0-9]{64})$/i.test(newPasswordSalt)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid newPasswordSalt format'
-      });
+      return res.status(400).json({ success: false, error: 'Invalid new_password_salt format' });
+    }
+    if (!isValidNcryptsec(newNcryptsec)) {
+      return res.status(400).json({ success: false, error: 'Invalid new_ncryptsec format' });
     }
 
-    if (!isValidNcryptsec(new_ncryptsec)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid ncryptsec format'
-      });
+    const user = getUserByUsername(username);
+    if (!user) {
+      // Same generic 401 as bad login — don't reveal username existence to
+      // an attacker who happens to also have signed with some random nsec.
+      return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
 
-    const tokenData = getValidToken(token, 'reset');
-
-    if (!tokenData) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid or expired reset token'
-      });
+    // The auth check: the signing pubkey (req.nip98.pubkey is hex) must
+    // match the npub stored on the user row. If a different nsec signed,
+    // reject — this proves the caller controls the account's identity.
+    const { npubEncode } = await import('nostr-tools/nip19');
+    const signingNpub = npubEncode(req.nip98.pubkey);
+    if (signingNpub !== user.npub) {
+      console.log(`[Auth] Reset rejected: signing pubkey ${req.nip98.pubkey.slice(0, 12)}… does not match account ${user.npub.slice(0, 12)}…`);
+      return res.status(403).json({ success: false, error: 'This nsec does not match the account' });
     }
 
-    // Update ncryptsec and password
-    updateNcryptsec(tokenData.user_id, new_ncryptsec);
-
-    // Update password hash and salt. bcrypt-wrap the incoming PBKDF2 hash
-    // and mark the row as v2 so it gets the same DB-leak protection as new
-    // accounts. The client may still be using a random salt (legacy reset
-    // flow) — that's fine; the bcrypt wrap is what closes the pass-the-hash
-    // vector regardless of which salt scheme produced the inner PBKDF2.
-    const bcryptLib = (await import('bcrypt')).default;
-    const wrappedHash = bcryptLib.hashSync(newPasswordHash, 10);
-    const { db } = await import('./db.js');
-    db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, password_hash_version = 2, updated_at = strftime(\'%s\', \'now\') WHERE id = ?')
-      .run(wrappedHash, newPasswordSalt, tokenData.user_id);
-
-    markTokenUsed(token);
-
-    console.log(`[Auth] Password reset completed for user ${tokenData.user_id}`);
+    resetPasswordWithNsec(user.id, { newPasswordHash, newPasswordSalt, newNcryptsec });
+    console.log(`[Auth] Password reset (nsec-paste) for user ${user.id} (${user.npub.slice(0, 12)}…)`);
 
     return res.json({
       success: true,
-      message: 'Password reset successfully'
+      npub: user.npub,
+      username: user.username,
+      ncryptsec: newNcryptsec
     });
-
   } catch (error) {
-    console.error('[Auth] Reset password error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
+    console.error('[Auth] Reset-with-nsec error:', error?.message || error);
+    return res.status(500).json({ success: false, error: 'Reset failed' });
   }
-});
-
-/**
- * GET /api/auth/reset-password-info
- *
- * Get info needed for password reset (ncryptsec to decrypt with temp key).
- * This endpoint is called when user clicks reset link, before they enter new password.
- *
- * Query: ?token=xxx
- */
-router.get('/reset-password-info', async (req, res) => {
-  try {
-    const { token } = req.query;
-
-    if (!token) {
-      return res.status(400).json({
-        success: false,
-        error: 'Token required'
-      });
-    }
-
-    const tokenData = getValidToken(token, 'reset');
-
-    if (!tokenData) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid or expired reset token'
-      });
-    }
-
-    // Return ncryptsec so client can decrypt with old password
-    // (User knows old password, just forgot it - this is for UI flow)
-    // Actually, this flow won't work - user forgot password, can't decrypt
-    // Need different approach - see comments below
-
-    return res.json({
-      success: true,
-      email: tokenData.email,
-      npub: tokenData.npub
-      // Note: We cannot return ncryptsec here because user can't decrypt it
-      // without old password. Password reset requires:
-      // 1. User has nsec backed up elsewhere, OR
-      // 2. We implement a recovery mechanism (security questions, etc.)
-      // For now, password reset will require user to have their nsec
-    });
-
-  } catch (error) {
-    console.error('[Auth] Reset password info error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
-  }
-});
-
-/**
- * POST /api/auth/add-recovery
- *
- * Add email/password recovery to an existing Nostr account.
- * For users who created account without recovery options.
- *
- * DISABLED: This endpoint requires Nostr signature verification to prevent
- * attackers from claiming ownership of npubs they don't control.
- * See JUMPSTART.md TODO for implementation details.
- *
- * Body: {
- *   npub: string,
- *   ncryptsec: string,
- *   passwordHash: string,
- *   passwordSalt: string,
- *   email?: string,
- *   username?: string,
- *   signature: string (Nostr event signature proving ownership)
- * }
- */
-router.post('/add-recovery', async (req, res) => {
-  // Endpoint disabled until Nostr signature verification is implemented
-  return res.status(501).json({
-    success: false,
-    error: 'This feature is temporarily disabled. Please use signup instead.'
-  });
-
-  /* DISABLED - Enable after implementing signature verification
-  try {
-    const { npub, ncryptsec, passwordHash, passwordSalt, email, username, signature } = req.body;
-
-    // TODO: Verify Nostr signature to prove ownership of npub
-    // For now, we'll implement basic version
-
-    if (!npub || !ncryptsec || !passwordHash || !passwordSalt) {
-      return res.status(400).json({
-        success: false,
-        error: 'npub, ncryptsec, passwordHash, and passwordSalt required'
-      });
-    }
-
-    if (!email && !username) {
-      return res.status(400).json({
-        success: false,
-        error: 'Either email or username required'
-      });
-    }
-
-    if (!isValidNpub(npub)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid npub format'
-      });
-    }
-
-    if (!isValidNcryptsec(ncryptsec)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid ncryptsec format'
-      });
-    }
-
-    if (!isValidPassword(password)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Password must be 8-128 characters'
-      });
-    }
-
-    if (email && !isValidEmail(email)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid email format'
-      });
-    }
-
-    if (username && !isValidUsername(username)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid username format'
-      });
-    }
-
-    // Check if user already exists
-    const existingUser = getUserByNpub(npub);
-
-    if (existingUser) {
-      // Update existing user's recovery info
-      if (email && emailExists(email) && existingUser.email !== email) {
-        return res.status(409).json({
-          success: false,
-          error: 'Email already registered to another account'
-        });
-      }
-
-      if (username && usernameExists(username) && existingUser.username !== username) {
-        return res.status(409).json({
-          success: false,
-          error: 'Username already taken'
-        });
-      }
-
-      const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-      updateUserRecovery({ npub, email, username, ncryptsec, password_hash });
-
-      console.log(`[Auth] Recovery info updated for ${npub.slice(0, 12)}...`);
-
-      return res.json({
-        success: true,
-        message: 'Recovery info updated'
-      });
-    }
-
-    // Create new user with recovery info
-    if (email && emailExists(email)) {
-      return res.status(409).json({
-        success: false,
-        error: 'Email already registered'
-      });
-    }
-
-    if (username && usernameExists(username)) {
-      return res.status(409).json({
-        success: false,
-        error: 'Username already taken'
-      });
-    }
-
-    const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const user = createUser({ npub, email, username, ncryptsec, password_hash });
-
-    console.log(`[Auth] Recovery info added for ${npub.slice(0, 12)}...`);
-
-    // Send verification email if provided
-    if (email) {
-      try {
-        const token = createToken(user.id, 'verify', 24 * 60 * 60);
-        await sendVerificationEmail(email, token);
-      } catch (emailError) {
-        console.error('[Auth] Failed to send verification email:', emailError.message);
-      }
-    }
-
-    return res.json({
-      success: true,
-      message: 'Recovery info added'
-    });
-
-  } catch (error) {
-    console.error('[Auth] Add recovery error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
-  }
-  END DISABLED */
 });
 
 /**

@@ -91,6 +91,8 @@ export function showLoginModal() {
         // Ensure login sections are visible (not blank modal)
         document.getElementById('loginMainButtons')?.classList.remove('hidden');
         document.getElementById('returningUserSection')?.classList.remove('hidden');
+        const header = document.getElementById('loginModalHeader');
+        if (header) header.textContent = 'Sign In to Nosmero';
     }
 }
 
@@ -175,6 +177,8 @@ export function showLoginModalWithLogin() {
         hideAllLoginSections();
         document.getElementById('loginMainButtons')?.classList.remove('hidden');
         document.getElementById('returningUserSection')?.classList.remove('hidden');
+        const header = document.getElementById('loginModalHeader');
+        if (header) header.textContent = 'Sign In to Nosmero';
         document.getElementById('emailOrUsernameInput')?.focus();
     }
 }
@@ -187,6 +191,8 @@ export function showCreateAccountModal() {
         // Show new user signup section
         hideAllLoginSections();
         document.getElementById('newUserSection')?.classList.remove('hidden');
+        const header = document.getElementById('loginModalHeader');
+        if (header) header.textContent = 'Join Nosmero';
         document.getElementById('displayNameInput')?.focus();
     }
 }

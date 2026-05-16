@@ -285,6 +285,18 @@ const statements = {
     WHERE id = @id
   `),
 
+  // Same shape as migrateCredentialsToV2 — separated for audit-log clarity so
+  // a reset doesn't look like a silent v1→v2 upgrade in security logs.
+  resetPasswordWithNsec: db.prepare(`
+    UPDATE users
+    SET password_hash = @password_hash,
+        password_salt = @password_salt,
+        password_hash_version = 2,
+        ncryptsec = @ncryptsec,
+        updated_at = strftime('%s', 'now')
+    WHERE id = @id
+  `),
+
   getUserByEmail: db.prepare(`
     SELECT * FROM users WHERE email = ?
   `),
@@ -591,6 +603,53 @@ export function migrateCredentialsToV2(userId, { newPasswordHash, newPasswordSal
   logAuditEvent({
     userId,
     eventType: 'credentials_migrated_v1_to_v2',
+    success: true
+  });
+  return { ok: true };
+}
+
+/**
+ * Reset a user's password using a freshly-pasted nsec. Same wrapping
+ * semantics as migrateCredentialsToV2 — bcrypt-wrap the inner PBKDF2 hash,
+ * write the new salt + ncryptsec, mark v2. The auth handler is responsible
+ * for proving the caller controls the account (NIP-98 signature must match
+ * the user's stored npub) before calling this.
+ *
+ * @param {number} userId
+ * @param {object} params
+ * @param {string} params.newPasswordHash - PBKDF2 hash (hex) computed
+ *   client-side with the deterministic salt (SHA-256(username + AUTH_PEPPER)).
+ * @param {string} params.newPasswordSalt - The deterministic salt (hex).
+ * @param {string} params.newNcryptsec - The nsec re-encrypted with the new
+ *   password (NIP-49). The plaintext nsec is the same as before — only the
+ *   encryption changes because the password did.
+ */
+export function resetPasswordWithNsec(userId, { newPasswordHash, newPasswordSalt, newNcryptsec }) {
+  if (typeof userId !== 'number' || userId <= 0) {
+    throw new Error('Invalid userId');
+  }
+  if (typeof newPasswordHash !== 'string' || !/^[a-f0-9]{64}$/i.test(newPasswordHash)) {
+    throw new Error('Invalid newPasswordHash format');
+  }
+  if (typeof newPasswordSalt !== 'string' || !/^[a-f0-9]+$/i.test(newPasswordSalt)) {
+    throw new Error('Invalid newPasswordSalt format');
+  }
+  if (typeof newNcryptsec !== 'string' || !newNcryptsec.startsWith('ncryptsec1')) {
+    throw new Error('Invalid newNcryptsec format');
+  }
+  const wrapped = bcrypt.hashSync(newPasswordHash, BCRYPT_ROUNDS);
+  const result = statements.resetPasswordWithNsec.run({
+    id: userId,
+    password_hash: wrapped,
+    password_salt: newPasswordSalt,
+    ncryptsec: newNcryptsec
+  });
+  if (result.changes === 0) {
+    throw new Error('No user updated — id may not exist');
+  }
+  logAuditEvent({
+    userId,
+    eventType: 'password_reset_with_nsec',
     success: true
   });
   return { ok: true };
