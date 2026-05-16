@@ -170,8 +170,17 @@ function _genStageId() {
   return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function _buildEmbedUrlForKind(baseUrl, kind) {
+function _buildEmbedUrlForKind(baseUrl, kind, originalFilename) {
   if (kind === 'video') return baseUrl + '#video.mp4';
+  if (kind === 'pdf') {
+    // Use the original filename as the fragment when available so the
+    // rendered PDF card shows a meaningful name; otherwise fall back to
+    // a generic "document.pdf" marker that triggers the parser regex.
+    const safeName = (originalFilename && /\.pdf$/i.test(originalFilename))
+      ? originalFilename.replace(/[^\w.\-]+/g, '_')
+      : 'document.pdf';
+    return baseUrl + '#' + safeName;
+  }
   if (kind === 'file')  return baseUrl;
   return baseUrl + '#image.jpg';
 }
@@ -228,7 +237,7 @@ export async function resolvePendingPlaceholders(content) {
     }
     try {
       const result = await uploadToIpfs(staged.file);
-      const url = _buildEmbedUrlForKind(result.url, staged.kind);
+      const url = _buildEmbedUrlForKind(result.url, staged.kind, staged.filename);
       successful.push({ id, cid: result.cid, placeholder: match[0], replacement: url });
     } catch (e) {
       errors.push({ id, filename: staged.filename, error: e.error || e.message || 'upload_failed' });

@@ -5235,6 +5235,7 @@ function formatBytesShort(n) {
 // Fragments aren't sent to the gateway, so only the bare CID is fetched.
 function buildEmbedUrl(baseUrl, kind) {
     if (kind === 'video') return baseUrl + '#video.mp4';
+    if (kind === 'pdf')   return baseUrl + '#document.pdf';
     if (kind === 'file')  return baseUrl;
     return baseUrl + '#image.jpg';
 }
@@ -5323,9 +5324,16 @@ function showIPFSEmbedModal(textarea, selectedText, start, end) {
             quotaTotal = data.quotaTotalBytes;
             renderQuotaBar();
         } catch (e) {
-            quotaText.textContent = (e.status === 401)
-                ? 'Login required to upload to IPFS.'
-                : 'Could not load quota.';
+            if (e.status === 401) {
+                // Surface the specific NIP-98 failure reason instead of a
+                // generic "login required" — most 401s here are URL/clock/
+                // signature issues, not actual sign-in problems.
+                quotaText.textContent = (e.message === 'missing_authorization')
+                    ? 'Sign in to upload to IPFS.'
+                    : `Auth failed: ${e.message || 'unknown error'}`;
+            } else {
+                quotaText.textContent = 'Could not load quota.';
+            }
         }
     };
 

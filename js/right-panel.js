@@ -1141,6 +1141,9 @@ const RightPanel = {
             case 'article':
                 this.renderArticle(data);
                 break;
+            case 'pdf':
+                this.renderPdf(data);
+                break;
             case 'settings':
                 this.renderSettings();
                 break;
@@ -1175,6 +1178,14 @@ const RightPanel = {
      */
     openArticle(arg, updateUrl = true) {
         this.openView('article', arg, updateUrl);
+    },
+
+    /**
+     * Open PDF reader view.
+     * `arg` is `{ url, filename? }`.
+     */
+    openPdf(arg, updateUrl = true) {
+        this.openView('pdf', arg, updateUrl);
     },
 
     /**
@@ -1346,6 +1357,45 @@ const RightPanel = {
         } catch (error) {
             console.error('Error loading article:', error);
             section.innerHTML = '<div style="padding: 20px; color: var(--danger);">Failed to load article</div>';
+        }
+    },
+
+    /**
+     * Render PDF reader in panel.
+     * `arg` is `{ url, filename? }`.
+     */
+    async renderPdf(arg) {
+        if (!arg || !arg.url) return;
+        if (!this.content) {
+            console.error('renderPdf: content element not found');
+            return;
+        }
+
+        this.setTitle('PDF');
+
+        let section = this.content.querySelector('.right-panel-pdf');
+        if (!section) {
+            section = document.createElement('div');
+            section.className = 'right-panel-section right-panel-pdf';
+            this.content.appendChild(section);
+        }
+        section.classList.add('active');
+        section.innerHTML = '<div class="loading" style="padding: 20px;">Loading PDF…</div>';
+
+        if (this.defaultFeed) {
+            this.defaultFeed.style.display = 'none';
+        }
+
+        try {
+            const PdfReader = await import('./pdf-reader.js');
+            section.innerHTML = PdfReader.renderPdfReaderShell({
+                url: arg.url,
+                filename: arg.filename,
+            });
+            await PdfReader.mountPdfReader(section);
+        } catch (e) {
+            console.error('renderPdf failed:', e);
+            section.innerHTML = `<div style="padding: 20px; color: var(--danger);">Failed to load PDF: ${e?.message || e}</div>`;
         }
     },
 
@@ -2947,6 +2997,17 @@ window.rightPanelGoBack = () => RightPanel.goBack();
 // On mobile (right panel not visible) RightPanel.openArticle falls back to
 // fallbackToModal, which is patched separately for the mobile build.
 window.openArticleReader = (eventOrCoord) => RightPanel.openArticle(eventOrCoord);
+
+// PDF reader dispatch. pdf-reader.js initPdfReader() document-level click
+// listener calls this when any [data-action="open-pdf"] is clicked.
+window.openPdfReader = (arg) => RightPanel.openPdf(arg);
+
+// Bootstrap PDF auto-hydration once at module load — sets up the
+// MutationObserver that finds .pdf-card elements as they're inserted into
+// the DOM and renders their first-page thumbnails.
+import('./pdf-reader.js').then(mod => {
+    try { mod.initPdfReader(); } catch (e) { console.warn('initPdfReader failed:', e); }
+}).catch(e => console.warn('pdf-reader.js failed to load:', e));
 
 // Export for module usage
 window.RightPanel = RightPanel;

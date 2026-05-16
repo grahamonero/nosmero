@@ -355,7 +355,43 @@ export function parseContent(content, skipEmbeddedNotes = false) {
         }
         return stashMedia(`<video controls><source src="${escapeHtml(url)}" /></video>`);
     });
-    
+
+    // Parse PDF URLs hosted on the Nosmero IPFS gateway — these get the
+    // in-app PDF.js reader because we control the gateway's CORS headers
+    // (which makes them paywallable). Third-party PDFs fall through to
+    // urlRegex below and render as plain links that open in a new tab.
+    // Format matches the existing IPFS fragment trick: URLs like
+    // `https://ipfs.nosmero.com/ipfs/<CID>#document.pdf`.
+    const pdfRegex = /(https?:\/\/ipfs\.nosmero\.com\/[^\s<]+?\.pdf)(\?[^\s<]*)?/gi;
+    parsed = parsed.replace(pdfRegex, (match, base, query) => {
+        const url = base + (query || '');
+        if (!isValidUrlScheme(url)) {
+            return escapeHtml(match);
+        }
+        // Filename preference: fragment ends in .pdf (e.g. `#mybook.pdf` from
+        // the IPFS upload flow) → use the fragment. Otherwise last path seg.
+        let filename;
+        const hashIdx = url.indexOf('#');
+        if (hashIdx !== -1 && /\.pdf$/i.test(url.slice(hashIdx + 1))) {
+            filename = url.slice(hashIdx + 1);
+        } else {
+            filename = url.split('?')[0].split('#')[0].split('/').pop() || 'document.pdf';
+        }
+        try { filename = decodeURIComponent(filename); } catch (_) {}
+        const escUrl = escapeHtml(url);
+        const escName = escapeHtml(filename);
+        return stashMedia(
+            `<div class="pdf-card" data-action="open-pdf" data-pdf-url="${escUrl}" data-pdf-filename="${escName}">` +
+                `<div class="pdf-card-icon">📄</div>` +
+                `<div class="pdf-card-body">` +
+                    `<div class="pdf-card-name">${escName}</div>` +
+                    `<div class="pdf-card-meta"><span class="pdf-card-type">PDF</span></div>` +
+                `</div>` +
+                `<span class="pdf-card-open" data-action="open-pdf" data-pdf-url="${escUrl}" data-pdf-filename="${escName}" role="button" tabindex="0">Open</span>` +
+            `</div>`
+        );
+    });
+
     // Parse nostr npub mentions - show as user names
     const npubRegex = /(nostr:)?(npub1[a-z0-9]{58})/gi;
     parsed = parsed.replace(npubRegex, (match, prefix, npub) => {
@@ -427,6 +463,10 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     
     // Parse regular URLs (but not those already converted to images/videos)
     // Stop at whitespace or < to avoid grabbing <br> tags
+    // Note: `.pdf` is NOT in the exclusion list because only Nosmero-IPFS
+    // PDFs are caught by pdfRegex above (and stashed before this runs).
+    // Third-party PDFs should fall through here so they render as plain
+    // links that open in the browser's native PDF viewer in a new tab.
     const urlRegex = /(?<!src=")(https?:\/\/[^\s<]+)(?!\.(jpg|jpeg|png|gif|webp|svg|mp4|webm|ogg))/gi;
     parsed = parsed.replace(urlRegex, (match, url) => {
         // Validate URL scheme
@@ -624,6 +664,29 @@ export async function processEmbeddedNotes(containerId) {
                         } catch (_) {
                             noteDiv.innerHTML = renderEmbeddedNote(event, State);
                         }
+                    }
+                } else if (event.kind === 1063) {
+                    // NIP-94 file metadata — render the in-app PDF card only
+                    // if the file is on the Nosmero IPFS gateway (we control
+                    // CORS there). Third-party PDFs fall through to the
+                    // NIP-89 unknown-kind card so users at least get an
+                    // "Open in [client]" deep-link.
+                    console.log('✅ Rendering NIP-94 file card (kind 1063)');
+                    try {
+                        const PdfReader = await import('./pdf-reader.js');
+                        const fileMeta = PdfReader.parseNip94File(event);
+                        const isNosmeroHosted = fileMeta?.url && /^https?:\/\/ipfs\.nosmero\.com\//i.test(fileMeta.url);
+                        if (fileMeta && isNosmeroHosted) {
+                            noteDiv.innerHTML = PdfReader.renderPdfCard(fileMeta);
+                            // MutationObserver-based auto-hydration picks it up.
+                        } else {
+                            // Not a Nosmero PDF — fall through to NIP-89 fallback.
+                            const NIP89 = await import('./nip89.js');
+                            noteDiv.innerHTML = NIP89.renderUnknownKindCard(event, naddr || null);
+                            NIP89.hydrateUnknownKindCards(noteDiv).catch(() => {});
+                        }
+                    } catch (e) {
+                        console.warn('NIP-94 render failed:', e?.message || e);
                     }
                 } else {
                     console.log(`✅ Rendering NIP-89 unknown-kind fallback for kind ${event.kind}`);

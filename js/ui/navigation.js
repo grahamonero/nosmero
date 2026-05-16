@@ -116,7 +116,9 @@ export function handleMenuItemClick(tab) {
 // ===================
 
 export async function handleFeedTabClick(feedType, event) {
-    event.preventDefault();
+    // event may be null when this is dispatched from the hamburger menu
+    // rather than an actual feed-tab click.
+    event?.preventDefault?.();
 
     // Load State module to check current page
     const StateModule = await ensureStateLoaded();
@@ -158,11 +160,15 @@ export async function handleFeedTabClick(feedType, event) {
         `/feed/${feedPath}`
     );
 
-    // Update active tab styling
+    // Update active tab styling — only when triggered from a real click on a tab.
+    // The hamburger-dispatch path passes a null event for tabs that don't
+    // appear in the top nav (e.g. Suggested Follows).
     document.querySelectorAll('.feed-tab').forEach(tab => {
         tab.classList.remove('active');
     });
-    event.target.classList.add('active');
+    if (event?.target?.classList) {
+        event.target.classList.add('active');
+    }
 
     // Show the Following quick-toggle chip only on the Following feed for
     // logged-in users (anonymous users get redirected to Trending), and sync
