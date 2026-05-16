@@ -796,27 +796,6 @@
             <div id="loginMainButtons">
                 <!-- Returning User Login Section -->
                 <div id="returningUserSection" class="hidden">
-                    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
-                        <button class="login-option-btn" onclick="loginWithExtension()">
-                            <span style="margin-right: 8px;">🔌</span> Browser Extension
-                        </button>
-                        <button class="login-option-btn" onclick="showLoginWithNsecSection()">
-                            <span style="margin-right: 8px;">🔑</span> Paste nsec
-                        </button>
-                        <button class="login-option-btn" onclick="showLoginWithNsecApp()">
-                            <span style="margin-right: 8px;">🌐</span> nsec.app
-                        </button>
-                        <button class="login-option-btn" onclick="showLoginWithAmberSection()">
-                            <span style="margin-right: 8px;">📱</span> Amber (Android)
-                        </button>
-                    </div>
-
-                    <div style="display: flex; align-items: center; margin: 20px 0; gap: 12px;">
-                        <div style="flex: 1; height: 1px; background: #333;"></div>
-                        <span style="color: #666; font-size: 12px;">or with Nosmero username</span>
-                        <div style="flex: 1; height: 1px; background: #333;"></div>
-                    </div>
-
                     <form id="loginForm" onsubmit="return false;">
                         <div style="margin-bottom: 12px;">
                             <input type="text" id="emailOrUsernameInput" placeholder="Username Created on Nosmero"
@@ -831,6 +810,27 @@
                             <button type="button" class="text-btn" onclick="authUI.showForgotPassword()" style="color: #8B5CF6; font-size: 13px;">Forgot?</button>
                         </div>
                     </form>
+
+                    <div style="display: flex; align-items: center; margin: 20px 0; gap: 12px;">
+                        <div style="flex: 1; height: 1px; background: #333;"></div>
+                        <span style="color: #666; font-size: 12px;">or sign in with a Nostr key</span>
+                        <div style="flex: 1; height: 1px; background: #333;"></div>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+                        <button class="login-option-btn" onclick="loginWithExtension()">
+                            <span style="margin-right: 8px;">🔌</span> Browser Extension
+                        </button>
+                        <button class="login-option-btn" onclick="showLoginWithNsecSection()">
+                            <span style="margin-right: 8px;">🔑</span> Paste nsec
+                        </button>
+                        <button class="login-option-btn" onclick="showLoginWithNsecApp()">
+                            <span style="margin-right: 8px;">🌐</span> nsec.app
+                        </button>
+                        <button class="login-option-btn" onclick="showLoginWithAmberSection()">
+                            <span style="margin-right: 8px;">📱</span> Amber (Android)
+                        </button>
+                    </div>
 
                     <div style="text-align: center; margin-top: 20px;">
                         <button class="text-btn" onclick="showCreateAccountModal()" style="color: #FF6600; font-size: 14px;">
@@ -951,20 +951,11 @@
                         </div>
                     </div>
 
-                    <!-- Optional nsec backup email -->
+                    <!-- nsec export hint -->
                     <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 255, 255, 0.03); border-radius: 8px; border: 1px solid #333;">
-                        <label style="display: flex; align-items: flex-start; color: #ccc; font-size: 13px; cursor: pointer;">
-                            <input type="checkbox" id="emailBackupCheckbox" onchange="toggleEmailBackup(this.checked)"
-                                   style="margin-right: 10px; margin-top: 2px; accent-color: #8B5CF6;">
-                            <div>
-                                <span style="font-weight: 500;">Email me my nsec backup</span>
-                                <div style="font-size: 11px; color: #888; margin-top: 2px;">One-time send only - your email is NOT stored</div>
-                            </div>
-                        </label>
-                        <div id="emailBackupContainer" style="display: none; margin-top: 12px;">
-                            <input type="email" id="signupEmailInput" placeholder="Email for one-time nsec backup"
-                                   style="width: 100%; padding: 10px; border: 1px solid #333; border-radius: 6px; background: #000; color: #fff; font-size: 13px;">
-                            <div style="font-size: 10px; color: #666; margin-top: 4px;">We send your nsec once, then permanently delete your email from our systems</div>
+                        <div style="color: #ccc; font-size: 13px;">
+                            <span style="font-weight: 500;">🔑 About your private key</span>
+                            <div style="font-size: 11px; color: #888; margin-top: 4px; line-height: 1.5;">Nosmero generates your Nostr private key (<code style="background: #222; padding: 1px 4px; border-radius: 3px;">nsec</code>) in your browser and encrypts it with your password. You can export it any time from <strong>Settings</strong> after signing in — needed if you want to use the same identity in another Nostr client.</div>
                         </div>
                     </div>
 

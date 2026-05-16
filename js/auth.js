@@ -451,6 +451,69 @@ export async function completeLoginWithNsec(nsec, displayName = null, options = 
         }
 
         await finalizeLogin();
+
+        // For fresh signups, publish a kind-0 profile event with the chosen
+        // display name. completeLoginWithNsec is called with displayName ONLY
+        // during signup (login flow passes null), so this only fires once
+        // per account at account-creation time.
+        if (displayName) {
+            const profileNow = Math.floor(Date.now() / 1000);
+            const seededProfile = {
+                name: displayName,
+                display_name: displayName,
+                pubkey: State.publicKey,
+                created_at: profileNow,  // ← critical: loadUserProfileData's stale-event guard
+                                         // drops relay kind-0s older than this timestamp,
+                                         // so an empty-relay race won't overwrite our seed
+            };
+
+            // Seed in-memory cache so the hamburger + cached-read paths see
+            // the display name immediately, without waiting for the relay
+            // round-trip on the publish below.
+            State.profileCache[State.publicKey] = seededProfile;
+
+            // Also save to localStorage — loadProfileFromLocalStorage reads
+            // this on the full-page Profile route as a pre-fetch cache.
+            try {
+                localStorage.setItem(`profile-${State.publicKey}`, JSON.stringify(seededProfile));
+            } catch (_) {}
+
+            // Re-render the hamburger menu's logged-in-user widget now that
+            // the cache has the name. Without this it stays at whatever it
+            // showed during the logged-out initNavigation pass ("Anonymous").
+            try { window.updateHeaderUIForAuthState?.(); } catch (_) {}
+
+            // Publish kind-0 to relays. Awaited so it completes before this
+            // function returns — modal was already closed in proceedToApp
+            // (which runs the disable + classList.remove('show') before
+            // calling us), so the user doesn't see this delay. They see the
+            // app + the seeded profile while the publish lands.
+            try {
+                const Relays = await import('./relays.js');
+                const Utils = await import('./utils.js');
+                const event = {
+                    kind: 0,
+                    created_at: profileNow,
+                    tags: [],
+                    content: JSON.stringify({
+                        name: displayName,
+                        display_name: displayName
+                    })
+                };
+                const signed = await Utils.signEvent(event);
+                const writeRelays = Relays.getWriteRelays?.() || [];
+                if (writeRelays.length) {
+                    const results = await Promise.allSettled(window.NostrState.pool.publish(writeRelays, signed));
+                    const accepted = results.filter(r => r.status === 'fulfilled').length;
+                    if (DEBUG) console.log(`[Auth] Published initial kind-0 profile (name="${displayName}") to ${accepted}/${writeRelays.length} relays`);
+                }
+            } catch (e) {
+                // Non-fatal — user can edit profile via Settings later, and
+                // the seeded cache + localStorage entry keeps the UI happy.
+                console.warn('[Auth] Initial kind-0 publish failed:', e?.message || e);
+            }
+        }
+
         return true;
 
     } catch (error) {

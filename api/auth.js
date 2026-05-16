@@ -23,9 +23,12 @@ import {
   npubExists,
   createToken,
   getValidToken,
-  markTokenUsed
+  markTokenUsed,
+  verifyPasswordHash,
+  migrateCredentialsToV2
 } from './db.js';
 import { sendVerificationEmail, sendPasswordResetEmail } from './email.js';
+import { requireNip98 } from './middleware/nip98.js';
 
 const router = Router();
 const BCRYPT_ROUNDS = 12;
@@ -158,8 +161,10 @@ router.post('/signup', signupLimiter, async (req, res) => {
       });
     }
 
-    // Validate passwordSalt (should be 32 hex characters for 16-byte salt)
-    if (!/^[a-f0-9]{32}$/i.test(passwordSalt)) {
+    // Validate passwordSalt. Two valid shapes:
+    //   - 32 hex chars (16 bytes): legacy v1 random salt from crypto.getRandomValues
+    //   - 64 hex chars (32 bytes): v2 deterministic salt = SHA-256(username + AUTH_PEPPER)
+    if (!/^([a-f0-9]{32}|[a-f0-9]{64})$/i.test(passwordSalt)) {
       return res.status(400).json({
         success: false,
         error: 'Invalid passwordSalt format'
@@ -345,13 +350,10 @@ router.post('/login', loginLimiter, async (req, res) => {
       });
     }
 
-    // Verify password hash using timing-safe comparison
-    const crypto = await import('crypto');
-    const providedHash = Buffer.from(passwordHash, 'hex');
-    const storedHash = Buffer.from(user.password_hash, 'hex');
-
-    const passwordValid = providedHash.length === storedHash.length &&
-                          crypto.timingSafeEqual(providedHash, storedHash);
+    // Verify password using version-aware path. For v1 users this still
+    // does the legacy timing-safe compare and signals migration_needed; for
+    // v2 users it runs bcrypt.compare against the wrapped hash.
+    const { ok: passwordValid, migrationNeeded } = verifyPasswordHash(user, passwordHash);
 
     if (!passwordValid) {
       console.log(`[Auth] Failed login attempt for ${identifier}`);
@@ -364,7 +366,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     // Update last login
     updateLastLogin(user.id);
 
-    console.log(`[Auth] Successful login: ${identifier}`);
+    console.log(`[Auth] Successful login: ${identifier}${migrationNeeded ? ' (v1, migration needed)' : ''}`);
 
     return res.json({
       success: true,
@@ -372,7 +374,11 @@ router.post('/login', loginLimiter, async (req, res) => {
       ncryptsec: user.ncryptsec,
       email: user.email,
       username: user.username,
-      email_verified: !!user.email_verified
+      email_verified: !!user.email_verified,
+      // When true, the client has just logged in as a v1 user and should
+      // immediately POST /api/auth/migrate-credentials (NIP-98 signed) to
+      // upgrade the row to v2. Silent — no user-visible UI.
+      migration_needed: migrationNeeded
     });
 
   } catch (error) {
@@ -504,8 +510,8 @@ router.post('/reset-password', async (req, res) => {
       });
     }
 
-    // Validate passwordSalt format
-    if (!/^[a-f0-9]{32}$/i.test(newPasswordSalt)) {
+    // Validate passwordSalt format (accept both 32-hex legacy and 64-hex v2 deterministic)
+    if (!/^([a-f0-9]{32}|[a-f0-9]{64})$/i.test(newPasswordSalt)) {
       return res.status(400).json({
         success: false,
         error: 'Invalid newPasswordSalt format'
@@ -531,10 +537,16 @@ router.post('/reset-password', async (req, res) => {
     // Update ncryptsec and password
     updateNcryptsec(tokenData.user_id, new_ncryptsec);
 
-    // Update password hash and salt
+    // Update password hash and salt. bcrypt-wrap the incoming PBKDF2 hash
+    // and mark the row as v2 so it gets the same DB-leak protection as new
+    // accounts. The client may still be using a random salt (legacy reset
+    // flow) — that's fine; the bcrypt wrap is what closes the pass-the-hash
+    // vector regardless of which salt scheme produced the inner PBKDF2.
+    const bcryptLib = (await import('bcrypt')).default;
+    const wrappedHash = bcryptLib.hashSync(newPasswordHash, 10);
     const { db } = await import('./db.js');
-    db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, updated_at = strftime(\'%s\', \'now\') WHERE id = ?')
-      .run(newPasswordHash, newPasswordSalt, tokenData.user_id);
+    db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, password_hash_version = 2, updated_at = strftime(\'%s\', \'now\') WHERE id = ?')
+      .run(wrappedHash, newPasswordSalt, tokenData.user_id);
 
     markTokenUsed(token);
 
@@ -789,6 +801,61 @@ router.get('/check-availability', checkAvailabilityLimiter, (req, res) => {
     success: false,
     error: 'email or username query parameter required'
   });
+});
+
+/**
+ * POST /api/auth/migrate-credentials
+ *
+ * Silent v1 → v2 migration. Called by the client immediately after a
+ * successful v1 login when the server returned migration_needed: true.
+ *
+ * Authentication: NIP-98. The signing pubkey must equal the user's stored
+ * npub — which the user proves they control because they just decrypted
+ * their nsec from the v1 login response and re-signed this request with it.
+ *
+ * Body: { new_password_hash, new_password_salt, new_ncryptsec }
+ *   - new_password_hash: PBKDF2(password, SHA256(username + AUTH_PEPPER))
+ *   - new_password_salt: SHA256(username + AUTH_PEPPER) — the deterministic salt
+ *   - new_ncryptsec: nsec re-encrypted with the new password+salt
+ *
+ * Effect: bcrypt-wraps the new hash, updates the row to v2.
+ */
+router.post('/migrate-credentials', requireNip98(), async (req, res) => {
+  try {
+    const {
+      new_password_hash: newPasswordHash,
+      new_password_salt: newPasswordSalt,
+      new_ncryptsec: newNcryptsec
+    } = req.body;
+
+    if (!newPasswordHash || !newPasswordSalt || !newNcryptsec) {
+      return res.status(400).json({
+        success: false,
+        error: 'new_password_hash, new_password_salt, and new_ncryptsec required'
+      });
+    }
+
+    // Authorization: the user's row is identified by the NIP-98 signing
+    // pubkey's npub. Look it up — must exist and must currently be v1
+    // (no point migrating a v2 user).
+    const { npubEncode } = await import('nostr-tools/nip19');
+    const npub = npubEncode(req.nip98.pubkey);
+    const user = getUserByNpub(npub);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    if ((user.password_hash_version || 1) >= 2) {
+      // Idempotent — already migrated. Don't error; just no-op.
+      return res.json({ success: true, already_migrated: true });
+    }
+
+    migrateCredentialsToV2(user.id, { newPasswordHash, newPasswordSalt, newNcryptsec });
+    console.log(`[Auth] Migrated v1 → v2 for user ${user.id} (${npub.slice(0, 12)}...)`);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[Auth] Migrate credentials error:', error?.message || error);
+    return res.status(500).json({ success: false, error: 'Migration failed' });
+  }
 });
 
 export default router;

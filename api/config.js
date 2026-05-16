@@ -48,3 +48,12 @@ export const config = {
   // IMPORTANT: Set PAYWALL_ENCRYPTION_KEY in .env for production
   paywallEncryptionKey: process.env.PAYWALL_ENCRYPTION_KEY || null
 };
+
+// Public domain-separator used to derive per-user PBKDF2 salts client-side
+// as salt = SHA-256(username + AUTH_PEPPER). NOT secret — the client needs
+// it to compute the salt, and the client is publicly inspectable JS. Its
+// purpose is rainbow-table separation: even if every user picks "password",
+// their salted hashes differ from each other and from any other site's
+// hashes. Rotating this value would force every existing user to reset
+// their password, so treat it as immutable.
+export const AUTH_PEPPER = 'nosmero.com/auth/v2';

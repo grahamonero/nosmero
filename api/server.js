@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import * as Paywall from './paywall.js';
 import authRouter from './auth.js';
 import ipfsRouter from './ipfs.js';
+import { requireNip98 } from './middleware/nip98.js';
 
 // Get __dirname equivalent for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -424,7 +425,7 @@ app.get('/api/relatr/search', async (req, res) => {
 });
 
 // Main verification endpoint
-app.post('/api/verify-and-publish', async (req, res) => {
+app.post('/api/verify-and-publish', requireNip98(), async (req, res) => {
   const startTime = Date.now();
 
   try {
@@ -439,6 +440,16 @@ app.post('/api/verify-and-publish', async (req, res) => {
       message,
       tipper_pubkey: tipperPubkey
     } = req.body;
+
+    // NIP-98: only the actual tipper can publish a tip-disclosure event
+    // under their pubkey. Without this check, anyone could claim someone
+    // else's pubkey as the tipper and forge a disclosure event.
+    if (tipperPubkey && req.nip98.pubkey !== tipperPubkey) {
+      return res.status(403).json({
+        success: false,
+        error: 'NIP-98 pubkey does not match tipper_pubkey'
+      });
+    }
 
     console.log('[API] Verification request received:', {
       txid: txid?.substring(0, 8) + '...',
@@ -930,7 +941,7 @@ const paywallReadLimiter = rateLimit({
 });
 
 // Create a paywall for content (creator)
-app.post('/api/paywall/create', paywallLimiter, async (req, res) => {
+app.post('/api/paywall/create', requireNip98(), paywallLimiter, async (req, res) => {
   try {
     const {
       note_id: noteId,
@@ -947,6 +958,15 @@ app.post('/api/paywall/create', paywallLimiter, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: note_id, creator_pubkey, payment_address, price_xmr, decryption_key'
+      });
+    }
+
+    // NIP-98: prevent anyone from registering a paywall under someone else's
+    // pubkey. The signing pubkey MUST match the claimed creator.
+    if (req.nip98.pubkey !== creatorPubkey) {
+      return res.status(403).json({
+        success: false,
+        error: 'NIP-98 pubkey does not match creator_pubkey'
       });
     }
 
@@ -1037,9 +1057,19 @@ app.post('/api/paywall/info-batch', paywallReadLimiter, async (req, res) => {
 });
 
 // Check if user has unlocked content
-app.get('/api/paywall/check-unlock/:noteId/:buyerPubkey', paywallReadLimiter, async (req, res) => {
+app.get('/api/paywall/check-unlock/:noteId/:buyerPubkey', requireNip98(), paywallReadLimiter, async (req, res) => {
   try {
     const { noteId, buyerPubkey } = req.params;
+
+    // NIP-98: only the actual buyer (or creator if claimed pubkey is theirs)
+    // can ask whether they've unlocked. Without this, anyone could probe
+    // any noteId/pubkey pair and trivially fetch the decryption key.
+    if (req.nip98.pubkey !== buyerPubkey) {
+      return res.status(403).json({
+        success: false,
+        error: 'NIP-98 pubkey does not match buyerPubkey'
+      });
+    }
 
     // First check if user is the creator (author can always view their own content)
     const creatorKey = await Paywall.getCreatorKey(noteId, buyerPubkey);
@@ -1080,7 +1110,7 @@ app.get('/api/paywall/check-unlock/:noteId/:buyerPubkey', paywallReadLimiter, as
 });
 
 // Initiate a purchase (returns payment details)
-app.post('/api/paywall/purchase', paywallLimiter, async (req, res) => {
+app.post('/api/paywall/purchase', requireNip98(), paywallLimiter, async (req, res) => {
   try {
     const { note_id: noteId, buyer_pubkey: buyerPubkey } = req.body;
 
@@ -1088,6 +1118,14 @@ app.post('/api/paywall/purchase', paywallLimiter, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'note_id and buyer_pubkey required'
+      });
+    }
+
+    // NIP-98: only the actual buyer can claim a purchase under their pubkey.
+    if (req.nip98.pubkey !== buyerPubkey) {
+      return res.status(403).json({
+        success: false,
+        error: 'NIP-98 pubkey does not match buyer_pubkey'
       });
     }
 
@@ -1120,7 +1158,7 @@ app.post('/api/paywall/purchase', paywallLimiter, async (req, res) => {
 
 // Verify payment and unlock content
 // This is the key endpoint - called after buyer sends payment
-app.post('/api/paywall/verify', paywallLimiter, async (req, res) => {
+app.post('/api/paywall/verify', requireNip98(), paywallLimiter, async (req, res) => {
   try {
     const {
       purchase_id: purchaseId,
@@ -1135,6 +1173,14 @@ app.post('/api/paywall/verify', paywallLimiter, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'txid, tx_key, and buyer_pubkey required'
+      });
+    }
+
+    // NIP-98: only the buyer can verify their own payment.
+    if (req.nip98.pubkey !== buyerPubkey) {
+      return res.status(403).json({
+        success: false,
+        error: 'NIP-98 pubkey does not match buyer_pubkey'
       });
     }
 
@@ -1172,8 +1218,14 @@ app.post('/api/paywall/verify', paywallLimiter, async (req, res) => {
 });
 
 // Get user's unlocked content
-app.get('/api/paywall/my-unlocks/:buyerPubkey', paywallReadLimiter, async (req, res) => {
+app.get('/api/paywall/my-unlocks/:buyerPubkey', requireNip98(), paywallReadLimiter, async (req, res) => {
   try {
+    if (req.nip98.pubkey !== req.params.buyerPubkey) {
+      return res.status(403).json({
+        success: false,
+        error: 'NIP-98 pubkey does not match buyerPubkey'
+      });
+    }
     const { buyerPubkey } = req.params;
 
     if (!/^[0-9a-f]{64}$/i.test(buyerPubkey)) {
@@ -1201,7 +1253,7 @@ app.get('/api/paywall/my-unlocks/:buyerPubkey', paywallReadLimiter, async (req, 
 });
 
 // Get decryption key for creator (author can always see their own content)
-app.get('/api/paywall/creator-key/:noteId/:creatorPubkey', paywallReadLimiter, async (req, res) => {
+app.get('/api/paywall/creator-key/:noteId/:creatorPubkey', requireNip98(), paywallReadLimiter, async (req, res) => {
   try {
     const { noteId, creatorPubkey } = req.params;
 
@@ -1209,6 +1261,16 @@ app.get('/api/paywall/creator-key/:noteId/:creatorPubkey', paywallReadLimiter, a
       return res.status(400).json({
         success: false,
         error: 'Invalid pubkey format'
+      });
+    }
+
+    // NIP-98: the signing pubkey MUST match the requested creator pubkey.
+    // Without this check, any caller could swap in any creator's pubkey and
+    // pull their AES decryption key — bypassing every paywall in the system.
+    if (req.nip98.pubkey !== creatorPubkey) {
+      return res.status(403).json({
+        success: false,
+        error: 'NIP-98 pubkey does not match requested creator'
       });
     }
 
@@ -1264,7 +1326,7 @@ app.get('/api/paywall/creator-stats/:creatorPubkey', paywallReadLimiter, async (
 });
 
 // Delete a paywall (creator only)
-app.delete('/api/paywall/:noteId', paywallLimiter, async (req, res) => {
+app.delete('/api/paywall/:noteId', requireNip98(), paywallLimiter, async (req, res) => {
   try {
     const { noteId } = req.params;
     const { creator_pubkey: creatorPubkey } = req.body;
@@ -1273,6 +1335,14 @@ app.delete('/api/paywall/:noteId', paywallLimiter, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'creator_pubkey required'
+      });
+    }
+
+    // NIP-98: only the original creator can delete their paywall.
+    if (req.nip98.pubkey !== creatorPubkey) {
+      return res.status(403).json({
+        success: false,
+        error: 'NIP-98 pubkey does not match creator_pubkey'
       });
     }
 

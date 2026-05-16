@@ -10,6 +10,7 @@
 
 import * as State from './state.js';
 import * as Utils from './utils.js';
+import { signedFetch } from './signed-fetch.js';
 
 // API base URL
 const API_BASE = '/api/paywall';
@@ -256,7 +257,7 @@ export async function registerPaywall({ noteId, encryptedContent, decryptionKey,
         throw new Error('Must be logged in to create paywall');
     }
 
-    const response = await fetch(`${API_BASE}/create`, {
+    const response = await signedFetch(`${API_BASE}/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -385,9 +386,10 @@ export async function checkUnlocked(noteId, { forceBackend = false } = {}) {
         }
     }
 
-    // Check with backend
+    // Check with backend (NIP-98 signed — endpoint enforces the signing
+    // pubkey matches buyerPubkey)
     try {
-        const response = await fetch(`${API_BASE}/check-unlock/${noteId}/${buyerPubkey}`);
+        const response = await signedFetch(`${API_BASE}/check-unlock/${noteId}/${buyerPubkey}`);
         const data = await response.json();
 
         if (data.success && data.unlocked) {
@@ -421,7 +423,7 @@ export async function getMyUnlocks() {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/my-unlocks/${buyerPubkey}`);
+        const response = await signedFetch(`${API_BASE}/my-unlocks/${buyerPubkey}`);
         const data = await response.json();
 
         if (data.success) {
@@ -537,7 +539,7 @@ export async function completeUnlock(noteId, paywall, onProgress = () => {}) {
     // Verify payment with backend and get decryption key
     onProgress({ step: 'verifying', message: 'Verifying payment...' });
 
-    const response = await fetch(`${API_BASE}/verify`, {
+    const response = await signedFetch(`${API_BASE}/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

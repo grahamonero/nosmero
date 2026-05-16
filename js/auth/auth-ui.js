@@ -138,6 +138,20 @@ export async function handleLogin(e) {
 
     showSuccessToast('Logged in successfully');
 
+    // Silent v1 → v2 credentials upgrade if the server flagged it. Non-
+    // blocking: if it fails the user is already logged in and the next
+    // login will retry. State.privateKey is set by completeLoginWithNsec
+    // above, so the NIP-98 signing inside signedFetch works.
+    if (result.migrationNeeded && result.username) {
+      authClient.migrateToV2({
+        username: result.username,
+        password,
+        nsec: result.nsec
+      }).catch(err =>
+        console.warn('[Auth UI] Silent v1→v2 migration failed (will retry next login):', err?.message || err)
+      );
+    }
+
   } catch (error) {
     console.error('[Auth UI] Login error:', error);
     showErrorToast(error.message || 'Login failed');
@@ -153,7 +167,10 @@ export async function handleLogin(e) {
 
 /**
  * Handle new user signup form submission
- * Username-only signup - email is only used for one-time nsec backup (not stored)
+ * Username-only signup. nsec is generated client-side, encrypted with the
+ * user's password (NIP-49), and only the encrypted form is sent to the
+ * server. Users can export the plaintext nsec from Settings later when
+ * they want to use other Nostr clients.
  */
 export async function handleSignup(e) {
   if (e) e.preventDefault();
@@ -162,10 +179,6 @@ export async function handleSignup(e) {
   const username = document.getElementById('signupUsernameInput')?.value?.trim();
   const password = document.getElementById('signupPasswordInput')?.value;
   const confirmPassword = document.getElementById('confirmPasswordInput')?.value;
-
-  // Optional: one-time email for nsec backup (not stored in DB)
-  const wantsEmailBackup = document.getElementById('emailBackupCheckbox')?.checked;
-  const backupEmail = wantsEmailBackup ? document.getElementById('signupEmailInput')?.value?.trim() : null;
 
   // Validate display name
   if (!displayName) {
@@ -201,17 +214,6 @@ export async function handleSignup(e) {
     return;
   }
 
-  // Validate backup email if requested
-  if (wantsEmailBackup && !backupEmail) {
-    showErrorToast('Please enter an email for your nsec backup');
-    return;
-  }
-
-  if (wantsEmailBackup && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(backupEmail)) {
-    showErrorToast('Please enter a valid email address');
-    return;
-  }
-
   const createBtn = document.getElementById('createAccountBtn');
   const originalText = createBtn?.textContent;
 
@@ -230,13 +232,13 @@ export async function handleSignup(e) {
     const nsec = nsecEncode(privateKeyBytes);
     const npub = npubEncode(publicKeyHex);
 
-    // Register with server (username-only, email used for one-time backup only)
+    // Register with server. nsec is encrypted with the user's password
+    // client-side before transit; server never sees the plaintext key.
     await authClient.signup({
       nsec,
       npub,
       password,
-      username: username.toLowerCase(),
-      backupEmail: backupEmail || undefined  // One-time send, not stored
+      username: username.toLowerCase()
     });
 
     // Save session (no email stored since it's not in DB)
@@ -247,10 +249,6 @@ export async function handleSignup(e) {
     });
 
     console.log('[Auth UI] Account created (username-only)');
-
-    if (wantsEmailBackup) {
-      showSuccessToast('Account created! Check your email for nsec backup.');
-    }
 
     // Show the key display section (hasPassword=true since user registered with password)
     showKeyDisplay(nsec, npub, displayName, true);
@@ -332,6 +330,18 @@ export async function proceedToApp() {
     showErrorToast('No keys found. Please try again.');
     return;
   }
+
+  // Disable the button + close the modal immediately so the user gets
+  // instant feedback. Without this, finalizeLogin's NIP-65 relay fetch
+  // (several seconds) + the kind-0 publish leave the modal sitting on
+  // screen with a clickable button, encouraging multi-clicks.
+  const proceedBtn = document.querySelector('#keyDisplaySection .send-btn');
+  if (proceedBtn) {
+    proceedBtn.disabled = true;
+    proceedBtn.textContent = 'Logging in…';
+  }
+  const loginModal = document.getElementById('loginModal');
+  if (loginModal) loginModal.classList.remove('show');
 
   // Use existing auth system to complete login
   // skipPin if user registered with password (password already protects their key on server)
@@ -495,11 +505,6 @@ export function initAuthUI() {
   // Forgot password form
   document.getElementById('forgotPasswordForm')?.addEventListener('submit', handleForgotPassword);
 
-  // Email availability check
-  document.getElementById('signupEmailInput')?.addEventListener('input', (e) => {
-    checkEmailAvailability(e.target.value);
-  });
-
   // Username availability check
   document.getElementById('signupUsernameInput')?.addEventListener('input', (e) => {
     checkUsernameAvailability(e.target.value);
@@ -538,20 +543,6 @@ window.authUI = {
   toggleRecoveryOptions,
   initAuthUI
 };
-
-/**
- * Toggle email backup input visibility
- */
-export function toggleEmailBackup(checked) {
-  const container = document.getElementById('emailBackupContainer');
-  if (container) {
-    container.style.display = checked ? 'block' : 'none';
-    if (checked) {
-      document.getElementById('signupEmailInput')?.focus();
-    }
-  }
-}
-window.toggleEmailBackup = toggleEmailBackup;
 
 /**
  * Password strength calculator and UI updater

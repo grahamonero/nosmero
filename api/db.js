@@ -9,6 +9,11 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import bcrypt from 'bcrypt';
+
+// bcrypt work factor — 10 rounds ≈ 100ms per hash on a typical VPS, which
+// is the standard recommendation as of 2026. Raise if compute keeps cheap.
+const BCRYPT_ROUNDS = 10;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, 'data', 'nosmero.db');
@@ -21,6 +26,16 @@ db.pragma('foreign_keys = ON');
 // Create tables if they don't exist
 db.exec(`
   -- Users table
+  --
+  -- password_hash_version semantics:
+  --   1 = raw PBKDF2(password, random_salt) — legacy. Stored hash equals the
+  --       client-computed hash verbatim, so DB-leak == credential equivalent.
+  --   2 = bcrypt(PBKDF2(password, deterministic_salt)) — current. Client
+  --       computes salt = SHA256(username + AUTH_PEPPER) locally, server
+  --       bcrypt-wraps the incoming hash before storage and bcrypt.compare on
+  --       verify. DB leak only yields bcrypt blobs requiring per-user offline
+  --       crack work. Migration happens silently on next successful login of
+  --       a v1 user (see /api/auth/migrate-credentials).
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     npub TEXT UNIQUE NOT NULL,
@@ -29,6 +44,7 @@ db.exec(`
     ncryptsec TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     password_salt TEXT,
+    password_hash_version INTEGER NOT NULL DEFAULT 1,
     email_verified INTEGER DEFAULT 0,
     created_at INTEGER DEFAULT (strftime('%s', 'now')),
     updated_at INTEGER DEFAULT (strftime('%s', 'now')),
@@ -88,6 +104,18 @@ db.exec(`
 try {
   db.exec(`ALTER TABLE users ADD COLUMN password_salt TEXT`);
   console.log('[DB] Migration: Added password_salt column');
+} catch (error) {
+  if (!error.message.includes('duplicate column name')) {
+    throw error;
+  }
+}
+
+// Migration: Add password_hash_version column if it doesn't exist. Defaults
+// to 1 (legacy raw-PBKDF2 + random-salt scheme) so existing users keep
+// working until they silently migrate to v2 on next login.
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN password_hash_version INTEGER NOT NULL DEFAULT 1`);
+  console.log('[DB] Migration: Added password_hash_version column (default 1)');
 } catch (error) {
   if (!error.message.includes('duplicate column name')) {
     throw error;
@@ -243,8 +271,18 @@ function validateInput(params) {
 const statements = {
   // User queries
   createUser: db.prepare(`
-    INSERT INTO users (npub, email, username, ncryptsec, password_hash, password_salt)
-    VALUES (@npub, @email, @username, @ncryptsec, @password_hash, @password_salt)
+    INSERT INTO users (npub, email, username, ncryptsec, password_hash, password_salt, password_hash_version)
+    VALUES (@npub, @email, @username, @ncryptsec, @password_hash, @password_salt, @password_hash_version)
+  `),
+
+  migrateCredentialsToV2: db.prepare(`
+    UPDATE users
+    SET password_hash = @password_hash,
+        password_salt = @password_salt,
+        password_hash_version = 2,
+        ncryptsec = @ncryptsec,
+        updated_at = strftime('%s', 'now')
+    WHERE id = @id
   `),
 
   getUserByEmail: db.prepare(`
@@ -397,8 +435,15 @@ export function createUser({ npub, email, username, ncryptsec, password_hash, pa
   const normalizedEmail = normalizeEmail(email);
   const normalizedUsername = normalizeUsername(username);
 
-  // Validate all inputs (with normalized values)
+  // Validate all inputs (with normalized values). password_hash is validated
+  // as the raw client-supplied hex string BEFORE we bcrypt-wrap it below.
   validateInput({ npub, email: normalizedEmail, username: normalizedUsername, password_hash });
+
+  // V2: bcrypt-wrap the client PBKDF2 hash so a DB leak only yields offline
+  // crackable blobs (~10 bcrypt rounds = ~100ms per guess) instead of values
+  // that can be replayed directly to /login. Wrap happens here so callers
+  // don't need to know the policy.
+  const wrappedHash = bcrypt.hashSync(password_hash, BCRYPT_ROUNDS);
 
   try {
     const result = statements.createUser.run({
@@ -406,8 +451,9 @@ export function createUser({ npub, email, username, ncryptsec, password_hash, pa
       email: normalizedEmail,
       username: normalizedUsername,
       ncryptsec,
-      password_hash,
-      password_salt: password_salt || null
+      password_hash: wrappedHash,
+      password_salt: password_salt || null,
+      password_hash_version: 2
     });
 
     // Log successful registration
@@ -462,6 +508,92 @@ export function getUserByIdentifier(identifier) {
   }
 
   return null;
+}
+
+/**
+ * Verify a client-supplied password hash against the stored value.
+ * Branches on password_hash_version:
+ *   v1 (legacy): direct timing-safe compare against the raw PBKDF2 hex stored
+ *                verbatim. DB leak = credential equivalent (the audit finding
+ *                we're migrating away from). Returned `migrationNeeded: true`
+ *                so the auth handler can trigger the silent upgrade.
+ *   v2 (current): bcrypt.compare against the stored bcrypt blob. DB leak
+ *                yields only crackable blobs requiring per-user offline work.
+ * @param {object} user - User row from the DB
+ * @param {string} clientPasswordHash - Client-supplied PBKDF2 hash (hex)
+ * @returns {{ ok: boolean, migrationNeeded: boolean }}
+ */
+export function verifyPasswordHash(user, clientPasswordHash) {
+  if (!user || typeof clientPasswordHash !== 'string') {
+    return { ok: false, migrationNeeded: false };
+  }
+  const version = user.password_hash_version || 1;
+  if (version === 2) {
+    try {
+      const ok = bcrypt.compareSync(clientPasswordHash, user.password_hash);
+      return { ok, migrationNeeded: false };
+    } catch (_) {
+      return { ok: false, migrationNeeded: false };
+    }
+  }
+  // v1 legacy path — same logic as the original /login handler.
+  try {
+    const provided = Buffer.from(clientPasswordHash, 'hex');
+    const stored = Buffer.from(user.password_hash, 'hex');
+    if (provided.length !== stored.length) {
+      return { ok: false, migrationNeeded: false };
+    }
+    const ok = crypto.timingSafeEqual(provided, stored);
+    return { ok, migrationNeeded: ok };
+  } catch (_) {
+    return { ok: false, migrationNeeded: false };
+  }
+}
+
+/**
+ * Migrate a v1 user to v2 in a single transaction. Called by
+ * /api/auth/migrate-credentials after the client re-derives with deterministic
+ * salt and re-encrypts the ncryptsec with the new salt'd password.
+ *
+ * @param {number} userId
+ * @param {object} params
+ * @param {string} params.newPasswordHash - Fresh PBKDF2 hash (hex) computed
+ *   client-side with the deterministic salt.
+ * @param {string} params.newPasswordSalt - The deterministic salt (hex). Stored
+ *   for transparency; the server doesn't strictly need it (the client can
+ *   re-derive on every login) but keeping it lets us audit / debug.
+ * @param {string} params.newNcryptsec - The nsec re-encrypted with the
+ *   user's password (NIP-49). Same nsec, new password-derived encryption.
+ */
+export function migrateCredentialsToV2(userId, { newPasswordHash, newPasswordSalt, newNcryptsec }) {
+  if (typeof userId !== 'number' || userId <= 0) {
+    throw new Error('Invalid userId');
+  }
+  if (typeof newPasswordHash !== 'string' || !/^[a-f0-9]{64}$/i.test(newPasswordHash)) {
+    throw new Error('Invalid newPasswordHash format');
+  }
+  if (typeof newPasswordSalt !== 'string' || !/^[a-f0-9]+$/i.test(newPasswordSalt)) {
+    throw new Error('Invalid newPasswordSalt format');
+  }
+  if (typeof newNcryptsec !== 'string' || !newNcryptsec.startsWith('ncryptsec1')) {
+    throw new Error('Invalid newNcryptsec format');
+  }
+  const wrapped = bcrypt.hashSync(newPasswordHash, BCRYPT_ROUNDS);
+  const result = statements.migrateCredentialsToV2.run({
+    id: userId,
+    password_hash: wrapped,
+    password_salt: newPasswordSalt,
+    ncryptsec: newNcryptsec
+  });
+  if (result.changes === 0) {
+    throw new Error('No user updated — id may not exist');
+  }
+  logAuditEvent({
+    userId,
+    eventType: 'credentials_migrated_v1_to_v2',
+    success: true
+  });
+  return { ok: true };
 }
 
 /**

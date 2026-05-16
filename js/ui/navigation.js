@@ -452,7 +452,14 @@ export function showLoginOptions() {
     document.body.appendChild(modal);
 }
 
-// Helper function to update menu user info
+// Helper function to update menu user info.
+//
+// Idempotent across repeat calls: only mutates DOM properties whose values
+// actually changed. updateHeaderUIForAuthState is called 4× during login
+// (initNavigation immediate + 500ms + 2s delayed + completeLoginWithNsec's
+// post-seed call). Without the equality checks, each call re-assigns
+// menuUserPic.src to the same string — which in some browsers triggers a
+// paint reset and produces a visible flicker on the avatar.
 export function updateMenuUserInfo(profile, shortNpub) {
     const userName = profile?.name || profile?.display_name || shortNpub || 'Anonymous';
     const profilePic = sanitizeImageUrl(profile?.picture);
@@ -461,19 +468,27 @@ export function updateMenuUserInfo(profile, shortNpub) {
     const menuUserNpub = document.getElementById('menuUserNpub');
     const menuUserPic = document.getElementById('menuUserPic');
 
-    if (menuUserName) {
+    if (menuUserName && menuUserName.textContent !== userName) {
         menuUserName.textContent = userName;
     }
 
-    if (menuUserNpub) {
+    if (menuUserNpub && menuUserNpub.textContent !== shortNpub) {
         menuUserNpub.textContent = shortNpub;
     }
 
     if (menuUserPic) {
-        menuUserPic.src = profilePic;
-        // Handle image load errors
+        // Compare the raw attribute value (img.src returns the absolutized
+        // URL e.g. https://nosmero.com/default-avatar.png; getAttribute
+        // returns the verbatim string we'd be assigning).
+        if (menuUserPic.getAttribute('src') !== profilePic) {
+            menuUserPic.src = profilePic;
+        }
+        // onerror is reset per call but only fires once per actual load
+        // failure, so this doesn't compound.
         menuUserPic.onerror = function() {
-            this.src = '/default-avatar.png';
+            if (this.getAttribute('src') !== '/default-avatar.png') {
+                this.src = '/default-avatar.png';
+            }
         };
     }
 }
