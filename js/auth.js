@@ -452,10 +452,12 @@ export async function completeLoginWithNsec(nsec, displayName = null, options = 
 
         await finalizeLogin();
 
-        // For fresh signups, publish a kind-0 profile event with the chosen
-        // display name. completeLoginWithNsec is called with displayName ONLY
-        // during signup (login flow passes null), so this only fires once
-        // per account at account-creation time.
+        // For fresh signups (newly generated keypair), publish a kind-0 profile event
+        // with the chosen display name. Callers MUST pass displayName=null for any
+        // path where the user already has a Nostr identity (login, bring-your-own-nsec
+        // signup, password reset) — otherwise we'd republish a stripped kind-0 and
+        // clobber existing about/website/picture/nip05/lud16 on relays. See
+        // auth-ui.js proceedToApp() for the existingNsec gate.
         if (displayName) {
             const profileNow = Math.floor(Date.now() / 1000);
             const seededProfile = {

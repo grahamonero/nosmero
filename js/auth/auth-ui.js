@@ -17,7 +17,8 @@ let pendingAuth = {
   nsec: null,
   npub: null,
   displayName: null,
-  hasPassword: false
+  hasPassword: false,
+  existingNsec: false
 };
 
 // ==================== Modal State Management ====================
@@ -279,8 +280,11 @@ export async function handleSignup(e) {
       email_verified: false
     });
 
-    // Show the key display section (hasPassword=true since user registered with password)
-    showKeyDisplay(nsec, npub, displayName, true);
+    // Show the key display section (hasPassword=true since user registered with password).
+    // existingNsec=true when the user brought their own nsec — proceedToApp uses this to
+    // skip the kind-0 publish, since republishing {name, display_name} would clobber the
+    // user's existing kind-0 (about, website, picture, nip05, lud16) on relays.
+    showKeyDisplay(nsec, npub, displayName, true, !!existingNsec);
 
   } catch (error) {
     console.error('[Auth UI] Signup error:', error);
@@ -352,7 +356,7 @@ export async function handleKeysOnlySignup(e) {
 /**
  * Show generated keys and prompt user to save them
  */
-function showKeyDisplay(nsec, npub, displayName, hasPassword = false) {
+function showKeyDisplay(nsec, npub, displayName, hasPassword = false, existingNsec = false) {
   hideAllSections();
 
   const keySection = document.getElementById('keyDisplaySection');
@@ -367,6 +371,7 @@ function showKeyDisplay(nsec, npub, displayName, hasPassword = false) {
   pendingAuth.npub = npub;
   pendingAuth.displayName = displayName;
   pendingAuth.hasPassword = hasPassword;
+  pendingAuth.existingNsec = existingNsec;
 
   keySection?.classList.remove('hidden');
 }
@@ -375,12 +380,17 @@ function showKeyDisplay(nsec, npub, displayName, hasPassword = false) {
  * User confirmed they saved keys - proceed to app
  */
 export async function proceedToApp() {
-  const { nsec, displayName, hasPassword } = pendingAuth;
+  const { nsec, displayName, hasPassword, existingNsec } = pendingAuth;
 
   if (!nsec) {
     showErrorToast('No keys found. Please try again.');
     return;
   }
+
+  // For bring-your-own-nsec signup: the user already has (or will have via Settings) a
+  // kind-0 profile on relays. Passing displayName would republish a stripped kind-0
+  // and wipe about/website/picture/nip05/lud16. Suppress it.
+  const publishDisplayName = existingNsec ? null : displayName;
 
   // Disable the button + close the modal immediately so the user gets
   // instant feedback. Without this, finalizeLogin's NIP-65 relay fetch
@@ -397,14 +407,15 @@ export async function proceedToApp() {
   // Use existing auth system to complete login
   // skipPin if user registered with password (password already protects their key on server)
   if (window.completeLoginWithNsec) {
-    await window.completeLoginWithNsec(nsec, displayName, { skipPin: hasPassword });
+    await window.completeLoginWithNsec(nsec, publishDisplayName, { skipPin: hasPassword });
 
     // Clear sensitive data after successful login
     pendingAuth = {
       nsec: null,
       npub: null,
       displayName: null,
-      hasPassword: false
+      hasPassword: false,
+      existingNsec: false
     };
   } else {
     // Fallback - data already in module closure, just reload
