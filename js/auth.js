@@ -2,7 +2,7 @@
 // Phase 5: Authentication & User Management
 // Functions for login, logout, account creation, and key management
 
-import { encryptData, decryptData } from './crypto.js';
+import { encryptData, decryptData, deriveKey } from './crypto.js';
 import { showNotification } from './utils.js';
 import { loadNostrLogin } from './nostr-login-loader.js';
 import * as State from './state.js';
@@ -146,7 +146,8 @@ export async function storeSecurePrivateKey(privateKey, pin) {
         throw new Error('PIN is required to encrypt private key');
     }
 
-    const encrypted = await encryptData(privateKey, pin);
+    const key = await deriveKey(pin);
+    const encrypted = await encryptData(privateKey, key);
     localStorage.setItem('nostr-private-key-encrypted', encrypted);
     localStorage.setItem('encryption-enabled', 'true');
     // Remove unencrypted version if it exists
@@ -166,7 +167,8 @@ export async function getSecurePrivateKey(pin) {
     if (!encryptedKey || !pin) return null;
 
     try {
-        const decryptedKey = await decryptData(encryptedKey, pin);
+        const key = await deriveKey(pin);
+        const decryptedKey = await decryptData(encryptedKey, key);
 
         // Store in sessionStorage so page reloads within same session don't require PIN
         if (decryptedKey) {
