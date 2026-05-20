@@ -25,6 +25,20 @@ export let currentConversation = null;
 export let messagesSubscription = null;
 export let notificationType = 'all';
 
+// Module-level accumulator. Each fetchNotifications call APPENDS to this
+// instead of starting fresh, then processNotifications operates on the union.
+// Background refreshes and on-bell-click fetches both run through here — without
+// accumulation, a smaller subsequent fetch (e.g., relay timing race) would
+// clobber window.currentNotifications and the user would see fewer entries.
+// Deduped by event.id via _accumulatedNotifIds.
+const _accumulatedNotifEvents = [];
+const _accumulatedNotifIds = new Set();
+// Cleared on logout so the next user's session starts clean.
+export function clearAccumulatedNotifications() {
+    _accumulatedNotifEvents.length = 0;
+    _accumulatedNotifIds.clear();
+}
+
 // ==================== PROFILE FETCHING ====================
 
 // Fetch profiles for conversation participants
@@ -1114,14 +1128,17 @@ export function setNotificationType(type) {
 // Fetch notifications from relays
 export async function fetchNotifications() {
     if (!State.publicKey) {
-        console.log('No public key available for notifications');
+        debugLog('No public key available for notifications');
         return;
     }
 
     try {
-        console.log('Fetching notifications for user:', State.publicKey);
-        const notificationEvents = [];
-        const processedIds = new Set();
+        debugLog('Fetching notifications for user:', State.publicKey);
+        // Alias module-level accumulators so each fetch APPENDS rather than
+        // starting fresh. A smaller subsequent fetch (e.g., relay timing race
+        // on background refresh) would otherwise clobber the user's full list.
+        const notificationEvents = _accumulatedNotifEvents;
+        const processedIds = _accumulatedNotifIds;
 
         if (!State.pool) {
             console.error('Pool not initialized when loading notifications');
@@ -1160,30 +1177,49 @@ export async function fetchNotifications() {
 
         // Skip subscription if no filters enabled
         if (filters.length === 0) {
-            console.log('No notification types enabled');
+            debugLog('No notification types enabled');
             renderNotifications([]);
             return;
         }
 
         // Include Nosmero relay for kind 9736 tip disclosures
         const relaysToQuery = [...Relays.getActiveRelays()];
-        const nosmeroRelay = window.location.protocol === 'https:'
-            ? 'wss://nosmero.com/nip78-relay'     // Production & Dev (both HTTPS)
-            : 'ws://nosmero.com:8080/nip78-relay'; // Localhost only
+        const nosmeroRelay = Relays.getNosmeroRelay();
         if (!relaysToQuery.includes(nosmeroRelay)) {
             relaysToQuery.push(nosmeroRelay);
         }
 
         // Subscribe to enabled notification types
+        // Late events (arriving after oneose from slow relays) trigger a debounced
+        // re-process so the badge count picks them up too.
+        let initialProcessed = false;
+        let reprocessTimer = null;
         const sub = State.pool.subscribeMany(relaysToQuery, filters, {
             onevent(event) {
                 if (!processedIds.has(event.id) && event.pubkey !== State.publicKey) {
                     // For follows (kind 3), don't extract note ID - they're not related to a specific note
-                    // For other events, extract original note ID from e tags
+                    // For other events, extract the note this interaction is ABOUT.
+                    // Reactions/reposts/zaps have a single e-tag — easy. For replies
+                    // (kind 1) NIP-10 says there may be a root tag AND a reply tag;
+                    // we want the IMMEDIATE parent (the note being replied to), not
+                    // the thread root. Prefer the e-tag marked "reply"; fall back to
+                    // legacy positional rule (last e-tag is the parent).
                     let originalNoteId = null;
-                    if (event.kind !== 3) {
-                        const eTag = event.tags ? event.tags.find(tag => tag[0] === 'e' && tag[1]) : null;
-                        originalNoteId = eTag ? eTag[1] : null;
+                    if (event.kind !== 3 && event.tags) {
+                        if (event.kind === 1) {
+                            const markedReply = event.tags.find(t => t[0] === 'e' && t[1] && t[3] === 'reply');
+                            if (markedReply) {
+                                originalNoteId = markedReply[1];
+                            } else {
+                                const eTags = event.tags.filter(t => t[0] === 'e' && t[1]);
+                                if (eTags.length > 0) {
+                                    originalNoteId = eTags[eTags.length - 1][1];
+                                }
+                            }
+                        } else {
+                            const eTag = event.tags.find(t => t[0] === 'e' && t[1]);
+                            originalNoteId = eTag ? eTag[1] : null;
+                        }
                     }
 
                     // Store both the notification event and the original note ID
@@ -1192,18 +1228,28 @@ export async function fetchNotifications() {
                         originalNoteId: originalNoteId
                     });
                     processedIds.add(event.id);
+
+                    if (initialProcessed) {
+                        clearTimeout(reprocessTimer);
+                        reprocessTimer = setTimeout(() => {
+                            debugLog('Re-processing notifications after late event(s):', notificationEvents.length);
+                            processNotifications(notificationEvents);
+                        }, 1000);
+                    }
                 }
             },
             oneose() {
-                console.log('Received', notificationEvents.length, 'notification events');
+                debugLog('Received', notificationEvents.length, 'notification events');
+                initialProcessed = true;
                 processNotifications(notificationEvents);
             }
         });
-        
+
         // Close subscription after 8 seconds
         setTimeout(() => {
+            clearTimeout(reprocessTimer);
             sub.close();
-        }, 8000);
+        }, TIMEOUTS.SUBSCRIPTION_LONG);
         
     } catch (error) {
         console.error('Error fetching notifications:', error);
@@ -1211,153 +1257,177 @@ export async function fetchNotifications() {
     }
 }
 
-// Process notification events
+
+// ==================== TIMEOUT CONSTANTS ====================
+// Used by the notification pipeline ported from desktop messages.js.
+const TIMEOUTS = {
+    MESSAGE_PROCESS: 3000,
+    SUBSCRIPTION_SHORT: 5000,
+    SUBSCRIPTION_LONG: 8000,
+    NOTE_FETCH_WAIT: 10000,
+    PROFILE_FETCH: 12000
+};
+
+// ==================== DEBUG LOGGING ====================
+const _DEBUG_MESSAGES = (() => {
+    try { return localStorage.getItem('debug-messages') === 'true'; } catch (_) { return false; }
+})();
+function debugLog(...args) {
+    if (_DEBUG_MESSAGES) console.log('[Messages]', ...args);
+}
+
 async function processNotifications(events) {
-    console.log('Processing', events.length, 'notification events');
+    debugLog('Processing', events.length, 'notification events');
 
     // Separate follow events (kind 3) from other notification events
+    // Follows need special handling via baseline comparison
     const followEvents = events.filter(e => e.kind === 3);
     const otherEvents = events.filter(e => e.kind !== 3);
 
     // Sort non-follow events by timestamp (newest first)
     const sortedEvents = otherEvents.sort((a, b) => b.created_at - a.created_at);
 
-    // Separate follows from note-based notifications
-    const followNotifications = [];
-    const interactionsByNote = new Map();
+    // Create individual notification entries (not grouped)
+    const notifications = [];
     const originalNoteIds = new Set();
+    const originalNotesMap = new Map(); // noteId -> note content
 
     // Process follow events using baseline comparison
     // This ensures we only show NEW + RECENT followers, not all existing followers
     if (followEvents.length > 0) {
-        console.log('Processing', followEvents.length, 'follow events via baseline');
+        debugLog('Processing', followEvents.length, 'follow events via baseline');
         try {
             const { newFollowers, recentFollowers, isFirstTime } = await FollowerBaseline.processFollowersWithBaseline(followEvents);
 
             if (isFirstTime) {
-                console.log('First time user - follower baseline created, no follow notifications shown');
+                debugLog('First time user - follower baseline created, no follow notifications shown');
             } else {
                 // Combine new followers (just discovered) with recent followers (added in last 7 days)
                 const allFollowersToShow = [...newFollowers, ...recentFollowers];
 
                 if (allFollowersToShow.length > 0) {
-                    console.log('Found', newFollowers.length, 'new +', recentFollowers.length, 'recent followers to show');
+                    debugLog('Found', newFollowers.length, 'new +', recentFollowers.length, 'recent followers to show');
 
                     // Create notifications for new + recent followers
                     for (const { pubkey, timestamp } of allFollowersToShow) {
                         // Find the original event for this follower (for event ID)
                         const originalEvent = followEvents.find(e => e.pubkey === pubkey);
 
-                        followNotifications.push({
+                        notifications.push({
                             id: originalEvent?.id || `follow-${pubkey}`,
                             type: 'follow',
-                            timestamp: timestamp,
+                            timestamp: timestamp,  // Accurate timestamp from when we discovered them
                             pubkey: pubkey,
+                            content: 'followed you',
+                            originalNoteId: null,
+                            originalNote: null,
                             profile: State.profileCache[pubkey] || null,
                             isLegacy: false  // All followers now have accurate timestamps
                         });
                     }
                 } else {
-                    console.log('No new or recent followers to show');
+                    debugLog('No new or recent followers to show');
                 }
             }
         } catch (error) {
             console.error('Error processing follow baseline:', error);
+            // Fall back to not showing any follow notifications on error
         }
     }
 
-    // First pass: group other events by original note ID
+    // First pass: create individual notification objects for non-follow events
     for (const event of sortedEvents.slice(0, 100)) { // Limit to 100 most recent
         try {
-            const originalNoteId = event.originalNoteId;
+            let notification = null;
 
-            if (!originalNoteId) {
-                console.warn('No original note ID found for event:', event.id, 'kind:', event.kind);
-                continue;
-            }
-
-            originalNoteIds.add(originalNoteId);
-
-            if (!interactionsByNote.has(originalNoteId)) {
-                interactionsByNote.set(originalNoteId, {
-                    originalNoteId: originalNoteId,
-                    originalNote: null, // Will be fetched
-                    interactions: [],
-                    latestTimestamp: 0
-                });
-            }
-
-            const noteData = interactionsByNote.get(originalNoteId);
-
-            // Create interaction object
-            let interaction = null;
             switch (event.kind) {
                 case 1: // Reply
-                    interaction = {
+                    if (!event.originalNoteId) continue;
+                    originalNoteIds.add(event.originalNoteId);
+                    notification = {
                         id: event.id,
                         type: 'reply',
                         timestamp: event.created_at,
                         pubkey: event.pubkey,
                         content: event.content.substring(0, 150) + (event.content.length > 150 ? '...' : ''),
+                        originalNoteId: event.originalNoteId,
+                        originalNote: null,
                         profile: State.profileCache[event.pubkey] || null
                     };
                     break;
 
                 case 7: // Like
-                    interaction = {
+                    if (!event.originalNoteId) continue;
+                    originalNoteIds.add(event.originalNoteId);
+                    notification = {
                         id: event.id,
                         type: 'like',
                         timestamp: event.created_at,
                         pubkey: event.pubkey,
                         content: event.content || '❤️',
+                        originalNoteId: event.originalNoteId,
+                        originalNote: null,
                         profile: State.profileCache[event.pubkey] || null
                     };
                     break;
 
                 case 6: // Repost
-                    interaction = {
+                    if (!event.originalNoteId) continue;
+                    originalNoteIds.add(event.originalNoteId);
+                    notification = {
                         id: event.id,
                         type: 'repost',
                         timestamp: event.created_at,
                         pubkey: event.pubkey,
                         content: '',
+                        originalNoteId: event.originalNoteId,
+                        originalNote: null,
                         profile: State.profileCache[event.pubkey] || null
                     };
                     break;
 
                 case 9735: // Lightning Zap
-                    interaction = {
+                    if (!event.originalNoteId) continue;
+                    originalNoteIds.add(event.originalNoteId);
+                    notification = {
                         id: event.id,
                         type: 'zap',
                         timestamp: event.created_at,
                         pubkey: event.pubkey,
                         content: 'Lightning Zap',
+                        originalNoteId: event.originalNoteId,
+                        originalNote: null,
                         profile: State.profileCache[event.pubkey] || null
                     };
                     break;
 
                 case 9736: // Monero Tip
-                    // Extract amount and sender from tags
                     const amountTag = event.tags?.find(tag => tag[0] === 'amount');
                     const senderTag = event.tags?.find(tag => tag[0] === 'P');
                     const amount = amountTag ? amountTag[1] : '?';
                     const senderPubkey = senderTag ? senderTag[1] : event.pubkey;
 
-                    interaction = {
+                    if (event.originalNoteId) {
+                        originalNoteIds.add(event.originalNoteId);
+                    }
+                    notification = {
                         id: event.id,
                         type: 'tip',
                         timestamp: event.created_at,
                         pubkey: senderPubkey,
-                        content: `Monero Tip: ${amount} XMR`,
+                        content: `${amount} XMR`,
                         message: event.content || '',
+                        originalNoteId: event.originalNoteId || null,
+                        originalNote: null,
                         profile: State.profileCache[senderPubkey] || null
                     };
                     break;
+
+                // Note: case 3 (Follow) is now handled separately above via baseline
             }
 
-            if (interaction) {
-                noteData.interactions.push(interaction);
-                noteData.latestTimestamp = Math.max(noteData.latestTimestamp, interaction.timestamp);
+            if (notification) {
+                notifications.push(notification);
             }
 
         } catch (error) {
@@ -1365,9 +1435,9 @@ async function processNotifications(events) {
         }
     }
 
-    console.log('Processed', followNotifications.length, 'follows and', interactionsByNote.size, 'note interactions');
-    
-    // Show loading message while fetching original notes
+    debugLog('Created', notifications.length, 'individual notifications');
+
+    // Show loading message while fetching
     const notificationsList = document.getElementById('notificationsList');
     if (notificationsList) {
         notificationsList.innerHTML = `
@@ -1385,120 +1455,49 @@ async function processNotifications(events) {
             </style>
         `;
     }
-    
-    // Fetch profiles FIRST for all interaction authors (before fetching original notes)
-    const allAuthorPubkeys = [];
-    Array.from(interactionsByNote.values()).forEach(noteData => {
-        noteData.interactions.forEach(interaction => {
-            if (!interaction.profile) {
-                allAuthorPubkeys.push(interaction.pubkey);
-            }
-        });
-    });
 
-    // Also fetch profiles for follow notification authors
-    followNotifications.forEach(follow => {
-        if (!follow.profile) {
-            allAuthorPubkeys.push(follow.pubkey);
-        }
-    });
+    // Fetch profiles for all notification authors
+    const allAuthorPubkeys = notifications
+        .filter(n => !n.profile)
+        .map(n => n.pubkey);
 
     if (allAuthorPubkeys.length > 0) {
-        console.log('Pre-fetching profiles for', allAuthorPubkeys.length, 'authors:', allAuthorPubkeys.map(pk => pk.substring(0, 8)).join(', '));
-        await fetchNotificationProfiles([...new Set(allAuthorPubkeys)], Array.from(interactionsByNote.values()), followNotifications);
+        debugLog('Pre-fetching profiles for', allAuthorPubkeys.length, 'authors');
+        await fetchNotificationProfilesIndividual([...new Set(allAuthorPubkeys)], notifications);
     }
 
-    // Fetch the original notes (with progressive rendering)
+    // Fetch the original notes
     if (originalNoteIds.size > 0) {
-        await fetchOriginalNotes(Array.from(originalNoteIds), interactionsByNote, followNotifications);
+        await fetchOriginalNotesIndividual(Array.from(originalNoteIds), notifications, originalNotesMap);
     }
 
-    // After fetching timeout, mark missing notes as "not found"
-    Array.from(interactionsByNote.values()).forEach(noteData => {
-        if (!noteData.originalNote) {
-            noteData.originalNote = {
-                id: noteData.originalNoteId,
-                content: "[Note no longer available - may have been deleted or is on relays we're not connected to]",
+    // Mark missing notes
+    notifications.forEach(notification => {
+        if (notification.originalNoteId && !notification.originalNote) {
+            notification.originalNote = {
+                id: notification.originalNoteId,
+                content: "[Note no longer available]",
                 notFound: true
             };
         }
     });
 
-    // Final render: show all notifications regardless of whether original notes were fetched
-    // This ensures we show notifications even if some original notes failed to load
-    const groupedNotifications = Array.from(interactionsByNote.values())
-        .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+    debugLog('Final processed notifications:', notifications.length);
 
-    console.log('Final processed notifications:', groupedNotifications.length, 'note-based +', followNotifications.length, 'follows');
-
-    // Store notifications globally for filtering (include follows)
-    window.currentNotifications = groupedNotifications;
-    window.currentFollowNotifications = followNotifications;
-    renderNotifications(groupedNotifications, followNotifications);
+    // Store notifications globally for filtering
+    window.currentNotifications = notifications;
+    renderNotifications(notifications);
 }
-
-// Fetch original notes that were interacted with
-async function fetchOriginalNotes(noteIds, interactionsByNote, followNotifications = []) {
-    if (!noteIds || noteIds.length === 0) return;
-
-    console.log('Fetching', noteIds.length, 'original notes for notifications');
-
-    try {
-        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
-            { ids: noteIds }
-        ], {
-            onevent(event) {
-                try {
-                    if (interactionsByNote.has(event.id)) {
-                        const noteData = interactionsByNote.get(event.id);
-                        noteData.originalNote = event;
-                        console.log('Fetched original note:', event.id.substring(0, 8));
-
-                        // Progressive rendering: update notifications as notes are fetched
-                        const currentNotifications = Array.from(interactionsByNote.values())
-                            .filter(noteData => noteData.originalNote)
-                            .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
-
-                        // Store updated notifications globally
-                        window.currentNotifications = currentNotifications;
-                        window.currentFollowNotifications = followNotifications;
-                        renderNotifications(currentNotifications, followNotifications);
-                    }
-                } catch (error) {
-                    console.error('Error processing fetched original note:', error);
-                }
-            },
-            oneose() {
-                console.log('Finished fetching original notes');
-                sub.close();
-            }
-        });
-
-        // Close subscription after 8 seconds
-        setTimeout(() => {
-            sub.close();
-        }, 8000);
-
-        // Wait for notes to be fetched
-        await new Promise(resolve => {
-            setTimeout(resolve, 10000); // Give 10 seconds for notes to load
-        });
-
-    } catch (error) {
-        console.error('Error fetching original notes:', error);
-    }
-}
-
-// Fetch profiles for notification authors
-async function fetchNotificationProfiles(pubkeys, groupedNotifications, followNotifications = []) {
+// Fetch profiles for notification authors (individual notifications version)
+async function fetchNotificationProfilesIndividual(pubkeys, notifications) {
     if (!pubkeys || pubkeys.length === 0) return;
 
-    console.log('Fetching profiles for notification authors:', pubkeys.length);
+    debugLog('Fetching profiles for notification authors:', pubkeys.length);
 
     const unknownPubkeys = [...new Set(pubkeys)].filter(pubkey => !State.profileCache[pubkey]);
 
     if (unknownPubkeys.length === 0) {
-        console.log('All profiles already cached');
+        debugLog('All profiles already cached');
         return;
     }
 
@@ -1521,68 +1520,93 @@ async function fetchNotificationProfiles(pubkeys, groupedNotifications, followNo
                         picture: profile.picture
                     };
 
-                    // Update interaction profiles in grouped notifications
-                    groupedNotifications.forEach(noteData => {
-                        noteData.interactions.forEach(interaction => {
-                            if (interaction.pubkey === event.pubkey) {
-                                interaction.profile = State.profileCache[event.pubkey];
-                            }
-                        });
-                    });
-
-                    // Update follow notification profiles
-                    followNotifications.forEach(follow => {
-                        if (follow.pubkey === event.pubkey) {
-                            follow.profile = State.profileCache[event.pubkey];
+                    // Update profiles in individual notifications
+                    notifications.forEach(notification => {
+                        if (notification.pubkey === event.pubkey) {
+                            notification.profile = State.profileCache[event.pubkey];
                         }
                     });
 
                     // Re-render with updated profiles
-                    renderNotifications(groupedNotifications, followNotifications);
+                    renderNotifications(notifications);
                 } catch (error) {
                     console.error('Error parsing profile for notifications:', error);
                 }
             },
             oneose() {
-                console.log('Profile fetch complete for notification authors');
+                debugLog('Profile fetch complete for notification authors');
                 sub.close();
             }
         });
-        
+
         setTimeout(() => {
             sub.close();
-        }, 12000);
-        
+        }, TIMEOUTS.PROFILE_FETCH);
+
     } catch (error) {
         console.error('Error fetching notification profiles:', error);
     }
 }
 
+// Fetch original notes for individual notifications
+async function fetchOriginalNotesIndividual(noteIds, notifications, originalNotesMap) {
+    if (!noteIds || noteIds.length === 0) return;
+
+    debugLog('Fetching', noteIds.length, 'original notes for notifications');
+
+    try {
+        const sub = State.pool.subscribeMany(Relays.getActiveRelays(), [
+            { ids: noteIds }
+        ], {
+            onevent(event) {
+                try {
+                    originalNotesMap.set(event.id, event);
+
+                    // Update all notifications that reference this note
+                    notifications.forEach(notification => {
+                        if (notification.originalNoteId === event.id) {
+                            notification.originalNote = event;
+                        }
+                    });
+
+                    // Progressive rendering
+                    window.currentNotifications = notifications;
+                    renderNotifications(notifications);
+                } catch (error) {
+                    console.error('Error processing fetched original note:', error);
+                }
+            },
+            oneose() {
+                debugLog('Finished fetching original notes');
+                sub.close();
+            }
+        });
+
+        // Close subscription after 8 seconds
+        setTimeout(() => {
+            sub.close();
+        }, TIMEOUTS.SUBSCRIPTION_LONG);
+
+        // Wait for notes to be fetched
+        await new Promise(resolve => {
+            setTimeout(resolve, TIMEOUTS.NOTE_FETCH_WAIT);
+        });
+
+    } catch (error) {
+        console.error('Error fetching original notes:', error);
+    }
+}
 // Update notification badge in nav menu
 export function updateNotificationBadge() {
     const badge = document.getElementById('notificationBadge');
-    const bottomBadge = document.getElementById('bottomNotificationBadge');
+    if (!badge) return;
 
-    const displayCount = State.unreadNotifications > 99 ? '99+' : State.unreadNotifications;
-
-    // Update header/sidebar badge
-    if (badge) {
-        if (State.unreadNotifications > 0) {
-            badge.textContent = displayCount;
-            badge.style.display = 'flex';
-        } else {
-            badge.style.display = 'none';
-        }
-    }
-
-    // Update bottom navigation badge
-    if (bottomBadge) {
-        if (State.unreadNotifications > 0) {
-            bottomBadge.textContent = displayCount;
-            bottomBadge.style.display = 'flex';
-        } else {
-            bottomBadge.style.display = 'none';
-        }
+    if (State.unreadNotifications > 0) {
+        const displayCount = State.unreadNotifications > 99 ? '99+' : State.unreadNotifications;
+        badge.textContent = displayCount;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
     }
 }
 
@@ -1607,63 +1631,66 @@ export function updateMessagesBadge() {
     }
 }
 
-// Render notifications list
-export function renderNotifications(groupedNotifications = [], followNotifications = []) {
+// Render notifications list - each notification is a separate entry
+// TODO: Refactor - this function is ~176 lines. Consider extracting:
+// - renderNotificationItem() for single notification HTML
+// - getNotificationIcon() for type-based icon selection
+// - getNotificationActionText() for action description
+export function renderNotifications(notificationItems = []) {
+    // If the user is actively on the Notifications page, advance
+    // lastViewedNotificationTime to the max timestamp of currently-rendered
+    // items BEFORE computing unread. This way late events (arriving after the
+    // user clicked the bell) properly count as unread on the next render
+    // instead of being silently "marked viewed" by an early-set now() timestamp.
+    if (State.currentPage === 'notifications' && notificationItems.length > 0) {
+        const maxTimestamp = Math.max(...notificationItems.map(n => n.timestamp || 0));
+        if (maxTimestamp > State.lastViewedNotificationTime) {
+            State.setLastViewedNotificationTime(maxTimestamp);
+        }
+    }
+
     // Count unread notifications (newer than last viewed time)
-    const unreadNoteCount = groupedNotifications.filter(noteData => {
-        return noteData.latestTimestamp > State.lastViewedNotificationTime;
-    }).length;
-    const unreadFollowCount = followNotifications.filter(follow => {
-        return follow.timestamp > State.lastViewedNotificationTime;
+    const unreadCount = notificationItems.filter(notification => {
+        return notification.timestamp > State.lastViewedNotificationTime;
     }).length;
 
-    State.setUnreadNotifications(unreadNoteCount + unreadFollowCount);
+    State.setUnreadNotifications(unreadCount);
     updateNotificationBadge();
 
     // If not on notifications page, just update badge and return
     const notificationsList = document.getElementById('notificationsList');
     if (!notificationsList) return;
 
-    const hasNotifications = groupedNotifications.length > 0 || followNotifications.length > 0;
-
-    if (!hasNotifications) {
+    if (notificationItems.length === 0) {
         notificationsList.innerHTML = `
             <div style="text-align: center; color: #666; padding: 40px;">
                 <p>No notifications yet</p>
-                <p style="font-size: 14px; margin-top: 10px;">Notifications will appear here when others interact with your posts.</p>
+                <p style="font-size: 14px; margin-top: 10px;">Notifications will appear here when others interact with your notes.</p>
             </div>
         `;
         return;
     }
 
     // Filter notifications based on current type
-    let filteredNoteNotifications = groupedNotifications;
-    let filteredFollowNotifications = followNotifications;
-
+    let filteredNotifications = notificationItems;
     if (notificationType !== 'all') {
-        if (notificationType === 'follows') {
-            // Show only follows
-            filteredNoteNotifications = [];
-        } else {
-            // Show only note-based notifications of the selected type
-            filteredFollowNotifications = [];
-            filteredNoteNotifications = groupedNotifications.filter(noteData => {
-                return noteData.interactions.some(interaction => {
-                    switch (notificationType) {
-                        case 'mentions': return interaction.type === 'reply' && interaction.content.includes('@');
-                        case 'replies': return interaction.type === 'reply';
-                        case 'likes': return interaction.type === 'like';
-                        case 'reposts': return interaction.type === 'repost';
-                        default: return true;
-                    }
-                });
-            });
-        }
+        filteredNotifications = notificationItems.filter(notification => {
+            switch (notificationType) {
+                case 'mentions': return notification.type === 'reply' && notification.content.includes('@');
+                case 'replies': return notification.type === 'reply';
+                case 'likes': return notification.type === 'like';
+                case 'reposts': return notification.type === 'repost';
+                case 'follows': return notification.type === 'follow';
+                default: return true;
+            }
+        });
     }
 
-    const hasFilteredNotifications = filteredNoteNotifications.length > 0 || filteredFollowNotifications.length > 0;
+    // Sort all notifications by timestamp (newest first)
+    // With baseline tracking, all follow notifications now have accurate timestamps
+    const sortedNotifications = [...filteredNotifications].sort((a, b) => b.timestamp - a.timestamp);
 
-    if (!hasFilteredNotifications) {
+    if (sortedNotifications.length === 0) {
         notificationsList.innerHTML = `
             <div style="text-align: center; color: #666; padding: 40px;">
                 <p>No ${notificationType} notifications</p>
@@ -1672,173 +1699,130 @@ export function renderNotifications(groupedNotifications = [], followNotificatio
         return;
     }
 
-    // All follow notifications now have accurate timestamps (no legacy sorting needed)
-    // Helper function to render a follow notification
-    const renderFollow = (follow) => {
-        const profile = follow.profile || {};
-        const displayName = profile.name || profile.display_name || `User ${follow.pubkey.substring(0, 8)}...`;
+    notificationsList.innerHTML = sortedNotifications.map(notification => {
+        const profile = notification.profile || {};
+        const displayName = escapeHtml(profile.name || profile.display_name || `User ${notification.pubkey.substring(0, 8)}...`);
+        // Default profile picture - fully URL-encoded SVG to prevent HTML parsing issues
         const defaultPicture = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2250%22%20fill%3D%22%23333%22%2F%3E%3Ctext%20x%3D%2250%22%20y%3D%2255%22%20text-anchor%3D%22middle%22%20fill%3D%22%23888%22%20font-size%3D%2230%22%3E%3F%3C%2Ftext%3E%3C%2Fsvg%3E';
         const profilePicture = profile.picture || defaultPicture;
-        const time = formatTime(follow.timestamp);
+
+        // For follows, don't show original note section - FORCE this regardless of data
+        const isFollow = notification.type === 'follow';
+
+        // For follows, show timestamp if we have a locally-tracked one
+        // Locally-tracked timestamps are accurate (stored when we first saw the follow)
+        const time = formatTime(notification.timestamp);
+
+        // Determine action text and icon based on type
+        let actionIcon = '';
+        let actionText = '';
+        let actionColor = '#ccc';
+
+        switch (notification.type) {
+            case 'like':
+                actionIcon = '❤️';
+                actionText = 'liked your note';
+                actionColor = '#ff6b6b';
+                break;
+            case 'repost':
+                actionIcon = '🔄';
+                actionText = 'reposted your note';
+                actionColor = '#4ecdc4';
+                break;
+            case 'reply':
+                actionIcon = '💬';
+                actionText = 'replied to your note';
+                actionColor = '#45b7d1';
+                break;
+            case 'zap':
+                actionIcon = '⚡';
+                actionText = 'zapped your note';
+                actionColor = '#f7dc6f';
+                break;
+            case 'tip':
+                actionIcon = '💰';
+                actionText = `sent you ${notification.content}`;
+                actionColor = '#FF6600';
+                break;
+            case 'follow':
+                actionIcon = '👤';
+                actionText = 'followed you';
+                actionColor = '#8B5CF6';
+                break;
+        }
+
+        // For follows, NEVER show original note (follows don't relate to notes)
+        // For other types, check if we have a valid original note
+        const originalNote = isFollow ? null : notification.originalNote;
+        const hasOriginalNote = !isFollow && originalNote && !originalNote.notFound;
+
+        // Original note content (truncated)
+        const originalContent = hasOriginalNote
+            ? originalNote.content.substring(0, 150) + (originalNote.content.length > 150 ? '...' : '')
+            : '';
+
+        // Click handler - follows go to profile, others go to thread
+        let onclickHandler = '';
+        if (isFollow) {
+            onclickHandler = `viewUserProfilePage('${notification.pubkey}')`;
+        } else if (hasOriginalNote) {
+            onclickHandler = `openThreadView('${originalNote.id}')`;
+        }
 
         return `
-            <div class="notification-item" data-type="follow" style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 16px; margin-bottom: 12px; cursor: pointer;"
-                 onclick="viewUserProfilePage('${follow.pubkey}')"
-                 onmouseover="this.style.background='rgba(255, 255, 255, 0.05)'"
-                 onmouseout="this.style.background='rgba(255, 255, 255, 0.02)'">
+            <div class="notification-item" data-type="${notification.type}" data-has-note="${hasOriginalNote}" style="background: var(--card-bg); border: 1px solid var(--border-primary); border-radius: 12px; padding: 16px; margin-bottom: 12px; ${onclickHandler ? 'cursor: pointer;' : ''}"
+                 ${onclickHandler ? `onclick="${onclickHandler}"` : ''}
+                 onmouseover="this.style.background='var(--card-hover)'"
+                 onmouseout="this.style.background='var(--card-bg)'">
 
                 <!-- User info row -->
-                <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: ${isFollow ? '0' : '12px'};">
                     <!-- Profile picture -->
                     <img src="${profilePicture}" alt="${displayName}"
-                         style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; cursor: pointer; border: 2px solid #8B5CF6;"
-                         onclick="event.stopPropagation(); viewUserProfilePage('${follow.pubkey}')"
+                         style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; cursor: pointer; border: 2px solid ${actionColor};"
+                         onclick="event.stopPropagation(); viewUserProfilePage('${notification.pubkey}')"
                          onerror="this.src='${defaultPicture}'">
 
                     <!-- Name and action -->
                     <div style="flex: 1; min-width: 0;">
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                            <span style="font-size: 18px;">👤</span>
+                            <span style="font-size: 18px;">${actionIcon}</span>
                             <span style="color: #FF6600; font-weight: bold; cursor: pointer;"
-                                  onclick="event.stopPropagation(); viewUserProfilePage('${follow.pubkey}')">${displayName}</span>
-                            <span style="color: #ccc; font-size: 14px;">followed you</span>
+                                  onclick="event.stopPropagation(); viewUserProfilePage('${notification.pubkey}')">${displayName}</span>
+                            <span style="color: var(--text-secondary); font-size: 14px;">${actionText}</span>
                         </div>
                     </div>
 
-                    <!-- Timestamp -->
-                    ${time ? `<div style="color: #666; font-size: 12px; white-space: nowrap;">${time}</div>` : ''}
-                </div>
-            </div>
-        `;
-    };
-
-    // Create unified list for chronological sorting
-    // Note groups use latestTimestamp, follows use timestamp
-    const chronologicalItems = [
-        ...filteredNoteNotifications.map(n => ({ type: 'note', data: n, timestamp: n.latestTimestamp })),
-        ...filteredFollowNotifications.map(f => ({ type: 'follow', data: f, timestamp: f.timestamp }))
-    ];
-
-    // Sort by timestamp (newest first)
-    chronologicalItems.sort((a, b) => b.timestamp - a.timestamp);
-
-    // Helper function to render a note notification
-    const renderNote = (noteData) => {
-        const originalNote = noteData.originalNote;
-
-        // Group interactions by type
-        const interactionGroups = {
-            likes: noteData.interactions.filter(i => i.type === 'like'),
-            reposts: noteData.interactions.filter(i => i.type === 'repost'),
-            replies: noteData.interactions.filter(i => i.type === 'reply'),
-            zaps: noteData.interactions.filter(i => i.type === 'zap'),
-            tips: noteData.interactions.filter(i => i.type === 'tip')
-        };
-
-        // Get most recent interaction for timestamp
-        const latestInteraction = noteData.interactions.sort((a, b) => b.timestamp - a.timestamp)[0];
-        const time = formatTime(latestInteraction.timestamp);
-
-        // Generate interaction summary
-        const summaryParts = [];
-        if (interactionGroups.likes.length > 0) {
-            const likeAuthors = interactionGroups.likes.slice(0, 3).map(i => {
-                const profile = i.profile || {};
-                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
-                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
-            });
-            const moreCount = Math.max(0, interactionGroups.likes.length - 3);
-            summaryParts.push(`❤️ ${likeAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} liked this`);
-        }
-
-        if (interactionGroups.reposts.length > 0) {
-            const repostAuthors = interactionGroups.reposts.slice(0, 3).map(i => {
-                const profile = i.profile || {};
-                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
-                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
-            });
-            const moreCount = Math.max(0, interactionGroups.reposts.length - 3);
-            summaryParts.push(`🔄 ${repostAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} reposted this`);
-        }
-
-        if (interactionGroups.zaps.length > 0) {
-            summaryParts.push(`⚡ ${interactionGroups.zaps.length} zap${interactionGroups.zaps.length > 1 ? 's' : ''}`);
-        }
-
-        if (interactionGroups.tips.length > 0) {
-            const tipAuthors = interactionGroups.tips.slice(0, 3).map(i => {
-                const profile = i.profile || {};
-                const displayName = profile.name || profile.display_name || `User ${i.pubkey.substring(0, 8)}...`;
-                return `<span style="color: #FF6600; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${i.pubkey}')">${displayName}</span>`;
-            });
-            const moreCount = Math.max(0, interactionGroups.tips.length - 3);
-            summaryParts.push(`💰 ${tipAuthors.join(', ')}${moreCount > 0 ? ` +${moreCount} others` : ''} sent Monero tips`);
-        }
-
-        if (interactionGroups.replies.length > 0) {
-            summaryParts.push(`💬 ${interactionGroups.replies.length} repl${interactionGroups.replies.length > 1 ? 'ies' : 'y'}`);
-        }
-
-        // Handle original note content
-        const originalContent = originalNote?.content
-            ? originalNote.content.substring(0, 200) + (originalNote.content.length > 200 ? '...' : '')
-            : '[Note not found]';
-        const isNoteFound = originalNote && !originalNote.notFound;
-        const clickHandler = isNoteFound ? `openThreadView('${originalNote.id}')` : '';
-
-        return `
-            <div class="notification-item" style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px; ${isNoteFound ? 'cursor: pointer;' : 'opacity: 0.7;'}"
-                 ${isNoteFound ? `onclick="${clickHandler}"` : ''}
-                 onmouseover="this.style.background='rgba(255, 255, 255, 0.05)'"
-                 onmouseout="this.style.background='rgba(255, 255, 255, 0.02)'">
-
-                <!-- Original Note -->
-                <div class="notification-content" style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #333;">
-                    <div style="color: #888; font-size: 14px; margin-bottom: 8px;">Your note:</div>
-                    <div class="post-content" style="color: ${isNoteFound ? '#fff' : '#888'}; line-height: 1.4; font-size: 15px; ${!isNoteFound ? 'font-style: italic;' : ''}; word-wrap: break-word; overflow-wrap: break-word;">
-                        ${parseContent(originalContent)}
-                    </div>
+                    <!-- Timestamp (hidden for follows until historical lookup implemented) -->
+                    ${time ? `<div style="color: var(--text-muted); font-size: 12px; white-space: nowrap;">${time}</div>` : ''}
                 </div>
 
-                <!-- Interactions Summary -->
-                <div style="margin-bottom: 12px;">
-                    ${summaryParts.map(summary => `
-                        <div style="color: #ccc; font-size: 14px; margin-bottom: 6px;">${summary}</div>
-                    `).join('')}
-                </div>
-
-                <!-- Recent Replies Preview -->
-                ${interactionGroups.replies.length > 0 ? `
-                    <div style="margin-top: 12px;">
-                        ${interactionGroups.replies.slice(0, 2).map(reply => {
-                            const profile = reply.profile || {};
-                            const displayName = profile.name || profile.display_name || `User ${reply.pubkey.substring(0, 8)}...`;
-                            return `
-                                <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid #FF6600;">
-                                    <div style="color: #FF6600; font-size: 13px; font-weight: bold; margin-bottom: 4px; cursor: pointer; text-decoration: underline;" onclick="event.stopPropagation(); viewUserProfilePage('${reply.pubkey}')">${displayName}:</div>
-                                    <div class="post-content" style="color: #ccc; font-size: 14px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word;">${parseContent(reply.content)}</div>
-                                </div>
-                            `;
-                        }).join('')}
-                        ${interactionGroups.replies.length > 2 ? `
-                            <div style="color: #888; font-size: 12px; text-align: center;">...and ${interactionGroups.replies.length - 2} more replies</div>
-                        ` : ''}
+                ${hasOriginalNote ? `
+                    <!-- Original note preview -->
+                    <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; border-left: 3px solid var(--border-primary); margin-top: 8px;">
+                        <div class="post-content" style="color: var(--text-secondary); font-size: 14px; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">
+                            ${parseContent(originalContent)}
+                        </div>
                     </div>
                 ` : ''}
 
-                <!-- Timestamp -->
-                <div style="color: #666; font-size: 12px; text-align: right; margin-top: 12px;">${time}</div>
+                ${notification.type === 'reply' && notification.content ? `
+                    <!-- Reply content -->
+                    <div style="background: rgba(69, 183, 209, 0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #45b7d1; margin-top: 8px;">
+                        <div class="post-content" style="color: var(--text-secondary); font-size: 14px; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">
+                            ${parseContent(notification.content)}
+                        </div>
+                    </div>
+                ` : ''}
+
+                ${notification.type === 'tip' && notification.message ? `
+                    <!-- Tip message -->
+                    <div style="background: rgba(255, 102, 0, 0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #FF6600; margin-top: 8px;">
+                        <div style="color: var(--text-secondary); font-size: 14px; line-height: 1.4;">${parseContent(notification.message)}</div>
+                    </div>
+                ` : ''}
             </div>
         `;
-    };
-
-    // Render chronological items (notes + follows interleaved by timestamp)
-    notificationsList.innerHTML = chronologicalItems.map(item => {
-        if (item.type === 'follow') {
-            return renderFollow(item.data);
-        } else {
-            return renderNote(item.data);
-        }
     }).join('');
 }
 

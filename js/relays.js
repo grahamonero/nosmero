@@ -747,6 +747,15 @@ export function resetRelayPerformance() {
     relayPerformance = {};
 }
 
+// Get the Nosmero relay URL based on current protocol. Used by
+// messages.js fetchNotifications to additionally subscribe to the
+// Nosmero NIP-78 relay (which serves kind 9736 tip disclosures).
+export function getNosmeroRelay() {
+    return window.location.protocol === 'https:'
+        ? 'wss://nosmero.com/nip78-relay'
+        : 'ws://nosmero.com:8080/nip78-relay';
+}
+
 // Initialize relay system
 export function initializeRelays() {
     // Initialize the relay pool
