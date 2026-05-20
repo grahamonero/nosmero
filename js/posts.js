@@ -4440,13 +4440,26 @@ async function fetchMissingProfilesViaNIP65(missingPubkeys) {
             }
         }
 
-        // Re-render after background profiles loaded
+        // Re-render after background profiles loaded. Original check was
+        // window.location.hash === '#home', but neither desktop nor mobile
+        // uses that hash for the home feed. Use State.currentPage so the
+        // re-render fires regardless of platform / route.
         const nowFound = missingPubkeys.filter(pk => State.profileCache[pk]).length;
-        if (nowFound > 0 && window.location.hash === '#home') {
-            console.log(`🔄 Re-rendering after ${nowFound} background profiles loaded`);
-            const postsModule = await import('./posts.js');
-            if (postsModule.renderHomeFeedResults) {
-                await postsModule.renderHomeFeedResults();
+        if (nowFound > 0) {
+            console.log(`🔄 Re-rendering after ${nowFound} background profiles loaded (page=${State.currentPage})`);
+            try {
+                if (State.currentPage === 'home') {
+                    if (typeof renderHomeFeedResults === 'function') {
+                        await renderHomeFeedResults();
+                    }
+                } else if (State.currentPage === 'trending') {
+                    if (Array.isArray(trendingAllNotes) && trendingAllNotes.length > 0) {
+                        trendingAllOffset = 0;
+                        await showMoreTrendingAll();
+                    }
+                }
+            } catch (renderErr) {
+                console.warn('Background profile re-render failed:', renderErr?.message || renderErr);
             }
         }
 

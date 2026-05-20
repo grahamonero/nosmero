@@ -1093,11 +1093,28 @@ export async function fetchNotifications() {
             onevent(event) {
                 if (!processedIds.has(event.id) && event.pubkey !== State.publicKey) {
                     // For follows (kind 3), don't extract note ID - they're not related to a specific note
-                    // For other events, extract original note ID from e tags
+                    // For other events, extract the note this interaction is ABOUT.
+                    // Reactions/reposts/zaps have a single e-tag — easy. For replies
+                    // (kind 1) NIP-10 says there may be a root tag AND a reply tag;
+                    // we want the IMMEDIATE parent (the note being replied to), not
+                    // the thread root. Prefer the e-tag marked "reply"; fall back to
+                    // legacy positional rule (last e-tag is the parent).
                     let originalNoteId = null;
-                    if (event.kind !== 3) {
-                        const eTag = event.tags ? event.tags.find(tag => tag[0] === 'e' && tag[1]) : null;
-                        originalNoteId = eTag ? eTag[1] : null;
+                    if (event.kind !== 3 && event.tags) {
+                        if (event.kind === 1) {
+                            const markedReply = event.tags.find(t => t[0] === 'e' && t[1] && t[3] === 'reply');
+                            if (markedReply) {
+                                originalNoteId = markedReply[1];
+                            } else {
+                                const eTags = event.tags.filter(t => t[0] === 'e' && t[1]);
+                                if (eTags.length > 0) {
+                                    originalNoteId = eTags[eTags.length - 1][1];
+                                }
+                            }
+                        } else {
+                            const eTag = event.tags.find(t => t[0] === 'e' && t[1]);
+                            originalNoteId = eTag ? eTag[1] : null;
+                        }
                     }
 
                     // Store both the notification event and the original note ID
