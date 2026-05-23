@@ -458,23 +458,37 @@ export function renderPost(event, opts = {}) {
 
 function renderReplyHeader(event, profileCache) {
     if (event.kind !== 1) return '';
-    // Find the parent we're replying to. NIP-10 marker preferred.
     const eTags = event.tags.filter((t) => t[0] === 'e');
     if (eTags.length === 0) return '';
-    const replyTag = eTags.find((t) => t[3] === 'reply') || eTags[eTags.length - 1];
-    const parentId = replyTag?.[1];
+
+    // NIP-10 marker semantics:
+    //   - "root"/"reply" markers ⇒ this is a reply
+    //   - "mention" marker only ⇒ this is a quote-repost (let parseContent
+    //                              + the embedded-note resolver inline it)
+    //   - no markers anywhere   ⇒ legacy positional NIP-10: last e-tag is parent
+    const hasMarkers   = eTags.some((t) => t[3]);
+    const replyMarker  = eTags.find((t) => t[3] === 'reply');
+    const rootMarker   = eTags.find((t) => t[3] === 'root');
+
+    let parentEvent;
+    if (replyMarker)        parentEvent = replyMarker;
+    else if (rootMarker)    parentEvent = rootMarker;
+    else if (!hasMarkers)   parentEvent = eTags[eTags.length - 1];  // positional fallback
+    else                    return '';                              // mention-only: quote-repost, no header
+
+    const parentId = parentEvent?.[1];
     if (!parentId) return '';
 
-    // Identify parent author from p-tags (heuristic: the last p tag is usually
-    // the immediate parent author). Fall back to "someone".
+    // NIP-10 marker e-tags carry author in field [4]; positional-style doesn't.
+    // Fall back to last p-tag.
     const pTags = event.tags.filter((t) => t[0] === 'p');
-    const parentAuthor = pTags[pTags.length - 1]?.[1];
+    const parentAuthor = parentEvent[4] || pTags[pTags.length - 1]?.[1] || null;
     const profile = parentAuthor && profileCache?.get(parentAuthor);
     let name;
     if (profile?.display_name)      name = profile.display_name;
     else if (profile?.name)         name = profile.name;
     else if (parentAuthor)          name = shortPubkey(parentAuthor);
-    else                            name = 'someone';
+    else                            return '';  // can't identify parent — skip rather than show "@someone"
 
     return `<div class="post-reply-header">↳ Replying to <a href="#" class="mention" data-pubkey="${escapeAttr(parentAuthor || '')}">@${escapeHtml(name)}</a></div>`;
 }
