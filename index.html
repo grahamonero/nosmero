@@ -2,1581 +2,299 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>nosmero - Nostr + Monero</title>
-    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@gh-pages/qrcode.min.js"></script>
-    <link rel="stylesheet" href="/styles.css?v=1.9.16-emoji">
-    <link rel="stylesheet" href="/css/livestream.css?v=1.0.1">
-
-    <!-- HLS.js for livestream video playback (self-hosted for privacy browser compatibility) -->
-    <script src="/lib/hls.min.js"></script>
-</head>
-<body>
-    <!-- ==================================
-         NEW MINIMAL HEADER & HAMBURGER MENU
-         ================================== -->
-
-    <!-- Menu Overlay for Slide-out Menu -->
-    <div class="menu-overlay" id="menuOverlay" onclick="closeHamburgerMenu()"></div>
-
-    <!-- Slide-out Hamburger Menu -->
-    <nav class="slide-menu" id="slideMenu">
-        <div class="menu-header">
-            <span style="font-weight: 600; color: var(--text-primary);">Menu</span>
-            <button class="menu-close" onclick="closeHamburgerMenu()">✕</button>
-        </div>
-        <div class="menu-nav">
-            <!-- Auth Options (shown when anonymous) - AT TOP for easy access -->
-            <div id="menuLoginOptions" style="display: none; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
-                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; padding: 0 16px; font-weight: 600;">GET STARTED</div>
-                <div class="menu-item" onclick="showCreateAccountModal(); closeHamburgerMenu();">
-                    <span class="menu-icon">✨</span>
-                    <span style="color: #FF6600;">Create Account</span>
-                </div>
-                <div class="menu-item" onclick="showLoginModalWithLogin(); closeHamburgerMenu();">
-                    <span class="menu-icon">🔑</span>
-                    <span>Log In</span>
-                </div>
-            </div>
-            <!-- Already on Nostr section (hidden - redundant) -->
-            <div id="menuNostrOptions" style="display: none; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
-                <div style="padding: 12px 16px; color: #666; font-size: 12px;">
-                    Already on Nostr?
-                </div>
-                <div class="menu-item" onclick="loginWithExtension(); closeHamburgerMenu();">
-                    <span class="menu-icon">🔌</span>
-                    <span>Use Extension</span>
-                </div>
-                <div class="menu-item" onclick="showLoginWithNsec(); closeHamburgerMenu();">
-                    <span class="menu-icon">📝</span>
-                    <span>Paste nsec</span>
-                </div>
-                <div class="menu-item" onclick="showLoginWithNsecApp(); closeHamburgerMenu();">
-                    <span class="menu-icon">🌐</span>
-                    <span>nsec.app</span>
-                </div>
-                <div class="menu-item" onclick="showLoginWithAmber(); closeHamburgerMenu();">
-                    <span class="menu-icon">📱</span>
-                    <span>Amber</span>
-                </div>
-            </div>
-            <!-- Feed Selection -->
-            <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
-                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; padding: 0 16px; font-weight: 600;">FEEDS</div>
-                <div class="menu-item" onclick="handleFeedMenuClick('following')">
-                    <span class="menu-icon">👥</span>
-                    <span>Following</span>
-                </div>
-                <div class="menu-item" onclick="handleFeedMenuClick('live')">
-                    <span class="menu-icon">📺</span>
-                    <span>Live Streams</span>
-                </div>
-                <div class="menu-item" onclick="handleFeedMenuClick('global')">
-                    <span class="menu-icon">🌐</span>
-                    <span>Suggested Follows</span>
-                </div>
-                <div class="menu-item" onclick="handleFeedMenuClick('tipactivity')">
-                    <span class="menu-icon">💰</span>
-                    <span>Monero Tip Activity</span>
-                </div>
-                <div class="menu-item" onclick="handleFeedMenuClick('trending')">
-                    <span class="menu-icon">📈</span>
-                    <span>Popular Notes</span>
-                </div>
-                <div class="menu-item" onclick="handleFeedMenuClick('monero')">
-                    <span class="menu-icon">🔥</span>
-                    <span>Trending Monero Notes</span>
-                </div>
-            </div>
-
-            <!-- Navigation Items -->
-            <div class="menu-item" data-tab="home" onclick="handleMenuItemClick('home')">
-                <span class="menu-icon">🏠</span>
-                <span>Home</span>
-            </div>
-            <div class="menu-item" data-tab="search" onclick="handleMenuItemClick('search')">
-                <span class="menu-icon">🔍</span>
-                <span>Search</span>
-            </div>
-            <div class="menu-item" data-tab="messages" onclick="handleMenuItemClick('messages')">
-                <span class="menu-icon">💬</span>
-                <span>Messages</span>
-            </div>
-            <div class="menu-item" data-tab="profile" onclick="handleMenuItemClick('profile')">
-                <span class="menu-icon">👤</span>
-                <span>Profile</span>
-            </div>
-            <div class="menu-item" data-tab="ipfs" onclick="handleMenuItemClick('ipfs')">
-                <span class="menu-icon">📦</span>
-                <span>IPFS Media</span>
-            </div>
-            <div class="menu-item" data-tab="bookmarks" onclick="handleMenuItemClick('bookmarks')">
-                <span class="menu-icon">★</span>
-                <span>Bookmarks</span>
-            </div>
-            <div class="menu-item" onclick="closeHamburgerMenu(); handleFeedTabClick('global', null);">
-                <span class="menu-icon">👥</span>
-                <span>Suggested Follows</span>
-            </div>
-            <div class="menu-item" data-tab="settings" onclick="handleMenuItemClick('settings')">
-                <span class="menu-icon">⚙️</span>
-                <span>Settings</span>
-            </div>
-            <div class="menu-item" onclick="openWalletModal(); closeHamburgerMenu();" style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px; margin: 8px 16px;">
-                <span class="menu-icon">⛏️</span>
-                <span style="background: linear-gradient(135deg, #FF6600, #8B5CF6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 600;">XMR Tip Jar</span>
-            </div>
-            <div class="menu-item" onclick="showZapQueue(); closeHamburgerMenu();" style="position: relative;">
-                <span class="menu-icon">💰</span>
-                <span>Tip Queue</span>
-                <span id="menuQueueBadge" style="position: absolute; right: 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border-radius: 12px; min-width: 20px; height: 20px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center; padding: 0 6px;">0</span>
-            </div>
-            <div class="menu-item" onclick="toggleTheme()">
-                <span class="menu-icon" id="themeIconMenu">🌙</span>
-                <span id="themeLabelMenu">Dark Mode</span>
-            </div>
-            <div class="menu-item" onclick="window.location.href='https://nosmero.com/set-desktop-preference'">
-                <span class="menu-icon">🖥️</span>
-                <span>Desktop Site</span>
-            </div>
-            <div class="menu-item" onclick="toggleCompose()" id="menuCreateNoteBtn" style="display: none;">
-                <span class="menu-icon">✏️</span>
-                <span>Create Note</span>
-            </div>
-            <div class="menu-item" onclick="openArticleEditor(); closeHamburgerMenu();" id="menuWriteArticleBtn" style="display: none;">
-                <span class="menu-icon">📝</span>
-                <span>Write Article</span>
-            </div>
-            <!-- Logged-in user info -->
-            <div id="menuUserInfo" style="display: none; margin-top: auto; padding: 1rem; border-top: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.02);">
-                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">Logged in as</div>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <img id="menuUserPic" src="" alt="Profile" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid var(--border-color);">
-                    <div style="flex: 1; min-width: 0;">
-                        <div id="menuUserName" style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></div>
-                        <div id="menuUserNpub" style="font-size: 11px; font-family: monospace; color: var(--text-secondary);"></div>
-                    </div>
-                </div>
-            </div>
-            <!-- Logout button at bottom -->
-            <div class="menu-item" onclick="logout()" id="menuLogoutBtn" style="display: none; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-                <span class="menu-icon">🚪</span>
-                <span style="color: #ff6b6b;">Logout</span>
-            </div>
-        </div>
-    </nav>
-
-    <!-- Minimal Fixed Header - Single Row Layout -->
-    <header class="minimal-header">
-        <div class="header-single-row">
-            <button class="mobile-menu-btn" onclick="openHamburgerMenu()" aria-label="Open menu">☰</button>
-            <div class="logo-container">
-                <img src="/nosmero-logo-new.png" alt="nosmero" class="header-logo">
-                <span class="tagline">nostr + monero</span>
-            </div>
-
-            <nav class="feed-selector">
-                <a href="#" class="feed-tab active" data-feed="following" onclick="handleFeedTabClick('following', event)">Following</a>
-                <a href="#" class="feed-tab" data-feed="monero" onclick="handleFeedTabClick('monero', event)">Trending Monero Notes</a>
-                <a href="#" class="feed-tab" data-feed="articles" onclick="handleFeedTabClick('articles', event)">📝 Articles</a>
-                <a href="#" class="feed-tab" data-feed="trending" onclick="handleFeedTabClick('trending', event)">Popular Notes</a>
-                <a href="#" class="feed-tab" data-feed="tipactivity" onclick="handleFeedTabClick('tipactivity', event)">Monero Tip Activity</a>
-                <a href="#" class="feed-tab" data-feed="live" onclick="handleFeedTabClick('live', event)">📺 Live</a>
-                <button class="create-note-btn" id="headerCreateNoteBtn" onclick="handleCreateNoteClick()" style="display: none;">
-                    ✏️ <span>Post</span>
-                </button>
-                <button class="notifications-btn" id="headerNotificationsBtn" onclick="handleNavItemClick('notifications')" style="display: none; position: relative;">
-                    🔔
-                    <span id="notificationBadge" style="position: absolute; top: -4px; right: -4px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
-                </button>
-                <button class="login-btn-orange" id="headerLoginBtn" onclick="showLoginOptions()">
-                    Login
-                </button>
-            </nav>
-
-            <div class="quick-actions">
-                <div class="relay-indicator" id="relayIndicator">
-                    <div class="status-dot"></div>
-                    <span id="relayCount">0 relays connected</span>
-                </div>
-            </div>
-        </div>
-    </header>
-
-    <!-- ==================================
-         END NEW HEADER & MENU
-         ================================== -->
-
-    <!-- LEGACY: Keep existing sidebar hidden for backward compatibility -->
-    <div class="sidebar" style="display: none;">
-        <div class="logo">
-            <img src="/nosmero-logo-new.png" alt="nosmero" style="width: 120px; height: auto;">
-        </div>
-        
-        <div class="nav-item active" data-tab="home" onclick="handleNavItemClick('home')">
-            <span>🏠</span>
-            <span>Home</span>
-        </div>
-        
-        <div class="nav-item" data-tab="settings" onclick="handleNavItemClick('settings')">
-            <span>⚙️</span>
-            <span>Settings</span>
-        </div>
-        
-        <div class="nav-item" data-tab="search" onclick="handleNavItemClick('search')">
-            <span>🔍</span>
-            <span>Search</span>
-        </div>
-        
-        <div class="nav-item" data-tab="messages" onclick="handleNavItemClick('messages')" style="position: relative;">
-            <span>✉️</span>
-            <span>Messages</span>
-            <span id="messagesBadge" style="position: absolute; top: 8px; right: 8px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
-        </div>
-
-        <div class="nav-item" data-tab="notifications" onclick="handleNavItemClick('notifications')" style="position: relative;">
-            <span>🔔</span>
-            <span>Notifications</span>
-            <span id="notificationBadge" style="position: absolute; top: 8px; right: 8px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
-        </div>
-        
-        <div class="nav-item" data-tab="profile" onclick="handleNavItemClick('profile')">
-            <span>👤</span>
-            <span>Profile</span>
-        </div>
-
-        <!-- Theme Toggle -->
-        <div class="nav-item" onclick="toggleTheme()" style="cursor: pointer;">
-            <span id="themeIcon">🌙</span>
-            <span id="themeLabel">Dark</span>
-        </div>
-
-        <!-- Login/Create Account Options (shown when not logged in) -->
-        <div id="authOptions" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
-            <button class="login-option-btn" onclick="showCreateAccount()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: white; border-radius: 8px; cursor: pointer;">
-                🆕 Create Account
-            </button>
-            <button class="login-option-btn" onclick="showLoginWithNsec()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
-                🔑 Login with nsec
-            </button>
-            <button class="login-option-btn" onclick="loginWithExtension()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
-                🔌 Use Extension
-            </button>
-            <button class="login-option-btn" onclick="showLoginWithNsecApp()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
-                🌐 Use nsec.app
-            </button>
-            <button class="login-option-btn" onclick="showLoginWithAmber()" style="width: 100%; margin-bottom: 10px; padding: 10px; background: #333; border: none; color: white; border-radius: 8px; cursor: pointer;">
-                📱 Use Amber
-            </button>
-        </div>
-        
-        <!-- Logout Option (shown when logged in) -->
-        <div id="logoutOption" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
-            <button onclick="logout()" style="width: 100%; padding: 10px; background: #333; border: none; color: #ff6b6b; border-radius: 8px; cursor: pointer;">
-                🚪 Logout
-            </button>
-        </div>
-        
-        <button class="post-button" onclick="toggleCompose()">✏️ Create Note</button>
-
-        <button class="post-button" onclick="showZapQueue()" style="position: relative; margin-top: 10px;">
-            💰 XMR Queue
-            <span class="zap-queue-indicator" style="position: absolute; top: -5px; right: -5px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; font-weight: bold; display: none; justify-content: center; align-items: center;">0</span>
-        </button>
-
-        <div class="nav-item" onclick="logout()" style="margin-top: 10px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border-radius: 12px; color: #fff;">
-            <span>🚪</span>
-            <span style="color: #fff; font-weight: bold;">Logout</span>
-        </div>
-    </div>
-
-    <div class="main">
-        <!-- Contact List Sync Status Indicator -->
-        <div id="contactSyncStatus" class="sync-status-banner" style="display: none; background: linear-gradient(135deg, #FF6600, #8B5CF6); padding: 10px 16px; margin: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13px; align-items: center; gap: 10px;">
-            <div class="spinner" style="width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-            <span id="contactSyncText">Syncing your follows...</span>
-        </div>
-
-        <div id="compose" class="compose-area" style="display: none;">
-            <textarea class="compose-textarea" placeholder="What's happening?" maxlength="4000" style="min-height: 120px; resize: vertical;" oninput="updateCharacterCount(this, 'mainCharCount')"></textarea>
-            <div id="composePreview" class="compose-preview" style="display: none;"></div>
-            <div class="compose-toolbar">
-                <button type="button" data-format="bold" title="Bold"><strong>B</strong></button>
-                <button type="button" data-format="italic" title="Italic"><em>I</em></button>
-                <button type="button" data-format="link" title="Link">🔗</button>
-                <button type="button" data-format="mention" title="Mention (paste npub)">@</button>
-                <button type="button" data-format="ipfs" title="Add IPFS media (paste CID or upload)">📦</button>
-                <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
-                <button type="button" data-format="quote" title="Quote">"</button>
-                <button type="button" data-format="list" title="Bullet list">•</button>
-                <button type="button" data-format="emoji" title="Add emoji">😀</button>
-                <button type="button" data-format="preview" title="Preview" class="preview-btn">Preview</button>
-            </div>
-            <div class="emoji-picker" style="display: none;">
-                <div class="emoji-grid">😀😃😄😁😅😂🤣😊😇🙂😉😌😍🥰😘😗😋😛😜🤪😎🤩🥳😏😒😔😟😕🙁😣😢😭😤😠😡🤬😱😨😰🤔🤫🤭🤥😶😐😑🙄😬😮😲🥱😴🤤😷🤒🤕🤢🤮🤧🥵🥶🥴😵🤯🤠🥳🥸😎🤓🧐😈👿👋🤚✋🖐️👌🤌✌️🤞🤟🤘🤙👈👉👆👇☝️👍👎✊👊🤛🤜👏🙌👐🤝🙏💪🦾❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝✨⭐🌟💫🔥💥💢💦💨🎉🎊🎁🏆🥇🥈🥉</div>
-            </div>
-            <div style="text-align: right; color: #666; font-size: 12px; margin-bottom: 8px;">
-                <span id="mainCharCount">0/4000</span>
-            </div>
-            <div class="compose-actions">
-                <input type="text" class="xmr-address-input" placeholder="Your Monero address (optional)" id="composeMoneroAddress">
-
-                <!-- Paywall Toggle -->
-                <div class="paywall-toggle-container">
-                    <div class="paywall-toggle-row">
-                        <div class="paywall-toggle">
-                            <input type="checkbox" id="paywallEnabled" onchange="NostrPaywall.togglePaywall(this.checked)">
-                            <label for="paywallEnabled">🔒 Paywall this note</label>
-                        </div>
-                        <div id="paywallPriceInput" class="paywall-price-input">
-                            <input type="number" id="paywallPrice" placeholder="0.00015" step="0.00001" min="0.00001" value="0.00015">
-                            <span>XMR</span>
-                        </div>
-                    </div>
-                    <div id="paywallPreviewSection" class="paywall-preview-section">
-                        <div class="paywall-preview-header" onclick="NostrPaywall.togglePreviewEdit()">
-                            <span>Preview text (shown to non-payers)</span>
-                            <span id="paywallPreviewToggle" class="paywall-preview-toggle">▼ Edit</span>
-                        </div>
-                        <div id="paywallPreviewSuggested" class="paywall-preview-suggested"></div>
-                        <div id="paywallPreviewEdit" class="paywall-preview-edit">
-                            <textarea id="paywallPreviewText" placeholder="Auto-generated from first paragraph..." rows="3"></textarea>
-                            <div class="paywall-preview-hint">Leave empty to auto-generate from your post's first paragraph</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="media-upload-section">
-                    <input type="file" id="composeMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'compose')">
-                    <div id="composeMediaPreview" class="media-preview" style="display: none;"></div>
-                </div>
-                <div class="compose-buttons">
-                    <button class="media-btn" onclick="document.getElementById('composeMediaInput').click()" title="Add Image/Video">
-                        📎 Media
-                    </button>
-                    <button class="cancel-btn" onclick="cancelCompose()">Cancel</button>
-                    <button class="send-btn" onclick="sendPost()">Publish</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Quick-toggle chip: only visible when Following feed is active -->
-        <div id="followingFeedChip" style="display: none; padding: 8px 16px; border-bottom: 1px solid #222; background: rgba(255, 102, 0, 0.03);">
-            <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #ccc; cursor: pointer;">
-                <input type="checkbox" id="followingChipShowOwn" checked onchange="toggleShowOwnNotesInFollowing(this.checked, true)" style="cursor: pointer;">
-                <span>Show my own notes in this feed</span>
-            </label>
-        </div>
-
-        <div class="feed" id="feed">
-            <!-- Welcome Banner for First-Time Anonymous Users -->
-            <div class="welcome-banner hidden" id="welcomeBanner">
-                <button class="close-banner" onclick="closeWelcomeBanner()">✕</button>
-                <h2 class="welcome-title">Welcome to Nosmero 👋</h2>
-                <p class="welcome-text">
-                    You are viewing the top notes regarding the Monero community. To post or send tips, just generate your keys - takes 5 seconds, no email needed.
-                </p>
-                <div class="welcome-actions">
-                    <button class="welcome-btn primary" onclick="handleCreateKeysAndPost()">Create Keys & Post</button>
-                    <a href="#" class="welcome-btn secondary" onclick="showWhatIsNostr()">What's Nostr?</a>
-                    <a href="#" class="welcome-btn secondary" onclick="showWhatIsMonero()">What's Monero?</a>
-                </div>
-            </div>
-
-            <div class="loading">Loading feed…</div>
-        </div>
-        
-        <!-- Messages page (hidden by default) -->
-        <div id="messagesPage" class="messages-page" style="display: none;">
-            <div class="messages-container">
-                <div class="conversations-list">
-                    <div class="conversations-header">
-                        <h2>Messages</h2>
-                        <button class="new-message-btn" onclick="startNewMessage()">
-                            <span>✉️ New</span>
-                        </button>
-                    </div>
-                    <div id="conversationsList" class="conversations">
-                        <!-- Conversations will be listed here -->
-                    </div>
-                </div>
-                <div class="message-thread">
-                    <div id="messageHeader" class="message-header">
-                        <span>Select a conversation</span>
-                    </div>
-                    <div id="messageThread" class="messages-display">
-                        <!-- Messages will appear here -->
-                    </div>
-                    <div id="messageComposer" class="message-composer" style="display: none;">
-                        <textarea id="messageInput" placeholder="Type your message..." rows="3"></textarea>
-                        <button onclick="sendMessage()" class="send-message-btn">Send</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Thread page (hidden by default) -->
-        <div id="threadPage" class="thread-page" style="display: none;">
-            <div class="thread-header">
-                <button onclick="goBackFromThread()" style="background: none; border: none; color: #fff; cursor: pointer; font-size: 18px; margin-right: 12px;">←</button>
-                <h2>Thread</h2>
-            </div>
-            <div id="threadPageContent" class="thread-content">
-                <!-- Thread will be displayed here -->
-            </div>
-        </div>
-
-        <div id="profilePage" class="profile-page" style="display: none;">
-            <!-- User profile will be displayed here -->
-        </div>
-
-        <!-- NIP-23 long-form article page (hidden by default) -->
-        <div id="articlePage" class="article-page" style="display: none;">
-            <div class="thread-header">
-                <button onclick="goBackFromArticle()" style="background: none; border: none; color: #fff; cursor: pointer; font-size: 18px; margin-right: 12px;">←</button>
-                <h2>Article</h2>
-            </div>
-            <div id="articlePageContent" class="article-content">
-                <!-- Article will be rendered here -->
-            </div>
-        </div>
-
-        <!-- PDF reader page (hidden by default) -->
-        <div id="pdfPage" class="pdf-page" style="display: none;">
-            <div class="thread-header">
-                <button onclick="goBackFromPdf()" style="background: none; border: none; color: #fff; cursor: pointer; font-size: 18px; margin-right: 12px;">←</button>
-                <h2>PDF</h2>
-            </div>
-            <div id="pdfPageContent" class="pdf-content">
-                <!-- PDF reader will be rendered here -->
-            </div>
-        </div>
-
-        <!-- IPFS Media page (hidden by default) -->
-        <div id="ipfsMediaPage" class="ipfs-media-page" style="display: none;"></div>
-
-        <!-- Bookmarks page (hidden by default) -->
-        <div id="bookmarksPage" class="bookmarks-page" style="display: none;"></div>
-
-        <!-- Article composer (hidden by default) -->
-        <div id="composeArticlePage" class="compose-article-page" style="display: none;">
-            <div class="article-editor-header">
-                <button id="articleBackBtn" class="article-editor-back" aria-label="Back">←</button>
-                <h2 class="article-editor-title">Write article</h2>
-                <div class="article-editor-tabs">
-                    <button id="articleWriteTabBtn" class="article-tab article-tab--active" type="button">Write</button>
-                    <button id="articlePreviewTabBtn" class="article-tab" type="button">Preview</button>
-                </div>
-                <div class="article-editor-actions">
-                    <div class="article-drafts-menu-wrap">
-                        <button id="articleDraftsBtn" class="btn-secondary" type="button" aria-haspopup="true" aria-expanded="false">📁 Drafts</button>
-                        <div id="articleDraftsMenu" class="article-drafts-menu" style="display: none;">
-                            <button id="articleNewDraftBtn" class="article-drafts-menu-new" type="button">+ New draft</button>
-                            <div id="articleDraftsList" class="article-drafts-menu-list"></div>
-                        </div>
-                    </div>
-                    <button id="articleClearBtn" class="btn-secondary" type="button" title="Clear form">🗑️ Clear</button>
-                    <button id="articleSaveDraftBtn" class="btn-secondary" type="button">Save draft</button>
-                    <button id="articlePublishBtn" class="btn-primary" type="button">Publish</button>
-                </div>
-            </div>
-            <div id="articleEditorStatus" class="article-editor-status" aria-live="polite"></div>
-
-            <div id="articleEditorWrite" class="article-editor-write">
-                <div class="article-editor-cover">
-                    <div id="articleCoverPreview" class="article-cover-preview">
-                        <span class="article-cover-placeholder">Cover image</span>
-                    </div>
-                    <button id="articleCoverUploadBtn" class="btn-secondary" type="button">Upload cover</button>
-                </div>
-
-                <input id="articleTitle" class="article-title-input" type="text" placeholder="Title" maxlength="200" />
-                <input id="articleSummary" class="article-summary-input" type="text" placeholder="One-sentence summary (shown in feeds)" maxlength="300" />
-                <input id="articleTopics" class="article-topics-input" type="text" placeholder="Topics, space-separated (e.g. #monero #privacy)" />
-
-                <fieldset id="articlePaywallSection" class="article-paywall-section">
-                    <legend>
-                        <label class="article-paywall-toggle-label">
-                            <input id="articlePaywallToggle" type="checkbox" />
-                            🔒 Paywall this article
-                        </label>
-                    </legend>
-                    <div class="article-paywall-fields">
-                        <p class="article-paywall-hint">Insert the 🔒 break in your body (toolbar button) to mark where locked content starts. Everything above the break is public; everything below is encrypted until a reader pays.</p>
-                        <label class="article-paywall-field">
-                            <span>Price (XMR)</span>
-                            <input id="articlePaywallPrice" type="number" step="0.00001" min="0.00001" placeholder="0.01" />
-                        </label>
-                        <label class="article-paywall-field">
-                            <span>Payment address</span>
-                            <input id="articlePaywallAddress" type="text" placeholder="Your Monero address (4… or 8…)" />
-                        </label>
-                    </div>
-                </fieldset>
-
-                <div class="article-editor-toolbar">
-                    <button class="article-fmt-btn" data-fmt="bold" type="button" title="Bold (Ctrl+B)"><strong>B</strong></button>
-                    <button class="article-fmt-btn" data-fmt="italic" type="button" title="Italic (Ctrl+I)"><em>I</em></button>
-                    <button class="article-fmt-btn" data-fmt="link" type="button" title="Link (Ctrl+K)">🔗</button>
-                    <button class="article-fmt-btn" data-fmt="h2" type="button" title="Heading">H</button>
-                    <button class="article-fmt-btn" data-fmt="code" type="button" title="Code">{ }</button>
-                    <button class="article-fmt-btn" data-fmt="quote" type="button" title="Quote">❝</button>
-                    <button class="article-fmt-btn" data-fmt="list" type="button" title="List">•</button>
-                    <button id="articleInsertPaywallBreakBtn" class="article-fmt-btn" type="button" title="Insert paywall break">🔒</button>
-                </div>
-
-                <textarea id="articleBody" class="article-body-textarea" placeholder="Write your article in markdown…" rows="20"></textarea>
-            </div>
-
-            <div id="articleEditorPreview" class="article-editor-preview" style="display: none;"></div>
-        </div>
-    </div>
-
-    <!-- Login Modal -->
-    <div class="modal" id="loginModal">
-        <div class="modal-content" style="max-width: 480px;">
-            <div class="modal-header" id="loginModalHeader">Sign In to Nosmero</div>
-
-            <!-- Main Login Buttons -->
-            <div id="loginMainButtons">
-                <!-- Returning User Login Section -->
-                <div id="returningUserSection" class="hidden">
-                    <form id="loginForm" onsubmit="return false;">
-                        <div style="margin-bottom: 12px;">
-                            <input type="text" id="emailOrUsernameInput" placeholder="Username Created on Nosmero"
-                                   style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
-                        </div>
-                        <div style="margin-bottom: 12px;">
-                            <input type="password" id="loginPasswordInput" placeholder="Password"
-                                   style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
-                        </div>
-                        <div style="display: flex; gap: 12px; align-items: center;">
-                            <button type="submit" id="loginBtn" class="send-btn" onclick="authUI.handleLogin()" style="flex: 1;">Log In</button>
-                            <button type="button" class="text-btn" onclick="authUI.showForgotPassword()" style="color: #8B5CF6; font-size: 13px;">Forgot?</button>
-                        </div>
-                    </form>
-
-                    <div style="display: flex; align-items: center; margin: 20px 0; gap: 12px;">
-                        <div style="flex: 1; height: 1px; background: #333;"></div>
-                        <span style="color: #666; font-size: 12px;">or sign in with a Nostr key</span>
-                        <div style="flex: 1; height: 1px; background: #333;"></div>
-                    </div>
-
-                    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
-                        <button class="login-option-btn" onclick="loginWithExtension()">
-                            <span style="margin-right: 8px;">🔌</span> Browser Extension
-                        </button>
-                        <button class="login-option-btn" onclick="showLoginWithNsecSection()">
-                            <span style="margin-right: 8px;">🔑</span> Paste nsec
-                        </button>
-                        <button class="login-option-btn" onclick="showLoginWithNsecApp()">
-                            <span style="margin-right: 8px;">🌐</span> nsec.app
-                        </button>
-                        <button class="login-option-btn" onclick="showLoginWithAmberSection()">
-                            <span style="margin-right: 8px;">📱</span> Amber (Android)
-                        </button>
-                    </div>
-
-                    <div style="text-align: center; margin-top: 20px;">
-                        <button class="text-btn" onclick="showCreateAccountModal()" style="color: #FF6600; font-size: 14px;">
-                            New to Nostr? Create Account
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Quick Login Buttons (legacy, hidden by default) -->
-                <div id="quickLoginSection" class="hidden"></div>
-            </div>
-
-            <!-- New User Section - Choose Method -->
-            <div id="newUserSection" class="hidden">
-                <div style="display: flex; flex-direction: column; gap: 12px;">
-                    <button class="login-option-btn" onclick="showEmailPasswordSignup()" style="text-align: left; padding: 16px;">
-                        <div style="font-weight: 600; margin-bottom: 4px;">Create with Username/Password</div>
-                        <div style="font-size: 12px; color: #888;">Familiar login experience - Nostr keys generated & encrypted with your password</div>
-                        <div style="font-size: 11px; color: #8B5CF6; margin-top: 4px;">Export your nsec/npub anytime to use elsewhere</div>
-                    </button>
-                    <button class="login-option-btn" onclick="showKeysOnlySignup()" style="text-align: left; padding: 16px;">
-                        <div style="font-weight: 600; margin-bottom: 4px;">Just Generate Keys</div>
-                        <div style="font-size: 12px; color: #888;">Advanced - You save and manage your own keys</div>
-                    </button>
-                </div>
-                <div style="text-align: center; margin-top: 16px;">
-                    <button class="text-btn" onclick="showLoginModalWithLogin()" style="color: #8B5CF6; font-size: 14px;">
-                        Already have an account? Log In
-                    </button>
-                </div>
-            </div>
-
-            <!-- Email/Password Signup Form (Username-only, no email stored) -->
-            <div id="emailPasswordSignupSection" class="hidden">
-                <form id="signupForm" onsubmit="return false;">
-                    <!-- Display Name -->
-                    <div style="margin-bottom: 16px;">
-                        <input type="text" id="displayNameInput" placeholder="Display name (e.g., John Smith)"
-                               style="width: 100%; padding: 14px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 15px;">
-                        <div style="font-size: 11px; color: #888; margin-top: 4px;">Public - This name appears on your posts and profile</div>
-                    </div>
-
-                    <!-- Username (required) -->
-                    <div style="margin-bottom: 12px;">
-                        <input type="text" id="signupUsernameInput" placeholder="Username (you'll log in with this)"
-                               style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;"
-                               oninput="checkUsernameAvailability(this.value)">
-                        <div style="font-size: 11px; color: #888; margin-top: 2px;">Private - Only you see this. Letters, numbers, underscore (3-20 chars)</div>
-                        <div id="usernameAvailability" style="font-size: 11px; margin-top: 2px; min-height: 16px;"></div>
-                    </div>
-
-                    <!-- Password with strength indicator -->
-                    <div style="margin-bottom: 12px;">
-                        <input type="password" id="signupPasswordInput" placeholder="Password (min 8 characters)"
-                               style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;"
-                               oninput="updatePasswordStrength(this.value)">
-                        <!-- Password strength meter -->
-                        <div style="margin-top: 8px;">
-                            <div style="display: flex; gap: 4px; margin-bottom: 4px;">
-                                <div id="strengthBar1" style="flex: 1; height: 4px; background: #333; border-radius: 2px;"></div>
-                                <div id="strengthBar2" style="flex: 1; height: 4px; background: #333; border-radius: 2px;"></div>
-                                <div id="strengthBar3" style="flex: 1; height: 4px; background: #333; border-radius: 2px;"></div>
-                                <div id="strengthBar4" style="flex: 1; height: 4px; background: #333; border-radius: 2px;"></div>
-                            </div>
-                            <div id="strengthText" style="font-size: 11px; color: #888;"></div>
-                        </div>
-                    </div>
-
-                    <!-- Confirm Password -->
-                    <div style="margin-bottom: 12px;">
-                        <input type="password" id="confirmPasswordInput" placeholder="Confirm password"
-                               style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
-                    </div>
-
-                    <!-- Password security explanation -->
-                    <div style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border: 1px solid rgba(139, 92, 246, 0.2);">
-                        <div style="color: #8B5CF6; font-weight: 600; font-size: 12px; margin-bottom: 6px;">Why password strength matters</div>
-                        <div style="color: #aaa; font-size: 11px; line-height: 1.5;">
-                            Your password encrypts your private key. If Nosmero's database were ever compromised, a strong password protects your identity from being stolen. Use 12+ characters with mixed case, numbers, and symbols.
-                        </div>
-                    </div>
-
-                    <!-- nsec export + recovery warning -->
-                    <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.08); border-radius: 8px; border-left: 3px solid #FF6600;">
-                        <div style="color: #FF6600; font-weight: 600; font-size: 13px; margin-bottom: 6px;">⚠️ Back up your nsec or you may lose your account</div>
-                        <div style="color: #ccc; font-size: 12px; line-height: 1.5;">
-                            Your password encrypts a Nostr private key (<code style="background: #222; padding: 1px 4px; border-radius: 3px;">nsec</code>) generated in your browser. <strong>If you lose your password and haven't exported your nsec, your account cannot be recovered</strong> — there is no email reset link. You'll see your nsec on the next screen; you can also export it any time from <strong>Settings</strong>.
-                        </div>
-                    </div>
-
-                    <!-- Bring-your-own-nsec toggle -->
-                    <div style="margin-bottom: 12px; text-align: center;">
-                        <button type="button" id="existingNsecToggleLink" class="text-btn" onclick="authUI.toggleExistingNsecSignup()" style="color: #8B5CF6; font-size: 13px; background: none; border: none; cursor: pointer; padding: 4px;">
-                            Already have an nsec? Use it →
-                        </button>
-                    </div>
-                    <div id="existingNsecForSignupContainer" class="hidden" style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.06); border-radius: 8px; border: 1px solid rgba(139, 92, 246, 0.25);">
-                        <div style="color: #8B5CF6; font-size: 12px; margin-bottom: 8px; line-height: 1.5;">
-                            Paste an existing <code style="background: #222; padding: 1px 4px; border-radius: 3px;">nsec</code> to anchor this Nosmero account to your current Nostr identity. We'll encrypt it with your password — your existing follows, posts, and reputation carry over.
-                        </div>
-                        <input type="password" id="existingNsecForSignupInput" placeholder="nsec1…" autocomplete="off"
-                               style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 13px; font-family: monospace;">
-                    </div>
-
-                    <button type="submit" id="createAccountBtn" class="send-btn" onclick="authUI.handleSignup()" style="width: 100%;">
-                        Create Account
-                    </button>
-                </form>
-                <button class="close-btn" onclick="showCreateAccountModal()" style="margin-top: 12px;">Back</button>
-            </div>
-
-            <!-- Keys Only Signup Form -->
-            <div id="keysOnlySignupSection" class="hidden">
-                <form id="keysOnlyForm" onsubmit="return false;">
-                    <div style="margin-bottom: 16px;">
-                        <input type="text" id="keysOnlyDisplayNameInput" placeholder="Display name (e.g., John Smith)"
-                               style="width: 100%; padding: 14px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 15px;">
-                        <div style="font-size: 11px; color: #888; margin-top: 4px;">Your public name shown on your profile</div>
-                    </div>
-                    <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
-                        <div style="color: #FF6600; font-size: 13px; line-height: 1.5;">
-                            Your keys will be generated and shown once. Save them securely - if lost, your account cannot be recovered.
-                        </div>
-                    </div>
-                    <button type="submit" class="send-btn" onclick="authUI.handleKeysOnlySignup()" style="width: 100%;">
-                        Generate My Keys
-                    </button>
-                </form>
-                <button class="close-btn" onclick="showCreateAccountModal()" style="margin-top: 12px;">Back</button>
-            </div>
-
-            <!-- Forgot Password Section (nsec-paste reset) -->
-            <div id="forgotPasswordSection" class="hidden">
-                <div style="margin-bottom: 16px; color: #ccc; font-size: 14px; line-height: 1.5;">
-                    Paste the nsec backup you saved at signup. We'll re-encrypt it with a new password and log you in.
-                </div>
-                <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
-                    <div style="color: #FF6600; font-size: 13px; line-height: 1.5;">
-                        Your nsec is the only way to recover your account. Without it, Nosmero cannot reset your password.
-                    </div>
-                </div>
-                <form id="forgotPasswordForm" onsubmit="return false;">
-                    <div style="margin-bottom: 12px;">
-                        <input type="text" id="resetUsernameInput" placeholder="Username" autocomplete="username"
-                               style="width: 100%; padding: 14px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 15px;">
-                    </div>
-                    <div style="margin-bottom: 12px;">
-                        <input type="password" id="resetNsecInput" placeholder="Paste your nsec (nsec1…)" autocomplete="off"
-                               style="width: 100%; padding: 14px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 13px; font-family: monospace;">
-                    </div>
-                    <div style="margin-bottom: 12px;">
-                        <input type="password" id="resetNewPasswordInput" placeholder="New password" autocomplete="new-password"
-                               style="width: 100%; padding: 14px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 15px;">
-                    </div>
-                    <div style="margin-bottom: 16px;">
-                        <input type="password" id="resetConfirmPasswordInput" placeholder="Confirm new password" autocomplete="new-password"
-                               style="width: 100%; padding: 14px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 15px;">
-                    </div>
-                    <button type="submit" id="forgotPasswordBtn" class="send-btn" onclick="authUI.handlePasswordReset()" style="width: 100%;">
-                        Reset Password & Log In
-                    </button>
-                </form>
-                <button class="close-btn" onclick="authUI.backToMainLogin()" style="margin-top: 12px;">Back</button>
-            </div>
-
-            <!-- Login with nsec Section -->
-            <div id="loginWithNsecSection" class="hidden">
-                <div style="margin-bottom: 16px;">
-                    <input type="password" id="nsecInput" placeholder="Enter your nsec..."
-                           style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
-                </div>
-                <div style="margin-bottom: 16px; padding: 14px; background: rgba(255, 102, 0, 0.1); border-radius: 8px; border-left: 3px solid #FF6600;">
-                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">Security Warning</div>
-                    <div style="color: #ccc; font-size: 13px; line-height: 1.5;">
-                        Your nsec controls your identity permanently. It will be encrypted with a PIN and stored locally.
-                    </div>
-                </div>
-
-                <button class="send-btn" onclick="loginWithNsec()">Login</button>
-                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
-            </div>
-
-            <!-- Login with Amber Section -->
-            <div id="loginWithAmberSection" class="hidden">
-                <div style="margin-bottom: 16px;">
-                    <input type="text" id="amberBunkerInput" placeholder="Paste your bunker URI from Amber..."
-                           style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px;">
-                </div>
-                <div style="margin-bottom: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border-left: 3px solid #8B5CF6;">
-                    <div style="color: #8B5CF6; font-weight: bold; margin-bottom: 8px;">How to get your bunker URI:</div>
-                    <ol style="color: #ccc; font-size: 13px; margin: 0; padding-left: 20px; line-height: 1.8;">
-                        <li>Open Amber on your Android device</li>
-                        <li>Go to Settings - Connections</li>
-                        <li>Create or select a connection</li>
-                        <li>Copy the bunker:// URI</li>
-                    </ol>
-                </div>
-
-                <button class="send-btn" onclick="loginWithAmber()">Connect to Amber</button>
-                <button class="close-btn" onclick="backToLoginOptions()">Back</button>
-            </div>
-
-            <!-- Key Display Section -->
-            <div id="keyDisplaySection" class="hidden">
-                <div style="margin-bottom: 20px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
-                        <div style="color: #FF6600; font-weight: 600;">Your Private Key (nsec)</div>
-                        <div style="display: flex; gap: 6px;">
-                            <button onclick="copyToClipboard(document.getElementById('privateKeyDisplay').textContent, this)"
-                                    style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; color: #FF6600; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 4px;">
-                                📋 Copy
-                            </button>
-                            <button onclick="authUI.downloadNsecBackup(document.getElementById('privateKeyDisplay').textContent, document.getElementById('signupUsernameInput')?.value || 'nosmero')"
-                                    style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; color: #8B5CF6; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 4px;">
-                                💾 Download Backup
-                            </button>
-                        </div>
-                    </div>
-                    <div id="privateKeyDisplay" style="padding: 12px; background: #1a1a1a; border-radius: 8px; font-family: monospace; font-size: 12px; word-break: break-all; color: #FF6600; border: 1px solid rgba(255, 102, 0, 0.3);"></div>
-                    <!-- Hidden element to store npub for proceedToApp -->
-                    <div id="publicKeyDisplay" style="display: none;"></div>
-                </div>
-
-                <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.2), rgba(139, 92, 246, 0.2)); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
-                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 8px;">⚠️ Save your nsec — this is the only backup</div>
-                    <div style="color: #ccc; font-size: 14px; line-height: 1.5;">
-                        Your <strong>nsec</strong> is your account. Save it in a password manager or download the backup file above.
-                        <div style="margin-top: 10px; color: #FFB070; font-size: 13px;">
-                            If you forget your password and don't have this nsec backed up, <strong>your account cannot be recovered</strong>. There is no email reset link.
-                        </div>
-                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); color: #888; font-size: 13px;">
-                            You can also find and export your nsec from <strong>Settings</strong> any time after logging in.
-                        </div>
-                    </div>
-                </div>
-
-                <button class="send-btn" onclick="authUI.proceedToApp()">I've Saved It - Continue</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- New Post Modal -->
-    <div class="modal" id="newPostModal">
-        <div class="modal-content compose-area">
-            <div class="modal-header">Create Note</div>
-            <textarea id="newPostContent" class="compose-textarea" placeholder="What's happening?" maxlength="4000" style="width: 100%; min-height: 150px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;" oninput="updateCharacterCount(this, 'modalCharCount')"></textarea>
-            <div class="compose-toolbar">
-                <button type="button" data-format="bold" title="Bold"><strong>B</strong></button>
-                <button type="button" data-format="italic" title="Italic"><em>I</em></button>
-                <button type="button" data-format="link" title="Link">🔗</button>
-                <button type="button" data-format="mention" title="Mention (paste npub)">@</button>
-                <button type="button" data-format="ipfs" title="Add IPFS media (paste CID or upload)">📦</button>
-                <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
-                <button type="button" data-format="quote" title="Quote">"</button>
-                <button type="button" data-format="list" title="Bullet list">•</button>
-                <button type="button" data-format="emoji" title="Add emoji">😀</button>
-            </div>
-            <div class="emoji-picker" style="display: none;">
-                <div class="emoji-grid">😀😃😄😁😅😂🤣😊😇🙂😉😌😍🥰😘😗😋😛😜🤪😎🤩🥳😏😒😔😟😕🙁😣😢😭😤😠😡🤬😱😨😰🤔🤫🤭🤥😶😐😑🙄😬😮😲🥱😴🤤😷🤒🤕🤢🤮🤧🥵🥶🥴😵🤯🤠🥳🥸😎🤓🧐😈👿👋🤚✋🖐️👌🤌✌️🤞🤟🤘🤙👈👉👆👇☝️👍👎✊👊🤛🤜👏🙌👐🤝🙏💪🦾❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝✨⭐🌟💫🔥💥💢💦💨🎉🎊🎁🏆🥇🥈🥉</div>
-            </div>
-            <div style="text-align: right; color: #666; font-size: 12px; margin-top: 4px;">
-                <span id="modalCharCount">0/4000</span>
-            </div>
-            <input type="text" id="modalMoneroAddress" placeholder="Your Monero address (optional)" style="width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-top: 12px;">
-            <div class="media-upload-section">
-                <input type="file" id="modalMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'modal')">
-                <div id="modalMediaPreview" class="media-preview" style="display: none;"></div>
-            </div>
-            <div class="modal-actions">
-                <button class="media-btn" onclick="document.getElementById('modalMediaInput').click()" title="Add Image/Video">
-                    📎 Media
-                </button>
-                <button class="close-btn" onclick="closeNewPostModal()">Cancel</button>
-                <button class="send-btn" onclick="publishNewPost()">Publish</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Reply Modal -->
-    <div class="modal" id="replyModal">
-        <div class="modal-content compose-area">
-            <div class="modal-header">Reply to Post</div>
-            <div id="replyingTo" style="padding: 12px; background: #1a1a1a; border-radius: 8px; margin-bottom: 16px; font-size: 14px; color: #999;"></div>
-            <textarea id="replyContent" class="compose-textarea" placeholder="Write your reply..." maxlength="1000" style="width: 100%; min-height: 120px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
-            <div class="compose-toolbar">
-                <button type="button" data-format="bold" title="Bold"><strong>B</strong></button>
-                <button type="button" data-format="italic" title="Italic"><em>I</em></button>
-                <button type="button" data-format="link" title="Link">🔗</button>
-                <button type="button" data-format="mention" title="Mention (paste npub)">@</button>
-                <button type="button" data-format="ipfs" title="Add IPFS media (paste CID or upload)">📦</button>
-                <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
-                <button type="button" data-format="quote" title="Quote">"</button>
-                <button type="button" data-format="list" title="Bullet list">•</button>
-                <button type="button" data-format="emoji" title="Add emoji">😀</button>
-            </div>
-            <div class="emoji-picker" style="display: none;">
-                <div class="emoji-grid">😀😃😄😁😅😂🤣😊😇🙂😉😌😍🥰😘😗😋😛😜🤪😎🤩🥳😏😒😔😟😕🙁😣😢😭😤😠😡🤬😱😨😰🤔🤫🤭🤥😶😐😑🙄😬😮😲🥱😴🤤😷🤒🤕🤢🤮🤧🥵🥶🥴😵🤯🤠🥳🥸😎🤓🧐😈👿👋🤚✋🖐️👌🤌✌️🤞🤟🤘🤙👈👉👆👇☝️👍👎✊👊🤛🤜👏🙌👐🤝🙏💪🦾❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝✨⭐🌟💫🔥💥💢💦💨🎉🎊🎁🏆🥇🥈🥉</div>
-            </div>
-
-            <!-- Media Upload Section for Replies -->
-            <div class="media-upload-section">
-                <input type="file" id="replyMediaInput" accept="image/*,video/*" style="display: none;" onchange="handleMediaUpload(this, 'reply')">
-                <div id="replyMediaPreview" class="media-preview" style="display: none;"></div>
-            </div>
-            
-            <div class="modal-actions">
-                <button type="button" class="media-btn" onclick="document.getElementById('replyMediaInput').click()" title="Add Image/Video">
-                    📎 Media
-                </button>
-                <button class="close-btn" onclick="closeReplyModal()">Cancel</button>
-                <button class="send-btn" onclick="sendReplyToCurrentPost()">Reply</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Highlight Modal (NIP-84) -->
-    <div class="modal" id="highlightModal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">📌 Publish Highlight</div>
-            <blockquote id="highlightPreview" style="padding: 12px 14px; background: rgba(255, 235, 100, 0.08); border-left: 3px solid rgba(255, 235, 100, 0.6); border-radius: 4px; margin: 0 0 16px; font-style: italic; color: #ddd; line-height: 1.55; max-height: 200px; overflow-y: auto;"></blockquote>
-            <textarea id="highlightComment" placeholder="Add a comment (optional)" maxlength="500" style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px; resize: vertical; box-sizing: border-box;"></textarea>
-            <div class="modal-actions">
-                <button class="close-btn" id="highlightCancelBtn" type="button">Cancel</button>
-                <button class="send-btn" id="highlightPublishBtn" type="button">Publish</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Repost Modal -->
-    <div class="modal" id="repostModal">
-        <div class="modal-content">
-            <div class="modal-header">Repost</div>
-            <div id="repostingTo" style="padding: 12px; background: #1a1a1a; border-radius: 8px; margin-bottom: 16px; font-size: 14px; color: #999;"></div>
-
-            <!-- Repost Type Toggle -->
-            <div style="margin-bottom: 16px;">
-                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                    <button id="quickRepostBtn" onclick="setRepostType('quick')" style="flex: 1; padding: 8px 16px; border: 1px solid #FF6600; border-radius: 6px; background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; font-weight: bold; cursor: pointer;">Quick Repost</button>
-                    <button id="addCommentBtn" onclick="setRepostType('comment')" style="flex: 1; padding: 8px 16px; border: 1px solid #333; border-radius: 6px; background: transparent; color: #fff; cursor: pointer;">Add Comment</button>
-                </div>
-                <div id="quickRepostDesc" style="color: #666; font-size: 14px;">Share this note to your followers without adding commentary</div>
-                <div id="addCommentDesc" style="color: #666; font-size: 14px; display: none;">Quote this note and add your own commentary</div>
-            </div>
-
-            <!-- Comment Section (hidden by default) -->
-            <div id="repostCommentSection" class="compose-area" style="display: none; margin-bottom: 16px;">
-                <textarea id="repostComment" class="compose-textarea" placeholder="Add your thoughts..." maxlength="1000" style="width: 100%; min-height: 100px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
-                <div class="compose-toolbar">
-                    <button type="button" data-format="bold" title="Bold"><strong>B</strong></button>
-                    <button type="button" data-format="italic" title="Italic"><em>I</em></button>
-                    <button type="button" data-format="link" title="Link">🔗</button>
-                    <button type="button" data-format="mention" title="Mention (paste npub)">@</button>
-                    <button type="button" data-format="ipfs" title="Add IPFS media (paste CID or upload)">📦</button>
-                    <button type="button" data-format="code" title="Code">&lt;/&gt;</button>
-                    <button type="button" data-format="quote" title="Quote">"</button>
-                    <button type="button" data-format="list" title="Bullet list">•</button>
-                    <button type="button" data-format="emoji" title="Add emoji">😀</button>
-                </div>
-                <div class="emoji-picker" style="display: none;">
-                    <div class="emoji-grid">😀😃😄😁😅😂🤣😊😇🙂😉😌😍🥰😘😗😋😛😜🤪😎🤩🥳😏😒😔😟😕🙁😣😢😭😤😠😡🤬😱😨😰🤔🤫🤭🤥😶😐😑🙄😬😮😲🥱😴🤤😷🤒🤕🤢🤮🤧🥵🥶🥴😵🤯🤠🥳🥸😎🤓🧐😈👿👋🤚✋🖐️👌🤌✌️🤞🤟🤘🤙👈👉👆👇☝️👍👎✊👊🤛🤜👏🙌👐🤝🙏💪🦾❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝✨⭐🌟💫🔥💥💢💦💨🎉🎊🎁🏆🥇🥈🥉</div>
-                </div>
-            </div>
-
-            <div class="modal-actions">
-                <button class="close-btn" onclick="closeRepostModal()">Cancel</button>
-                <button id="repostBtn" class="send-btn" onclick="sendRepost()">Repost</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Settings Modal -->
-    <div class="modal" id="settingsModal">
-        <div class="modal-content">
-            <div class="modal-header">Settings</div>
-            
-            <div class="settings-section">
-                <h3>Lightning Address</h3>
-                <input type="text" id="defaultLightningAddress" placeholder="Your Lightning address (e.g., user@domain.com)" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-                <p style="color: #999; font-size: 12px; margin-top: 8px;">Used for receiving Bitcoin zaps via Lightning Network</p>
-            </div>
-
-            <div class="settings-section">
-                <h3>Banner Image URL</h3>
-                <input type="text" id="defaultBannerImage" placeholder="Your profile banner image URL" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-                <p style="color: #999; font-size: 12px; margin-top: 8px;">Banner image displayed on your profile page</p>
-            </div>
-
-            <div class="settings-section">
-                <h3>Default Monero Address</h3>
-                <input type="text" id="defaultMoneroAddress" placeholder="Your default XMR address" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-            </div>
-
-            <div class="settings-section">
-                <h3>Default Zap Amounts</h3>
-                <div style="display: flex; gap: 20px; margin-top: 12px;">
-                    <div style="flex: 1;">
-                        <label style="color: #FFDF00; display: block; margin-bottom: 8px;">⚡ Bitcoin (sats)</label>
-                        <input type="number" id="defaultBtcZapAmount" placeholder="1000" min="1" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-                    </div>
-                    <div style="flex: 1;">
-                        <label style="color: #FF6600; display: block; margin-bottom: 8px;">⚡ Monero (XMR)</label>
-                        <input type="text" id="defaultXmrZapAmount" placeholder="0.001" step="0.001" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff;">
-                    </div>
-                </div>
-                <p style="color: #999; font-size: 12px; margin-top: 8px;">Set default amounts for quick zapping</p>
-            </div>
-
-            <div class="settings-section">
-                <h3>Relay Configuration (NIP-65)</h3>
-                <p style="color: #ccc; font-size: 12px; margin-bottom: 4px;"><strong>Read</strong> relays are where others send replies and mentions to you. <strong>Write</strong> relays are where you publish your own notes.</p>
-                <p style="color: #ccc; font-size: 12px; margin-bottom: 12px;">Your <strong>Announced</strong> relays — the subset published in your kind 10002 event — are what other clients use to find your notes and what they pack into shareable <code>nevent</code> references. NIP-65 recommends 2–4 announced relays per category so those references stay short enough to share in IRC and similar channels. Untick <strong>Announce</strong> to keep a relay in your local read/write list without including it in kind 10002.</p>
-
-                <div style="display: flex; flex-direction: column; gap: 16px;">
-                    <div>
-                        <h4 style="color: #FF6600; margin-bottom: 8px;">Read Relays</h4>
-                        <div id="readRelaysList" style="margin-bottom: 12px; max-height: 220px; overflow-y: auto;"></div>
-                        <input type="text" id="newReadRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
-                        <button onclick="addReadRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Read Relay</button>
-                    </div>
-
-                    <div>
-                        <h4 style="color: #8B5CF6; margin-bottom: 8px;">Write Relays</h4>
-                        <div id="writeRelaysList" style="margin-bottom: 12px; max-height: 220px; overflow-y: auto;"></div>
-                        <input type="text" id="newWriteRelayUrl" placeholder="wss://relay.example.com" style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; margin-bottom: 8px;">
-                        <button onclick="addWriteRelay()" style="padding: 8px 16px; background: linear-gradient(135deg, #8B5CF6, #FF6600); border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; width: 100%;">Add Write Relay</button>
-                    </div>
-                </div>
-
-                <div id="relayAdvertiseHint" style="display: none; margin-top: 12px; padding: 10px 12px; background: rgba(255, 223, 0, 0.08); border-left: 3px solid #FFDF00; border-radius: 4px; color: #ffffff; font-size: 12px;"></div>
-                
-                <div style="margin-top: 12px; padding: 8px; background: #111; border-radius: 8px;">
-                    <button onclick="resetToDefaultRelays()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer; margin-right: 8px;">Reset to Defaults</button>
-                    <button onclick="importRelayList()" style="padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #fff; cursor: pointer;">Import from Profile</button>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>Direct Messages</h3>
-                <div style="margin-top: 12px;">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="useNip17Dms" style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>Use NIP-17 encrypted DMs (enhanced privacy)</span>
-                    </label>
-                    <div style="margin-top: 8px; padding: 12px; background: #1a1a00; border-left: 3px solid #FFDF00; border-radius: 4px;">
-                        <p style="color: #FFDF00; font-size: 12px; margin: 0;">⚠️ <strong>Only works with other Nosmero users</strong> who have this enabled.</p>
-                        <p style="color: #999; font-size: 12px; margin: 4px 0 0 0;">Messages to other clients will automatically use standard encryption (NIP-04).</p>
-                    </div>
-                    <p style="color: #666; font-size: 11px; margin-top: 8px;">
-                        NIP-17 provides enhanced privacy by hiding message metadata from relays. However, it only works when both sender and recipient use Nosmero with this setting enabled.
-                    </p>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>Muted Users</h3>
-                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Users you've muted won't appear in your feed or tip disclosures</p>
-                <div id="mutedUsersList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
-                    <!-- Muted users will be populated by JavaScript -->
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>Muted Hashtags</h3>
-                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Posts tagged with any of these hashtags will be hidden from your feeds. Public — syncs to other NIP-51 clients (kind 10000).</p>
-                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                    <input id="addMuteHashtagInput" type="text" placeholder="e.g. nsfw (without the #)"
-                           onkeydown="if(event.key==='Enter'){event.preventDefault();addMutedHashtag(event);}"
-                           style="flex: 1; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #fff;">
-                    <button onclick="addMutedHashtag(event)"
-                            style="padding: 10px 16px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">Mute</button>
-                </div>
-                <div id="mutedHashtagsList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
-                    <!-- Populated by JavaScript -->
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>Muted Words</h3>
-                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Posts containing any of these substrings will be hidden. Case-insensitive, matches anywhere in the post. Private — encrypted to yourself.</p>
-                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                    <input id="addMuteWordInput" type="text" placeholder="e.g. spamword"
-                           onkeydown="if(event.key==='Enter'){event.preventDefault();addMutedWord(event);}"
-                           style="flex: 1; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #fff;">
-                    <button onclick="addMutedWord(event)"
-                            style="padding: 10px 16px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">Mute</button>
-                </div>
-                <div id="mutedWordsList" style="max-height: 200px; overflow-y: auto; background: #111; border-radius: 8px; padding: 8px;">
-                    <!-- Populated by JavaScript -->
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>🔐 Web of Trust</h3>
-                <p style="color: #999; font-size: 12px; margin-bottom: 16px;">NIP-85 trust scoring powered by Relatr</p>
-
-                <!-- Master Switch -->
-                <div class="trust-badges-toggle" style="margin-bottom: 16px;">
-                    <div>
-                        <div class="trust-badges-label">Enable Web of Trust</div>
-                        <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
-                            Calculate trust scores using Relatr
-                        </div>
-                    </div>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="enableWebOfTrust" checked onchange="toggleWebOfTrust(this.checked)">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <!-- Sub-options (enabled when Web of Trust is on) -->
-                <div id="webOfTrustOptions" style="margin-left: 20px; padding-left: 16px; border-left: 2px solid #333;">
-
-                    <!-- Always show on Suggested Follows & New Voices -->
-                    <div style="margin-bottom: 12px; padding: 8px; background: rgba(255, 102, 0, 0.05); border-radius: 6px;">
-                        <div style="color: #FF6600; font-size: 12px; font-weight: 600; margin-bottom: 4px;">
-                            ✓ Badges shown on Suggested Follows & New Voices
-                        </div>
-                        <div style="color: #999; font-size: 11px;">
-                            Trust scores help discover quality accounts
-                        </div>
-                    </div>
-
-                    <!-- Show badges on all feeds -->
-                    <div class="trust-badges-toggle" style="margin-bottom: 16px;">
-                        <div>
-                            <div class="trust-badges-label">Show badges on all feeds</div>
-                            <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
-                                Display scores on home feed, profiles, threads, etc.
-                            </div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="showTrustBadgesEverywhere" onchange="toggleTrustBadgesEverywhere(this.checked)">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-
-                    <!-- Personalize scores -->
-                    <div class="trust-badges-toggle" style="margin-bottom: 16px;">
-                        <div>
-                            <div class="trust-badges-label">Personalize scores to my network</div>
-                            <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
-                                Calculate from your perspective vs global network
-                            </div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="personalizeScores" checked onchange="togglePersonalizeScores(this.checked)">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-
-                    <!-- Share data with network -->
-                    <div class="trust-badges-toggle">
-                        <div>
-                            <div class="trust-badges-label">Share my scores with the network</div>
-                            <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
-                                Help improve trust calculations for others
-                            </div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="shareDataWithRelatr" onchange="toggleShareData(this.checked)">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                    <div style="margin-top: 8px; padding: 8px; background: rgba(139, 92, 246, 0.05); border-left: 3px solid #8B5CF6; border-radius: 4px;">
-                        <p style="color: #ccc; font-size: 11px; margin: 0;">
-                            ℹ️ Your follow list is already public on Nostr. This allows the Nosmero trust server to use it for network-wide calculations.
-                        </p>
-                    </div>
-                </div>
-
-                <!-- Info box -->
-                <div style="margin-top: 16px; padding: 12px; background: rgba(255, 102, 0, 0.05); border-left: 3px solid #FF6600; border-radius: 4px;">
-                    <p style="color: #ccc; font-size: 12px; margin: 0;">
-                        Trust scores are calculated based on social graph distance, NIP-05 verification, Lightning addresses, and relay list publication. Scores range from 0-100, with higher scores indicating more trusted users.
-                    </p>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>📰 Feed</h3>
-
-                <div class="trust-badges-toggle" style="margin-bottom: 16px;">
-                    <div>
-                        <div class="trust-badges-label">Show my own notes in Following feed</div>
-                        <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
-                            Include posts you publish in the timeline alongside accounts you follow
-                        </div>
-                    </div>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="showOwnNotesInFollowing" checked onchange="toggleShowOwnNotesInFollowing(this.checked)">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>Notifications</h3>
-                <p style="color: #999; font-size: 12px; margin-bottom: 12px;">Choose which types of notifications to receive</p>
-                <div style="display: grid; gap: 12px;">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_replies" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>💬 Replies to my posts</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_mentions" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>📢 Mentions of me</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_likes" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>❤️ Likes on my posts</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_reposts" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>🔄 Reposts of my posts</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_zaps" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>⚡ Zaps & Tips (Lightning + Monero)</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notif_follows" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>👥 New followers</span>
-                    </label>
-                </div>
-                <p style="color: #666; font-size: 11px; margin-top: 12px;">
-                    Disabled notification types won't be fetched from relays. Changes take effect on next notification refresh.
-                </p>
-            </div>
-
-            <div class="modal-actions">
-                <button class="close-btn" onclick="closeSettingsModal()">Close</button>
-                <button class="send-btn" onclick="saveSettings()">Save</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Profile Modal -->
-    <div class="modal" id="profileModal">
-        <div class="modal-content">
-            <div class="modal-header">Profile</div>
-            <div id="profileContent"></div>
-            <div class="modal-actions">
-                <button class="close-btn" onclick="closeProfileModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- User Profile Modal -->
-    <div class="modal" id="userProfileModal">
-        <div class="modal-content">
-            <div id="userProfileContent"></div>
-            <div class="modal-actions">
-                <button class="close-btn" onclick="closeUserProfileModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Thread View Modal -->
-    <div class="modal" id="threadModal">
-        <div class="modal-content" style="max-width: 600px;">
-            <div class="modal-header">Thread</div>
-            <div id="threadContent" style="max-height: 70vh; overflow-y: auto;"></div>
-            <div class="modal-actions">
-                <button class="close-btn" onclick="closeThreadModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Zap Modal -->
-    <div class="modal" id="zapModal">
-        <div class="modal-content">
-            <div class="modal-header">Tip with Monero</div>
-            <div id="zapDetails"></div>
-            <div class="qr-container">
-                <div id="qrCode"></div>
-            </div>
-            <div class="modal-footer">
-                <div style="font-size: 12px; color: #666; margin-bottom: 16px;">
-                    Scan with your Monero wallet
-                </div>
-                <button class="close-btn" onclick="closeZapModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- XMR Wallet Modal (Full-screen, z-index higher than bottom nav) -->
-    <div class="modal" id="walletModal" style="display: none; z-index: 2000;">
-        <div class="modal-content" style="max-width: 100%; width: 100%; height: 100%; margin: 0; border-radius: 0; display: flex; flex-direction: column;">
-            <!-- Wallet Modal Header -->
-            <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; border-bottom: 1px solid var(--border-color); background: #0a0a0a;">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <button onclick="closeWalletModal()" style="background: none; border: none; color: var(--text-secondary); font-size: 24px; cursor: pointer; padding: 4px;">←</button>
-                    <h2 id="walletModalTitle" style="margin: 0; font-size: 18px; background: linear-gradient(135deg, #FF6600, #8B5CF6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">⛏️ XMR Tip Jar</h2>
-                </div>
-                <button id="walletLockBtn" onclick="lockWallet()" style="background: none; border: 1px solid var(--border-color); color: var(--text-secondary); padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; display: none;">🔒 Lock</button>
-            </div>
-
-            <!-- Wallet Modal Content (scrollable) -->
-            <div id="walletModalContent" style="flex: 1; overflow-y: auto; padding: 16px; padding-bottom: 100px;">
-                <!-- Content will be dynamically rendered by wallet-modal.js -->
-                <div style="text-align: center; padding: 40px;">
-                    <div class="sync-spinner" style="width: 40px; height: 40px; margin: 0 auto 20px; border: 3px solid #333; border-top-color: #FF6600; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-                    <p style="color: #999;">Loading wallet...</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- PIN Entry Modal (for encrypted key storage) -->
-    <div class="modal" id="pinModal" style="display: none;">
-        <div class="modal-content" style="max-width: 400px;">
-            <div class="modal-header">🔐 Secure Your Account</div>
-            <div style="padding: 20px;">
-                <p id="pinModalMessage" style="margin-bottom: 20px; color: #ccc;">Create a PIN to encrypt your private key</p>
-
-                <div style="margin-bottom: 20px;">
-                    <label style="display: block; margin-bottom: 8px; color: #999;">Enter PIN (4-8 digits)</label>
-                    <input type="password" id="pinInput"
-                           placeholder="Enter PIN..."
-                           maxlength="8"
-                           style="width: 100%; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 4px;">
-                </div>
-
-                <div id="pinConfirmSection" style="margin-bottom: 20px; display: none;">
-                    <label style="display: block; margin-bottom: 8px; color: #999;">Confirm PIN</label>
-                    <input type="password" id="pinConfirmInput"
-                           placeholder="Confirm PIN..."
-                           maxlength="8"
-                           style="width: 100%; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 4px;">
-                </div>
-
-                <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 6px; padding: 12px; margin-top: 16px;">
-                    <div style="color: #FF6600; font-weight: bold; margin-bottom: 4px;">⚠️ Important</div>
-                    <div style="color: #999; font-size: 13px;">
-                        Your PIN encrypts your private key in browser storage. Don't forget it - we cannot recover it!
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="send-btn" id="pinSubmitBtn" onclick="submitPin()"
-                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Continue</button>
-                <button class="close-btn" id="pinCancelBtn" onclick="cancelPin()">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Disclosure Prompt Modal -->
-    <div class="modal" id="disclosurePromptModal">
-        <div class="modal-content" style="max-width: 650px;">
-            <div class="modal-header">💰 Tip Disclosure Options</div>
-            <div style="padding: 20px;">
-                <p style="margin-bottom: 20px; color: #ccc;">Choose how you want to handle this tip:</p>
-
-                <!-- Option A: Keep it Secret -->
-                <label style="display: block; padding: 14px; margin-bottom: 12px; background: rgba(100, 100, 100, 0.1); border: 2px solid #444; border-radius: 8px; cursor: pointer; transition: all 0.2s;"
-                       onmouseover="this.style.background='rgba(100,100,100,0.15)'; this.style.borderColor='#666';"
-                       onmouseout="this.style.background='rgba(100,100,100,0.1)'; this.style.borderColor='#444';">
-                    <div style="display: flex; align-items: start;">
-                        <input type="radio" name="disclosureOption" value="secret" checked onchange="updateDisclosureOption()"
-                               style="margin-right: 12px; margin-top: 4px;">
-                        <div style="flex: 1;">
-                            <div style="font-weight: 600; font-size: 15px; color: #fff; margin-bottom: 4px;">🔒 Keep it Secret</div>
-                            <div style="font-size: 13px; color: #999;">No public record of this tip</div>
-                        </div>
-                    </div>
-                </label>
-
-                <!-- Option B: Disclose (No Verification) -->
-                <label style="display: block; padding: 14px; margin-bottom: 12px; background: rgba(255, 102, 0, 0.1); border: 2px solid rgba(255, 102, 0, 0.3); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
-                       onmouseover="this.style.background='rgba(255,102,0,0.15)'; this.style.borderColor='rgba(255,102,0,0.5)';"
-                       onmouseout="this.style.background='rgba(255,102,0,0.1)'; this.style.borderColor='rgba(255,102,0,0.3)';">
-                    <div style="display: flex; align-items: start;">
-                        <input type="radio" name="disclosureOption" value="disclose" onchange="updateDisclosureOption()"
-                               style="margin-right: 12px; margin-top: 4px;">
-                        <div style="flex: 1;">
-                            <div style="font-weight: 600; font-size: 15px; color: #FF6600; margin-bottom: 4px;">💰 Disclose (No Verification)</div>
-                            <div style="font-size: 13px; color: #999;">Honor system, no cryptographic proof</div>
-                        </div>
-                    </div>
-                </label>
-
-                <!-- Option C: Disclose + Verify -->
-                <label style="display: block; padding: 14px; margin-bottom: 20px; background: rgba(16, 185, 129, 0.1); border: 2px solid rgba(16, 185, 129, 0.3); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
-                       onmouseover="this.style.background='rgba(16,185,129,0.15)'; this.style.borderColor='rgba(16,185,129,0.5)';"
-                       onmouseout="this.style.background='rgba(16,185,129,0.1)'; this.style.borderColor='rgba(16,185,129,0.3)';">
-                    <div style="display: flex; align-items: start;">
-                        <input type="radio" name="disclosureOption" value="verify" onchange="updateDisclosureOption()"
-                               style="margin-right: 12px; margin-top: 4px;">
-                        <div style="flex: 1;">
-                            <div style="font-weight: 600; font-size: 15px; color: #10B981; margin-bottom: 4px;">✓ Disclose + Verify</div>
-                            <div style="font-size: 13px; color: #999;">Cryptographically verified with blockchain proof. Verified badge displayed publicly on the note.</div>
-                        </div>
-                    </div>
-                </label>
-
-                <!-- Message Field (shown for all public options) -->
-                <div id="messageSection" style="display: none; margin-bottom: 20px;">
-                    <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Message (optional)</label>
-                    <textarea id="disclosurePromptMessage" rows="3"
-                              placeholder="Add a message with your tip..."
-                              style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; resize: vertical;"></textarea>
-                </div>
-
-                <!-- Verification Fields (shown only for verify options) -->
-                <div id="verificationFields" style="display: none; padding: 16px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; margin-bottom: 16px;">
-                    <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 6px; color: #aaa; font-size: 13px;">Transaction ID (TXID)</label>
-                        <input type="text" id="verificationTxid"
-                               placeholder="Get from your wallet's transaction history..."
-                               style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-family: monospace; font-size: 12px;">
-                    </div>
-
-                    <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 6px; color: #aaa; font-size: 13px;">Transaction Key (tx_key)</label>
-                        <input type="text" id="verificationTxKey"
-                               placeholder="Run: get_tx_key <txid> in your wallet..."
-                               style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; font-family: monospace; font-size: 12px;">
-                        <div style="font-size: 11px; color: #666; margin-top: 4px;">
-                            CLI: get_tx_key &lt;txid&gt; | GUI: Right-click transaction → Get transaction key
-                        </div>
-                    </div>
-
-                    <div style="padding: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px;">
-                        <div style="font-size: 12px; color: #aaa; line-height: 1.6;">
-                            <strong style="color: #10B981;">🔍 Public Blockchain Verification</strong><br>
-                            Your transaction details (TXID & tx_key) will be:<br>
-                            • Verified instantly against the Monero blockchain<br>
-                            • Published as tags on a public kind 9736 tip event<br>
-                            • Anyone can re-verify the amount via Monero's check_tx_key
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="send-btn" onclick="submitDisclosurePrompt()"
-                        style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Confirm</button>
-                <button class="close-btn" onclick="closeDisclosurePromptModal()">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Zap Queue Modal -->
-    <div class="modal" id="zapQueueModal">
-        <div class="modal-content" style="max-width: 600px;">
-            <div class="modal-header">XMR Zap Queue</div>
-            <div id="zapQueueContent">
-                <!-- Queue content will be dynamically populated -->
-            </div>
-            <div class="modal-footer">
-                <button class="send-btn" onclick="showBatchQrCodes()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6);">Process Queue</button>
-                <button class="close-btn" onclick="closeZapQueueModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Paywall Unlock Modal -->
-    <div id="paywallModalOverlay" class="paywall-modal-overlay" onclick="NostrPaywall.closeModal(event)">
-        <div class="paywall-modal" onclick="event.stopPropagation()">
-            <div class="paywall-modal-header">
-                <h3>Unlock Content</h3>
-                <button class="paywall-modal-close" onclick="NostrPaywall.closeModal()">&times;</button>
-            </div>
-            <div id="paywallModalContent">
-                <!-- Content injected dynamically -->
-            </div>
-        </div>
-    </div>
-
-    <!-- Post Menu -->
-    <div id="postMenu" class="post-menu" style="display: none;">
-        <button id="postMenuBookmarkBtn" onclick="toggleBookmark()">☆ Bookmark</button>
-        <button id="postMenuPinBtn" onclick="togglePin()" style="display: none;">📌 Pin to Profile</button>
-        <button onclick="copyPostLink()">Copy Link</button>
-        <button onclick="copyPostNevent()">Copy as nevent</button>
-        <button onclick="copyPostId()">Copy Note ID</button>
-        <button onclick="copyPostJson()">Copy JSON</button>
-        <button onclick="viewPostSource()">View Source</button>
-        <button id="postMenuDeleteBtn" onclick="requestDeletion()" style="color: #ff6b6b;">Request Deletion</button>
-        <button onclick="muteUser()">Mute User</button>
-        <button onclick="reportPost()">Report</button>
-    </div>
-
-    <!-- Generated Key Modal -->
-    <div class="modal" id="keyModal">
-        <!-- Content will be generated by JavaScript -->
-    </div>
-
-    <!-- Toast Notification Container -->
-    <div id="toastContainer"></div>
-
-    <!-- Mobile Bottom Navigation Bar -->
-    <nav class="mobile-bottom-nav">
-        <button class="nav-btn" onclick="handleBottomNavClick('home')" data-nav="home">
-            <span class="nav-icon">🏠</span>
-            <span class="nav-label">Home</span>
-        </button>
-        <button class="nav-btn" onclick="handleBottomNavClick('search')" data-nav="search">
-            <span class="nav-icon">🔍</span>
-            <span class="nav-label">Search</span>
-        </button>
-        <button class="nav-btn nav-btn-primary" onclick="handleBottomNavClick('compose')" data-nav="compose" id="bottomNavCompose" style="display: none;">
-            <span class="nav-icon">✏️</span>
-            <span class="nav-label">Post</span>
-        </button>
-        <button class="nav-btn" onclick="handleBottomNavClick('messages')" data-nav="messages">
-            <span class="nav-icon">💬</span>
-            <span class="nav-label">Messages</span>
-        </button>
-        <button class="nav-btn" onclick="handleBottomNavClick('notifications')" data-nav="notifications" style="position: relative;">
-            <span class="nav-icon">🔔</span>
-            <span class="nav-label">Alerts</span>
-            <span id="bottomNotificationBadge" style="position: absolute; top: 4px; right: 8px; background: #FF6600; color: white; border-radius: 10px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: bold; display: none; justify-content: center; align-items: center;"></span>
-        </button>
-    </nav>
-
-    <!-- Security: DOMPurify for XSS protection -->
-    <script src="/lib/purify.min.js"></script>
-
-    <!-- Markdown parser for compose preview -->
-    <script src="/lib/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
-
-    <!-- Load nostr-tools from local copy -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Nosmero">
+    <meta name="description" content="Nostr client with Monero tipping.">
+
+    <title>Nosmero</title>
+
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png">
+    <link rel="apple-touch-icon" href="/assets/icon-192.png">
+    <link rel="stylesheet" href="/styles.css?v=20260523n">
+
+    <!-- nostr-tools IIFE — provides window.NostrTools globally -->
     <script src="/lib/nostr-tools.bundle.js"></script>
+    <!-- DOMPurify for content sanitize -->
+    <script src="/lib/purify.min.js"></script>
+    <!-- QR code generator (used on profile address) -->
+    <script src="/lib/qrcode.min.js"></script>
 
-    <!-- Monero wallet WASM library for paywall/wallet features -->
-    <!-- SRI hash protects against supply chain attacks on the WASM bundle -->
-    <script src="/lib/monero-wallet.iife.js" integrity="sha384-/bPHoGgNd6VwHiBPUzapfjKCa5QgS4l77vrHImA0Bmku2+QIezVJCxmPnArNZQBi" crossorigin="anonymous"></script>
+</head>
+<body class="tab-feed">
 
-    <!-- UI Redesign JS - New minimal header, hamburger menu, feed tabs -->
-    <script src="/js/ui-redesign.js?v=3.3.0"></script>
-
-    <!-- Load the modular v2 application -->
-    <script type="module" src="/js/app.js?v=2.9.70-profile"></script>
-
-    <!-- IPFS Embed Modal -->
-    <dialog id="ipfsEmbedModal" class="ipfs-embed-modal">
-        <h3 class="ipfs-embed-title">Add IPFS media</h3>
-
-        <div class="ipfs-embed-tabs" role="tablist">
-            <button type="button" class="ipfs-tab active" data-tab="paste" role="tab">Paste CID</button>
-            <button type="button" class="ipfs-tab" data-tab="upload" role="tab">Upload to IPFS</button>
+<!-- =================== LOGIN VIEW (overlay) =================== -->
+<div id="loginView" class="overlay-view" hidden>
+    <div class="login-container">
+        <div class="login-logo">
+            <img src="/assets/logo_nosmero.svg" alt="Nosmero" width="48" height="48">
+            <h1>Nosmero</h1>
+            <p class="login-tag">Nostr · Monero tips</p>
         </div>
 
-        <!-- Paste-CID tab (Phase 0 flow, unchanged behavior) -->
-        <div class="ipfs-tab-content" data-tab-content="paste">
-            <form method="dialog" class="ipfs-paste-form">
-                <input type="text" id="ipfsCidInput" placeholder="CID or gateway URL" autocomplete="off" spellcheck="false" autocapitalize="off" class="ipfs-embed-input">
-                <div class="ipfs-error"></div>
-                <div class="ipfs-embed-label">Please select the file type for the CID:</div>
-                <div class="ipfs-embed-actions">
-                    <button type="submit" value="image" class="ipfs-embed-btn">🖼️ Image</button>
-                    <button type="submit" value="video" class="ipfs-embed-btn">🎬 Video</button>
-                    <button type="submit" value="pdf" class="ipfs-embed-btn">📕 PDF</button>
-                    <button type="submit" value="file" class="ipfs-embed-btn">📄 File</button>
-                    <button type="submit" value="cancel" class="ipfs-embed-btn ipfs-embed-cancel">Cancel</button>
-                </div>
-            </form>
+        <!-- u/p form (default) -->
+        <form id="loginFormUp" class="auth-form" autocomplete="on">
+            <label class="field">
+                <span>Username</span>
+                <input type="text" id="loginUsername" autocomplete="username" required>
+            </label>
+            <label class="field">
+                <span>Password</span>
+                <input type="password" id="loginPassword" autocomplete="current-password" required>
+            </label>
+            <label class="field">
+                <span>Device PIN (4+ digits) — encrypts your key on this device</span>
+                <input type="password" id="loginPin" autocomplete="off" inputmode="numeric" required>
+            </label>
+            <button type="submit" class="btn btn-primary">Sign in</button>
+            <button type="button" id="loginForgotBtn" class="btn-link">Forgot password?</button>
+        </form>
+
+        <div class="auth-divider"><span>or use</span></div>
+
+        <div class="auth-alts">
+            <button type="button" id="loginNsecBtn"  class="btn btn-secondary">🔑 nsec key</button>
+            <button type="button" id="loginNip07Btn" class="btn btn-secondary">🧩 Browser extension</button>
+            <button type="button" id="loginBunkerBtn" class="btn btn-secondary">🔐 NIP-46 bunker</button>
         </div>
 
-        <!-- Upload-to-IPFS tab (Step 7 — npub-keyed pinning, 500 MB quota) -->
-        <div class="ipfs-tab-content" data-tab-content="upload" hidden>
-            <form method="dialog" class="ipfs-upload-form">
-                <div class="ipfs-quota-row">
-                    <span class="ipfs-quota-text">Loading quota…</span>
-                    <div class="ipfs-quota-bar"><div class="ipfs-quota-fill" style="width:0%"></div></div>
-                </div>
-
-                <input type="file" id="ipfsUploadFile" class="ipfs-file-input">
-                <div class="ipfs-file-info" hidden></div>
-
-                <div class="ipfs-embed-label">Type:</div>
-                <div class="ipfs-type-radio">
-                    <label><input type="radio" name="ipfsUploadKind" value="image" checked> 🖼️ Image</label>
-                    <label><input type="radio" name="ipfsUploadKind" value="video"> 🎬 Video</label>
-                    <label><input type="radio" name="ipfsUploadKind" value="pdf"> 📕 PDF</label>
-                    <label><input type="radio" name="ipfsUploadKind" value="file"> 📄 File</label>
-                </div>
-
-                <div class="ipfs-metadata-warning" hidden>
-                    ⚠️ Metadata is not stripped from non-image files. PDFs, documents, video and archives can leak author names, edit history, and embedded EXIF/GPS. Scrub sensitive metadata before uploading.
-                </div>
-
-                <div class="ipfs-upload-progress" hidden>
-                    <div class="ipfs-upload-progress-bar"><div class="ipfs-upload-progress-fill" style="width:0%"></div></div>
-                    <span class="ipfs-upload-progress-text">0%</span>
-                </div>
-
-                <div class="ipfs-upload-error" hidden></div>
-
-                <p class="ipfs-stage-note">Files upload only when you publish the post — no quota is charged until then.</p>
-
-                <div class="ipfs-embed-actions">
-                    <button type="submit" value="cancel" class="ipfs-embed-btn ipfs-embed-cancel">Cancel</button>
-                    <button type="button" class="ipfs-embed-btn ipfs-upload-btn" data-upload-action="upload" disabled>Add to post</button>
-                </div>
-            </form>
+        <div class="auth-footer">
+            <button type="button" id="loginSignupBtn" class="btn-link">New here? Sign up</button>
         </div>
-    </dialog>
+    </div>
 
-    <!-- Wallet Modal (loaded after app) -->
-    <script type="module" src="/js/wallet-modal.js?v=1.0.5"></script>
+    <!-- nsec entry sub-form (hidden initially) -->
+    <div id="nsecForm" class="auth-subform" hidden>
+        <button type="button" class="back-btn" data-action="auth-back">← Back</button>
+        <h2>Sign in with nsec</h2>
+        <label class="field">
+            <span>Your nsec</span>
+            <input type="password" id="nsecInput" placeholder="nsec1…" autocomplete="off">
+        </label>
+        <label class="field">
+            <span>PIN (4+ digits) — encrypts your key on this device</span>
+            <input type="password" id="nsecPin" autocomplete="off" inputmode="numeric">
+        </label>
+        <button type="button" id="nsecLoginSubmit" class="btn btn-primary">Continue</button>
+    </div>
+
+    <!-- bunker entry sub-form -->
+    <div id="bunkerForm" class="auth-subform" hidden>
+        <button type="button" class="back-btn" data-action="auth-back">← Back</button>
+        <h2>Connect a NIP-46 bunker</h2>
+        <label class="field">
+            <span>bunker:// URI</span>
+            <input type="text" id="bunkerInput" placeholder="bunker://…" autocomplete="off">
+        </label>
+        <button type="button" id="bunkerSubmit" class="btn btn-primary">Connect</button>
+    </div>
+
+    <!-- signup sub-form -->
+    <form id="signupForm" class="auth-subform" autocomplete="on" hidden>
+        <button type="button" class="back-btn" data-action="auth-back">← Back</button>
+        <h2>Create Nosmero account</h2>
+        <label class="field">
+            <span>Username</span>
+            <input type="text" id="signupUsername" autocomplete="username">
+        </label>
+        <label class="field">
+            <span>Password</span>
+            <input type="password" id="signupPassword" autocomplete="new-password">
+        </label>
+        <label class="field">
+            <span>Device PIN (4+ digits)</span>
+            <input type="password" id="signupPin" autocomplete="off" inputmode="numeric">
+        </label>
+        <label class="field opt-existing">
+            <input type="checkbox" id="signupUseExistingNsec">
+            <span>I have an existing nsec to use</span>
+        </label>
+        <label class="field" id="signupNsecRow" hidden>
+            <span>Your nsec</span>
+            <input type="password" id="signupNsec" placeholder="nsec1…" autocomplete="off">
+        </label>
+        <button type="submit" id="signupSubmit" class="btn btn-primary">Create account</button>
+    </form>
+
+    <!-- forgot password sub-form -->
+    <form id="forgotForm" class="auth-subform" autocomplete="off" hidden>
+        <button type="button" class="back-btn" data-action="auth-back">← Back</button>
+        <h2>Reset password</h2>
+        <p class="muted">Paste your nsec to prove ownership, then set a new password.</p>
+        <label class="field">
+            <span>Username</span>
+            <input type="text" id="forgotUsername" autocomplete="username">
+        </label>
+        <label class="field">
+            <span>Your nsec</span>
+            <input type="password" id="forgotNsec" placeholder="nsec1…" autocomplete="off">
+        </label>
+        <label class="field">
+            <span>New password</span>
+            <input type="password" id="forgotNewPassword" autocomplete="new-password">
+        </label>
+        <label class="field">
+            <span>Device PIN (4+ digits)</span>
+            <input type="password" id="forgotPin" autocomplete="off" inputmode="numeric">
+        </label>
+        <button type="submit" id="forgotSubmit" class="btn btn-primary">Reset password</button>
+    </form>
+</div>
+
+
+<!-- =================== APP CHROME =================== -->
+<header id="appHeader" class="app-header">
+    <!-- Header content is set per-tab by js/app.js -->
+    <div id="headerContent" class="header-content"></div>
+</header>
+
+
+<!-- =================== TAB VIEWS =================== -->
+<main id="appMain" class="app-main">
+
+    <!-- Feed -->
+    <section id="feedView" class="view view-feed">
+        <div class="feed-picker-bar">
+            <button type="button" id="feedPickerBtn" class="feed-picker-btn">
+                <span id="feedPickerLabel">Following</span>
+                <span class="chev">▾</span>
+            </button>
+        </div>
+
+        <div id="feedList" class="feed-list" data-empty-msg="No posts yet."></div>
+
+        <div id="feedLoadMore" class="load-more-row" hidden>
+            <button type="button" class="btn btn-secondary" id="feedLoadMoreBtn">Load more</button>
+        </div>
+    </section>
+
+    <!-- Compose -->
+    <section id="composeView" class="view view-compose">
+        <div id="composeReplyChip" class="compose-reply-chip" hidden></div>
+        <textarea id="composeBody" class="compose-body" placeholder="What's on your mind?" rows="6"></textarea>
+        <div id="composeMedia" class="compose-media"></div>
+        <div class="compose-toolbar">
+            <button type="button" id="composeImgBtn"  class="tool-btn">📷 Image</button>
+            <button type="button" id="composeIpfsBtn" class="tool-btn">📦 IPFS</button>
+            <span class="compose-spacer"></span>
+            <span id="composeChars" class="char-count"></span>
+        </div>
+        <input type="file" id="composeFileInput" accept="image/*,video/*" hidden>
+        <input type="file" id="composeIpfsInput" accept="image/*,video/*,application/pdf" hidden>
+    </section>
+
+    <!-- Notifications -->
+    <section id="notifView" class="view view-notif">
+        <div id="notifList" class="notif-list" data-empty-msg="No notifications yet."></div>
+    </section>
+
+    <!-- Profile -->
+    <section id="profileView" class="view view-profile">
+        <div id="profileContent"></div>
+    </section>
+</main>
+
+
+<!-- ============ FULL-SCREEN OVERLAYS (BODY-LEVEL) ============
+     Live OUTSIDE #appMain so iOS Safari's overflow:hidden parent
+     can't clip these position:fixed sections. -->
+
+<section id="threadView" class="overlay-view" hidden>
+    <div class="overlay-header">
+        <button type="button" class="back-btn" data-action="close-overlay" data-target="threadView">← Back</button>
+        <h2>Thread</h2>
+    </div>
+    <div id="threadContent" class="thread-content"></div>
+</section>
+
+<section id="searchView" class="overlay-view" hidden>
+    <div class="overlay-header">
+        <button type="button" class="back-btn" data-action="close-overlay" data-target="searchView">← Back</button>
+        <input type="search" id="searchInput" placeholder="Search Nostr…" autocomplete="off">
+    </div>
+    <div id="searchResults" class="search-results" data-empty-msg="Enter a query to search."></div>
+</section>
+
+<section id="userProfileView" class="overlay-view" hidden>
+    <div class="overlay-header">
+        <button type="button" class="back-btn" data-action="close-overlay" data-target="userProfileView">← Back</button>
+        <h2 id="userProfileTitle">Profile</h2>
+    </div>
+    <div id="userProfileContent"></div>
+</section>
+
+<section id="settingsView" class="overlay-view" hidden>
+    <div class="overlay-header">
+        <button type="button" class="back-btn" data-action="close-overlay" data-target="settingsView">← Back</button>
+        <h2>Settings</h2>
+    </div>
+    <div id="settingsContent"></div>
+</section>
+
+
+<!-- =================== BOTTOM TAB BAR =================== -->
+<nav id="tabBar" class="tab-bar">
+    <button type="button" class="tab-btn" data-tab="feed">
+        <span class="tab-icon">🏠</span>
+        <span class="tab-label">Feed</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="compose" aria-label="New post">
+        <span class="tab-icon">✏️</span>
+        <span class="tab-label">Post</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="notif">
+        <span class="tab-icon">🔔</span>
+        <span class="notif-badge" id="notifBadge" hidden></span>
+        <span class="tab-label">Alerts</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="profile">
+        <span class="tab-icon">👤</span>
+        <span class="tab-label">Profile</span>
+    </button>
+</nav>
+
+
+<!-- =================== TOASTS =================== -->
+<div id="toasts" class="toasts"></div>
+
+
+<!-- =================== MODALS =================== -->
+<dialog id="feedPickerModal" class="modal feed-picker-modal">
+    <h3>Choose feed</h3>
+    <button type="button" class="feed-pick-row" data-feed="following">
+        <span>Following</span>
+        <span class="muted">People you follow</span>
+    </button>
+    <button type="button" class="feed-pick-row" data-feed="popular">
+        <span>Popular</span>
+        <span class="muted">Most engagement now</span>
+    </button>
+    <button type="button" class="feed-pick-row" data-feed="trending-monero">
+        <span>Trending Monero</span>
+        <span class="muted">#monero notes</span>
+    </button>
+    <button type="button" class="modal-close" data-action="close-modal">Cancel</button>
+</dialog>
+
+<dialog id="repostMenuModal" class="modal post-actions-modal">
+    <button type="button" class="action-row" data-action="repost-plain">🔁 Repost</button>
+    <button type="button" class="action-row" data-action="repost-quote">💬 Quote post (add your comment)</button>
+    <button type="button" class="modal-close" data-action="close-modal">Cancel</button>
+</dialog>
+
+<dialog id="postActionsModal" class="modal post-actions-modal">
+    <button type="button" class="action-row" data-action="post-mute">🔇 Mute author</button>
+    <button type="button" class="action-row" data-action="post-copy-nevent">📋 Copy note link</button>
+    <button type="button" class="action-row" data-action="post-open-ext">↗️ Open in external client</button>
+    <button type="button" class="modal-close" data-action="close-modal">Cancel</button>
+</dialog>
+
+
+<!-- =================== APP ENTRY =================== -->
+<script type="module" src="/js/app.js"></script>
 
 </body>
 </html>

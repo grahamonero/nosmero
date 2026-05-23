@@ -55,3 +55,8 @@ nosmero-stats*
 nosmero-healthcheck*
 analytics.html
 test-client-tags.html
+
+# Mobile-mini build additions
+node_modules/
+api/node_modules/
+trending-cache.json
