@@ -150,6 +150,35 @@ textarea {
     line-height: 1;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+#headerSignInBtn.header-action {
+    font-size: var(--type-md);
+    font-weight: 600;
+    padding: var(--space-xs) var(--space-sm);
+}
+
+.login-close-btn {
+    position: absolute;
+    top: calc(var(--safe-top) + var(--space-sm));
+    right: var(--space-md);
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-full);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 18px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
 .app-main {
     position: fixed;
     top:   calc(var(--header-height) + var(--safe-top));

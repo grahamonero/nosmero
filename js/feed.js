@@ -26,6 +26,8 @@ const FEED_PAGE_SIZE  = 30;
 const FEED_INITIAL_LIMIT = 200;
 const PROFILE_FETCH_BATCH = 50;
 
+// Default feed is decided by `bootInitialFeed()` based on login state —
+// anonymous visitors land on trending-monero, logged-in users on following.
 let _currentFeed = 'following';
 let _subscription = null;
 let _pendingProfileFetches = new Set();
@@ -53,6 +55,37 @@ export function setFeedKind(kind) {
 }
 
 export function getFeedKind() { return _currentFeed; }
+
+// Boot the initial feed once after session-restore has settled. Picks
+// trending-monero for anonymous visitors so they get a populated view
+// without having to sign in first; logged-in users default to following.
+// The publicKey subscription is registered here (after the first load) so
+// it only reacts to subsequent login/logout transitions, not the boot-time
+// State.set that restoreSession triggers.
+let _bootInitialFeedRan = false;
+export function bootInitialFeed() {
+    if (_bootInitialFeedRan) return;
+    _bootInitialFeedRan = true;
+
+    const pk = State.get('publicKey');
+    const initial = pk ? 'following' : 'trending-monero';
+    _currentFeed = initial;
+    State.set('feedKind', initial);
+    const labelEl = document.getElementById('feedPickerLabel');
+    if (labelEl) labelEl.textContent = labelFor(initial);
+    reload();
+
+    // After the initial load, react to login/logout by swapping the default
+    // feed kind so the view never sits empty.
+    subscribe('publicKey', (pk) => {
+        const target = pk ? 'following' : 'trending-monero';
+        if (target !== _currentFeed) {
+            setFeedKind(target);
+        } else {
+            reload();
+        }
+    });
+}
 
 function labelFor(kind) {
     return ({
@@ -167,8 +200,11 @@ async function loadTrendingMonero() {
             if (Array.isArray(data.notes) && data.notes.length > 0) {
                 // Cache entries already have score + engagement fields.
                 // Hydrate the engagement Map from those numbers so the rendered
-                // post foot shows real counts.
+                // post foot shows real counts. Older caches (pre-2026-05-24)
+                // were built without `kind`; backfill to 1 since trending is
+                // hashtag #monero filtered.
                 for (const n of data.notes) {
+                    if (n.kind === undefined) n.kind = 1;
                     const e = n.engagement || {};
                     State.get('engagement').set(n.id, {
                         reactions: e.reactions || 0,
@@ -445,7 +481,6 @@ export function renderPost(event, opts = {}) {
                     <button type="button" class="react" data-action="post-reply"  aria-label="Reply">💬<span class="count">${escapeHtml(fmtCount(eng.replies))}</span></button>
                     <button type="button" class="react" data-action="post-repost" aria-label="Repost">🔁<span class="count">${escapeHtml(fmtCount(eng.reposts))}</span></button>
                     <button type="button" class="react" data-action="post-like"   aria-label="Like">♥<span class="count">${escapeHtml(fmtCount(eng.reactions))}</span></button>
-                    <button type="button" class="react zap${eng.zaps > 0 ? '' : ' faded'}" data-action="post-zap" aria-label="Zap">⚡<span class="count">${escapeHtml(fmtCount(eng.zaps))}</span></button>
                     ${moneroAddress
                         ? `<a class="react xmr-tip" href="monero:${escapeAttr(moneroAddress)}" aria-label="Tip XMR" title="Tip with Monero" data-action="post-tip-xmr" data-addr="${escapeAttr(moneroAddress)}">💰<span class="xmr-label">XMR</span></a>`
                         : `<button type="button" class="react xmr-tip faded" aria-label="No Monero address" title="This user hasn't set a Monero address" data-action="post-tip-xmr-none">💰<span class="xmr-label">XMR</span></button>`
@@ -627,11 +662,9 @@ export function wireFeed() {
         document.getElementById('feedPickerModal').close();
     });
 
-    // Reload when login changes
-    subscribe('publicKey', (pk) => {
-        if (pk) reload();
-        else clearFeed();
-    });
+    // (publicKey subscription is registered inside bootInitialFeed() so it
+    // only reacts to post-boot login/logout transitions — not the State.set
+    // that restoreSession triggers, which would cause a double-reload.)
 
     subscribe('followingUsers', () => {
         if (_currentFeed === 'following') reload();
@@ -671,10 +704,6 @@ export function wireFeed() {
         }
         if (action === 'post-repost') {
             openRepostMenu(lookupEvent());
-            return;
-        }
-        if (action === 'post-zap') {
-            toast('Zaps need a Lightning wallet — coming soon', 'info', 2000);
             return;
         }
         if (action === 'post-tip-xmr')      return; // <a href> handles nav

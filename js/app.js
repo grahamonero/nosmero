@@ -7,7 +7,7 @@
 
 import { State, subscribe } from './state.js';
 import { wireLoginUI, restoreSession, promptInline } from './auth.js';
-import { wireFeed } from './feed.js';
+import { wireFeed, bootInitialFeed } from './feed.js';
 import { wireThread } from './thread.js';
 import { wireCompose } from './compose.js';
 import { wireProfile } from './profile.js';
@@ -20,9 +20,16 @@ import { startEmbeddedNoteResolver } from './embedded-notes.js';
 // ----- Tab routing ------------------------------------------------
 
 const TABS = ['feed', 'compose', 'notif', 'profile'];
+const LOGIN_REQUIRED_TABS = new Set(['compose', 'notif', 'profile']);
 
 export function setTab(tab) {
     if (!TABS.includes(tab)) tab = 'feed';
+    // Anonymous users see the feed by default; tapping a login-gated tab
+    // surfaces the login overlay instead of an empty view.
+    if (LOGIN_REQUIRED_TABS.has(tab) && !State.get('publicKey')) {
+        openOverlay('loginView');
+        return;
+    }
     // Switching tabs always dismisses any open overlay — otherwise the
     // overlay covers the tab view and the tab change is invisible.
     document.querySelectorAll('.overlay-view').forEach((ov) => {
@@ -40,12 +47,21 @@ function renderHeader(tab) {
     const el = document.getElementById('headerContent');
     if (!el) return;
     if (tab === 'feed') {
+        const loggedIn = !!State.get('publicKey');
+        const signInBtn = loggedIn
+            ? ''
+            : `<button type="button" class="btn-link header-action" id="headerSignInBtn">Sign in</button>`;
         el.innerHTML = `
             <span class="header-title">Nosmero</span>
-            <button type="button" class="header-action" id="headerSearchBtn" aria-label="Search">🔍</button>
+            <span class="header-actions">
+                ${signInBtn}
+                <button type="button" class="header-action" id="headerSearchBtn" aria-label="Search">🔍</button>
+            </span>
         `;
         document.getElementById('headerSearchBtn')
             ?.addEventListener('click', () => openOverlay('searchView'));
+        document.getElementById('headerSignInBtn')
+            ?.addEventListener('click', () => openOverlay('loginView'));
     } else if (tab === 'compose') {
         el.innerHTML = `
             <button type="button" class="btn-link" id="composeCancelBtn">Cancel</button>
@@ -143,18 +159,22 @@ async function boot() {
     wireSettingsEntry();
     startEmbeddedNoteResolver();
 
-    // Subscribe to login state changes — open/close login overlay accordingly
+    // Login state changes only update the header (so the Sign-in button
+    // appears/disappears) and dismiss the login overlay on success. Logged-out
+    // users are NOT forced into the login view — they see the trending feed.
     subscribe('publicKey', (pk) => {
         if (pk) closeOverlay('loginView');
-        else    openOverlay('loginView');
+        renderHeader(document.body.className.replace(/^tab-/, '') || 'feed');
     });
 
-    // Attempt session restore if we have stored credentials
-    const restored = await restoreSession({
+    // Attempt session restore if we have stored credentials. Whether or not
+    // it succeeds, kick off the initial feed so anonymous visitors land on
+    // Trending Monero Notes instead of an empty view.
+    await restoreSession({
         promptForPin: () => promptInline('Enter your device PIN to unlock:'),
     }).catch((err) => { console.warn('restoreSession threw', err); return false; });
 
-    if (!restored) openOverlay('loginView');
+    bootInitialFeed();
 }
 
 document.addEventListener('DOMContentLoaded', () => { boot().catch(console.error); });
