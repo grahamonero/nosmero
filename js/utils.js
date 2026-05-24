@@ -746,9 +746,15 @@ async function fetchEventById(eventId, relayHints = []) {
             'wss://relay.snort.social'
         ];
 
-        // Build relay list: hints first, then user relays, then fallbacks
+        // Build relay list: hints first, then user relays, then fallbacks.
+        // Sanitize hints — bech32-decoded relay URLs can carry trailing
+        // whitespace or other junk that breaks the WebSocket constructor and
+        // can take the whole subscription with them. Trim + scheme-check.
+        const cleanHints = relayHints
+            .map((r) => typeof r === 'string' ? r.trim() : '')
+            .filter((r) => /^wss?:\/\/[^\s]+/i.test(r));
         const allRelays = [...new Set([
-            ...relayHints,
+            ...cleanHints,
             ...readRelays,
             ...fallbackRelays
         ])];
@@ -803,8 +809,14 @@ async function fetchAddressableEvent(coord, relayHints = []) {
             'wss://nos.lol',
             'wss://relay.snort.social'
         ];
+        // Sanitize hints — bech32-decoded relay URLs can carry trailing
+        // whitespace that breaks the WebSocket constructor. Same fix as
+        // fetchEventById above.
+        const cleanHints = relayHints
+            .map((r) => typeof r === 'string' ? r.trim() : '')
+            .filter((r) => /^wss?:\/\/[^\s]+/i.test(r));
         const allRelays = [...new Set([
-            ...relayHints,
+            ...cleanHints,
             ...readRelays,
             ...fallbackRelays
         ])];

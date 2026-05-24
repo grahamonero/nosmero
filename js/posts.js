@@ -597,6 +597,7 @@ export async function loadTrendingFeed(forceRefresh = false) {
                 id: note.id,
                 pubkey: note.pubkey,
                 created_at: note.created_at,
+                kind: note.kind,
                 content: note.content,
                 tags: note.tags,
                 sig: note.sig,
@@ -853,6 +854,7 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
                 id: note.id,
                 pubkey: note.pubkey,
                 created_at: note.created_at,
+                kind: note.kind,
                 content: note.content,
                 tags: note.tags,
                 sig: note.sig,
@@ -895,8 +897,12 @@ async function renderCachedTrendingFeed(cache) {
     }));
     displayedTrendingPostCount = 0;
 
-    // Cache all notes in eventCache
+    // Cache all notes in eventCache. Older cache files (pre-2026-05-24) were
+    // built without the `kind` field; without it, embedded-nevent resolution
+    // hits this cache and falls into the NIP-89 "kind undefined" fallback.
+    // Trending notes are #monero hashtag filtered → always kind 1.
     cache.notes.forEach(noteData => {
+        if (noteData.kind === undefined) noteData.kind = 1;
         if (!State.eventCache[noteData.id]) {
             State.eventCache[noteData.id] = noteData;
         }
@@ -1018,8 +1024,12 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
     }));
     displayedTrendingPostCount = 0;
 
-    // Cache all notes in eventCache
+    // Cache all notes in eventCache. Older cache files (pre-2026-05-24) were
+    // built without the `kind` field; without it, embedded-nevent resolution
+    // hits this cache and falls into the NIP-89 "kind undefined" fallback.
+    // Trending notes are #monero hashtag filtered → always kind 1.
     cache.notes.forEach(noteData => {
+        if (noteData.kind === undefined) noteData.kind = 1;
         if (!State.eventCache[noteData.id]) {
             State.eventCache[noteData.id] = noteData;
         }
