@@ -886,51 +886,89 @@ export async function toggleFollow(pubkey) {
             return;
         }
 
-        // Use the GLOBAL state, not local followingList
-        const currentFollowing = new Set(StateModule.followingUsers || []);
-        const isCurrentlyFollowing = currentFollowing.has(pubkey);
-
-        // Update following set
-        if (isCurrentlyFollowing) {
-            currentFollowing.delete(pubkey);
-        } else {
-            currentFollowing.add(pubkey);
-        }
-
-        // Update global state immediately
-        StateModule.setFollowingUsers(currentFollowing);
-
-        // Update local tracking variable
-        followingList = new Set(currentFollowing);
-
-        // Save to localStorage with timestamp
-        localStorage.setItem('following-list', JSON.stringify([...currentFollowing]));
-        localStorage.setItem('following-list-timestamp', Date.now().toString());
-
-        // Update button immediately
-        await updateFollowButton(pubkey);
-
-        // Create contact list event (kind 3) with COMPLETE list
-        const tags = [...currentFollowing].map(pk => ['p', pk]);
-
-        const event = {
-            kind: 3,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: tags,
-            content: ''
-        };
-
-        // Sign and publish event
-        const writeRelays = RelaysModule.getWriteRelays();
-        const Utils = await import('../utils.js');
-        const signedEvent = await Utils.signEvent(event);
-        await StateModule.pool.publish(writeRelays, signedEvent);
-
+        const isCurrentlyFollowing = new Set(StateModule.followingUsers || []).has(pubkey);
         const action = isCurrentlyFollowing ? 'unfollowed' : 'followed';
         const actionTitle = isCurrentlyFollowing ? 'Unfollowed' : 'Followed';
 
-        // Show toast notification
+        const [{ fetchLatest, nextCreatedAt, unreadNotice }, { parseFollows, mergeContactTags }, Utils, FeedCache] = await Promise.all([
+            import('../replaceable.js'),
+            import('../contact-list.js'),
+            import('../utils.js'),
+            import('../feed-cache.js')
+        ]);
+
+        // Kind 3 is replaceable: publishing one DESTROYS the previous version, so what goes out
+        // has to be built on the version that is live RIGHT NOW, not on whatever this tab
+        // happens to hold. Rebuilding from StateModule.followingUsers is what deleted follows
+        // made in another client since this tab loaded.
+        //
+        // Read from the union of the read and write sets: under a split configuration the list
+        // is published to the write set, and reading only the read set finds nothing.
+        const contactRelays = [...new Set([
+            ...RelaysModule.getUserDataRelays(),
+            ...RelaysModule.getWriteRelays()
+        ])].filter(Boolean);
+
+        const liveRead = await fetchLatest({
+            pool: StateModule.pool,
+            relays: contactRelays,
+            filter: { kinds: [3], authors: [StateModule.publicKey], limit: 1 },
+            timeoutMs: 8000
+        });
+
+        // Total silence: nothing told us what the live list is, so any republish would be a
+        // whole-state guess. A partial read goes ahead and names the relays that stayed quiet —
+        // see replaceable.js on why refusing there makes the feature unusable instead of safe.
+        if (!liveRead.confirmed) {
+            showErrorToast("Couldn't reach any of your relays to read your current follow list. Nothing was changed, so nothing gets overwritten — try again when you're connected.", 'Relays unreachable');
+            return;
+        }
+
+        const live = liveRead.event;
+        const follows = live ? parseFollows(live) : new Set(StateModule.followingUsers || []);
+        if (isCurrentlyFollowing) follows.delete(pubkey);
+        else follows.add(pubkey);
+
+        // Carry every prior tag through: NIP-02 `p` tags are [p, pubkey, relay, petname], and
+        // rebuilding them as bare [p, pubkey] deletes the user's petnames and relay hints. The
+        // `content` of a kind 3 is carried for the same reason — it holds the legacy relay
+        // config for clients that still write it, and blanking it is silent data loss.
+        const tags = mergeContactTags(live?.tags ?? undefined, follows);
+
+        const event = {
+            kind: 3,
+            // Strictly newer than what it replaces. A raw clock behind the live version loses,
+            // and on an equal second NIP-01 decides on event id — a coin flip that can leave
+            // the OLDER list current.
+            created_at: nextCreatedAt(live?.created_at || 0),
+            tags,
+            content: live?.content ?? ''
+        };
+
+        const writeRelays = RelaysModule.getWriteRelays();
+        const signedEvent = await Utils.signEvent(event);
+        // pool.publish returns one promise PER RELAY; awaiting the bare array waits for nothing
+        // and reports success even when every relay rejected it.
+        const results = await Promise.allSettled(StateModule.pool.publish(writeRelays, signedEvent));
+        if (!results.some(r => r.status === 'fulfilled')) {
+            showErrorToast('No relay accepted the change, so your follow list is unchanged. Try again when you are connected.', 'Follow Error');
+            return;
+        }
+
+        // Only now that a relay has taken it. Adopting what was actually published also pulls in
+        // the follows another client made that this merge just picked up.
+        StateModule.setFollowingUsers(follows);
+        followingList = new Set(follows);
+        localStorage.setItem('following-list', JSON.stringify([...follows]));
+        localStorage.setItem('following-list-timestamp', Date.now().toString());
+        FeedCache.saveCachedFollows(StateModule.publicKey, signedEvent).catch(err => {
+            console.warn('Failed to save follows to cache:', err);
+        });
+        await updateFollowButton(pubkey);
+
         showSuccessToast(`User ${action}!`, actionTitle);
+        const unread = unreadNotice(liveRead);
+        if (unread) showWarningToast(unread, 'Saved on a partial read');
 
         // If unfollowing, immediately remove their posts from the Following feed
         if (isCurrentlyFollowing) {

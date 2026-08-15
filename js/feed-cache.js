@@ -6,7 +6,12 @@
  *
  * All cached data is public Nostr data - no encryption needed.
  * Failures are non-fatal: cache is a perf optimization, never a blocker.
+ *
+ * The cache holds VERSIONS of replaceable events, so which copy it keeps is decided by the
+ * NIP-01 rules in replaceable.js, never by size, arrival order or a local-copy-wins default.
  */
+
+import { isNewerVersion } from './replaceable.js';
 
 const DB_NAME = 'nosmero-cache';
 const DB_VERSION = 1;
@@ -101,7 +106,11 @@ export async function saveCachedFollows(ownerPubkey, kind3Event) {
 
     try {
         const existing = await getCachedFollows(ownerPubkey);
-        if (existing && existing.kind3_created_at >= kind3Event.created_at) {
+        // NIP-01's rule, not `>=`: on an equal timestamp the version with the LOWEST id is the
+        // one that exists, so a same-second copy can legitimately replace what we hold. `>=`
+        // made the local row win every tie, which is the wrong half of a coin flip half the
+        // time and kept a superseded list alive.
+        if (existing && !isNewerVersion(kind3Event, { created_at: existing.kind3_created_at, id: existing.kind3_id || null })) {
             return false;
         }
 
@@ -119,6 +128,10 @@ export async function saveCachedFollows(ownerPubkey, kind3Event) {
                 owner_pubkey: ownerPubkey,
                 follows,
                 kind3_created_at: kind3Event.created_at,
+                // Carried so a same-second comparison can be settled by NIP-01's lowest-id rule
+                // instead of defaulting to whichever copy happened to be local. Rows written
+                // before this field existed simply read as null and keep the old behaviour.
+                kind3_id: kind3Event.id || null,
                 cached_at: Date.now()
             };
             const request = tx.objectStore(STORES.FOLLOWS).put(record);

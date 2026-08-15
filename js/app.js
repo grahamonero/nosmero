@@ -4,6 +4,8 @@
 
 import * as State from './state.js';
 import * as Utils from './utils.js';
+import { fetchLatest, applyUpdates, nextCreatedAt } from './replaceable.js';
+import { shouldReplaceCachedProfile } from './profile-cache-rules.js';
 import * as Crypto from './crypto.js';
 import * as Relays from './relays.js';
 import * as Nip05 from './nip05.js';
@@ -952,10 +954,27 @@ async function loadUserProfile() {
 }
 
 // Helper function to save profile to both cache and localStorage
+// Kind 0 is replaceable, so the cache holds a VERSION of the profile and which copy it keeps is
+// a NIP-01 question: newest created_at, ties on the lowest id. This assigned unconditionally, so
+// a relay answering late with a months-old copy overwrote the current one — and the next save
+// then republished that stale copy as the whole profile.
+//
+// `_synthetic` marks a placeholder built from the pubkey when nothing could be fetched. It is
+// not a version: it yields to any real profile, and never displaces one.
 function saveProfileToCache(pubkey, profile) {
+    if (!pubkey || !profile) return false;
+    if (!shouldReplaceCachedProfile(profile, State.profileCache[pubkey])) {
+        console.log('📦 Kept the cached profile; the incoming copy does not supersede it');
+        return false;
+    }
     State.profileCache[pubkey] = profile;
-    localStorage.setItem(`profile-${pubkey}`, JSON.stringify(profile));
+    try {
+        localStorage.setItem(`profile-${pubkey}`, JSON.stringify(profile));
+    } catch (e) {
+        console.warn('Profile cached in memory but not persisted:', e?.message || e);
+    }
     console.log('💾 Profile saved to cache and localStorage');
+    return true;
 }
 
 // Helper function to load profile from localStorage
@@ -1127,7 +1146,11 @@ async function loadUserProfileData() {
                         picture: null,
                         nip05: null,
                         website: null,
-                        created_at: Math.floor(Date.now() / 1000)
+                        // Not a version of anything — a stand-in drawn from the pubkey because
+                        // no relay answered. It carried `created_at: now`, which under the
+                        // version rule outranks the real profile whenever that one is older,
+                        // locking the genuine content out of the cache permanently.
+                        _synthetic: true
                     };
 
                     console.log('Created default profile:', defaultProfile);
@@ -1153,7 +1176,7 @@ async function loadUserProfileData() {
                     nip05: null,
                     website: null,
                     monero_address: localStorage.getItem('user-monero-address') || null,
-                    created_at: Math.floor(Date.now() / 1000)
+                    _synthetic: true   // see defaultProfile above
                 };
                 saveProfileToCache(State.publicKey, fallbackProfile);
                 displayProfileHeader(fallbackProfile);
@@ -4097,8 +4120,27 @@ window.handleMediaUpload = async (input, context) => {
 // ==================== EDIT PROFILE FUNCTIONALITY ====================
 
 // Show edit profile modal
+// What the Edit Profile form was SEEDED with, per field. Saving diffs against this rather than
+// against the live profile: a field the user emptied is a deletion they asked for, while a field
+// that was already blank when the form opened is one this device simply had no value for, and
+// treating the two the same is how a save deletes what it never displayed.
+let editProfileSeed = null;
+
 function showEditProfileModal() {
-    const currentProfile = State.profileCache[State.publicKey] || {};
+    const cachedProfile = State.profileCache[State.publicKey] || {};
+    // A synthetic placeholder ("User_ab12cd34", "No bio available - fetch timed out") is not the
+    // user's profile. Seeding the form from one and saving would publish the placeholder as the
+    // account's real name and bio, so the form opens empty instead — and since an empty field
+    // that was seeded empty is sent as "no change", saving from here deletes nothing.
+    const currentProfile = cachedProfile._synthetic ? {} : cachedProfile;
+    editProfileSeed = {
+        name: currentProfile.name || currentProfile.display_name || '',
+        about: currentProfile.about || '',
+        picture: currentProfile.picture || '',
+        banner: currentProfile.banner || '',
+        website: currentProfile.website || '',
+        nip05: currentProfile.nip05 || ''
+    };
     
     // Create modal HTML
     const modalHtml = `
@@ -4217,27 +4259,51 @@ async function saveProfile(event) {
             Utils.showNotification('NIP-05 validation successful!', 'success');
         }
         
-        // Create profile metadata event (kind 0)
-        const profileData = {
-            name: name || undefined,
-            about: about || undefined,
-            picture: picture || undefined,
-            banner: banner || undefined,
-            website: website || undefined,
-            nip05: nip05 || undefined
-        };
-        
-        // Remove undefined fields
-        Object.keys(profileData).forEach(key => {
-            if (profileData[key] === undefined) {
-                delete profileData[key];
-            }
+        // Kind 0 is replaceable, so this publish REPLACES the whole profile. Building it from
+        // the six fields on this form deleted every field the form does not show — lud16,
+        // display_name, lnurl, anything another client set — and `tags: []` deleted the NIP-39
+        // identity claims with them. So: read what is live, apply only what actually changed,
+        // and keep the rest.
+        const liveRead = await fetchLatest({
+            pool: State.pool,
+            relays: [...new Set([...Relays.getReadRelays(), ...Relays.getWriteRelays()])],
+            filter: { kinds: [0], authors: [State.publicKey] },
+            timeoutMs: 10000
         });
-        
+        if (!liveRead.confirmed) {
+            Utils.showNotification("Couldn't reach any of your relays to load your current profile. Nothing was saved, so nothing gets overwritten — try again when you're connected.", 'error');
+            return;
+        }
+
+        let liveContent = {};
+        if (liveRead.event) {
+            try {
+                liveContent = JSON.parse(liveRead.event.content) || {};
+            } catch (e) {
+                console.warn('Live kind 0 content could not be parsed, rebuilding from this save:', e?.message || e);
+            }
+        }
+
+        // Only fields the user actually changed. Emptying a field that was seeded with a value
+        // is a deletion (null); a field left as it was seeded is not sent at all, so whatever
+        // the live profile holds for it survives — including a value this device never saw.
+        const seed = editProfileSeed || {};
+        const updates = {};
+        for (const [key, value] of Object.entries({ name, about, picture, banner, website, nip05 })) {
+            if (editProfileSeed && value === (seed[key] || '')) continue;
+            updates[key] = value || null;
+        }
+
+        const profileData = applyUpdates(liveContent, updates);
+
         const event = {
             kind: 0,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [],
+            // Strictly newer than the version being replaced; a raw clock behind the live
+            // version loses, and an equal second is decided on event id.
+            created_at: nextCreatedAt(liveRead.event?.created_at || 0),
+            // Carried wholesale: this publisher owns no tags of its own, and kind 0 tags hold
+            // NIP-39 identity claims that an empty array would delete.
+            tags: Array.isArray(liveRead.event?.tags) ? liveRead.event.tags : [],
             content: JSON.stringify(profileData)
         };
         
@@ -4248,14 +4314,23 @@ async function saveProfile(event) {
         const writeRelays = Relays.getWriteRelays();
         console.log('Publishing profile to write relays:', writeRelays);
         
-        if (State.pool && writeRelays.length > 0) {
-            State.pool.publish(writeRelays, signedEvent);
+        // pool.publish returns one promise PER RELAY; the bare call was fire-and-forget, so a
+        // profile every relay rejected still reported success and was written to the cache as
+        // though it were live — and the next read then treated that cache entry as the newest
+        // version and republished it.
+        const results = State.pool && writeRelays.length > 0
+            ? await Promise.allSettled(State.pool.publish(writeRelays, signedEvent))
+            : [];
+        if (!results.some(r => r.status === 'fulfilled')) {
+            Utils.showNotification("No relay accepted your profile, so nothing was saved. Try again when you're connected.", 'error');
+            return;
         }
-        
+
         // Update local profile cache + localStorage with the published event's timestamp.
         // created_at lets loadUserProfileData/forceFreshProfileFetch reject older relay copies.
+        // Built on what was actually published, so fields this form never showed survive here
+        // too rather than being dropped back out of the cache on the next read.
         const updatedProfile = {
-            ...State.profileCache[State.publicKey],
             ...profileData,
             pubkey: State.publicKey,
             created_at: signedEvent.created_at
@@ -4605,13 +4680,40 @@ async function saveSettings() {
     }
 
     try {
-        const currentProfile = State.profileCache[State.publicKey] || {};
-        console.log('💾 Saving settings with current profile:', currentProfile);
-
         const lightningAddress = document.getElementById('defaultLightningAddress').value.trim();
         const bannerImage = document.getElementById('defaultBannerImage').value.trim();
         const moneroAddress = document.getElementById('defaultMoneroAddress').value.trim();
 
+        // The publish base must be the LIVE kind 0, not the in-memory cache. The cache can
+        // lag the relays (an edit made from another device or client), and re-signing stale
+        // fields with a fresh created_at silently reverts the user's newest profile
+        // everywhere — kind 0 is replaceable, newest timestamp wins.
+        let currentProfile = State.profileCache[State.publicKey] || {};
+        try {
+            const relaySet = [...new Set([...(await Relays.getReadRelays()), ...(await Relays.getWriteRelays())])];
+            const live = await Promise.race([
+                State.pool.querySync(relaySet, { kinds: [0], authors: [State.publicKey] }),
+                new Promise(resolve => setTimeout(() => resolve(null), 8000))
+            ]);
+            const newest = (live || []).reduce((a, b) => (!a || b.created_at > a.created_at) ? b : a, null);
+            if (newest && newest.created_at > (currentProfile.created_at || 0)) {
+                currentProfile = { ...JSON.parse(newest.content), pubkey: State.publicKey, created_at: newest.created_at };
+                saveProfileToCache(State.publicKey, currentProfile);
+            }
+        } catch (e) {
+            console.warn('Live profile fetch before save failed — falling back to the cached copy:', e?.message || e);
+        }
+
+        // Settings can only change the Lightning address and the banner. When neither
+        // changed, leave kind 0 alone entirely — republishing "preserved" fields under a
+        // new timestamp is exactly how a stale cache clobbers a newer profile.
+        const originalLightningAddress = currentProfile.lud16 || currentProfile.lud06 || '';
+        const originalBanner = currentProfile.banner || '';
+        const profileFieldsChanged = lightningAddress !== originalLightningAddress || bannerImage !== originalBanner;
+
+        if (!profileFieldsChanged) {
+            console.log('📤 Profile fields unchanged — skipping the kind-0 publish');
+        } else {
         // PRESERVE ALL EXISTING PROFILE FIELDS
         const profileData = {
             ...currentProfile
@@ -4621,37 +4723,18 @@ async function saveSettings() {
         delete profileData.created_at;
         delete profileData.monero_address;  // Monero address goes to NIP-78 relay, not kind 0 profile
 
-        console.log('🔍 Original Lightning address:', currentProfile.lud16 || currentProfile.lud06 || 'None');
-        console.log('🔍 New Lightning address from form:', lightningAddress || 'Empty');
-        console.log('🔍 Original Banner:', currentProfile.banner || 'None');
-        console.log('🔍 New Banner from form:', bannerImage || 'Empty');
-
-        // Only update Lightning address if user actually changed it
-        const originalLightningAddress = currentProfile.lud16 || currentProfile.lud06 || '';
-        if (lightningAddress !== originalLightningAddress) {
-            console.log('⚡ Lightning address changed, updating...');
-            if (lightningAddress) {
-                profileData.lud16 = lightningAddress;
-                delete profileData.lud06;
-            } else {
-                delete profileData.lud16;
-                delete profileData.lud06;
-            }
+        if (lightningAddress) {
+            profileData.lud16 = lightningAddress;
+            delete profileData.lud06;
         } else {
-            console.log('⚡ Lightning address unchanged, preserving existing value');
+            delete profileData.lud16;
+            delete profileData.lud06;
         }
 
-        // Only update Banner image if user actually changed it
-        const originalBanner = currentProfile.banner || '';
-        if (bannerImage !== originalBanner) {
-            console.log('🖼️ Banner image changed, updating...');
-            if (bannerImage) {
-                profileData.banner = bannerImage;
-            } else {
-                delete profileData.banner;
-            }
+        if (bannerImage) {
+            profileData.banner = bannerImage;
         } else {
-            console.log('🖼️ Banner image unchanged, preserving existing value');
+            delete profileData.banner;
         }
 
         console.log('📤 Profile data to save:', profileData);
@@ -4694,25 +4777,42 @@ async function saveSettings() {
         console.log('📤 Profile event ID:', signedProfileEvent.id);
         console.log('📤 Profile event content preview:', JSON.stringify(profileData).substring(0, 100));
 
+        // pool.publish already returns one promise PER RELAY, in relay order. Mapping over the
+        // relays and publishing to each individually wrapped every result in a one-element
+        // ARRAY, and an array is not a thenable — so Promise.allSettled resolved each one
+        // immediately, waited for no relay at all, and reported "Published to X" for every
+        // relay even when all of them refused. The inner promises were then left unhandled,
+        // which is where the "Uncaught (in promise) restricted: sign up at ..." came from for
+        // any paid relay in the write set.
         const publishResults = await Promise.allSettled(
-            writeRelays.map(relay => State.pool.publish([relay], signedProfileEvent))
+            State.pool.publish(writeRelays, signedProfileEvent)
         );
 
         publishResults.forEach((result, index) => {
             if (result.status === 'fulfilled') {
                 console.log(`✅ Published to ${writeRelays[index]}`);
             } else {
-                console.error(`❌ Failed to publish to ${writeRelays[index]}:`, result.reason);
+                console.warn(`❌ ${writeRelays[index]} rejected the profile:`, result.reason?.message || result.reason);
             }
         });
 
-        console.log('📡 Profile event published to relays');
-
-        saveProfileToCache(State.publicKey, {
-            ...profileData,
-            pubkey: State.publicKey,
-            created_at: signedProfileEvent.created_at
-        });
+        // Same rule as saveProfile: a profile no relay accepted was not saved, and must not be
+        // cached as though it were live — the next read would treat that cache entry as the
+        // newest version and republish it over whatever is actually on the relays.
+        const acceptedBy = publishResults.filter(r => r.status === 'fulfilled').length;
+        if (acceptedBy) {
+            console.log(`📡 Profile event published to ${acceptedBy}/${writeRelays.length} relays`);
+            saveProfileToCache(State.publicKey, {
+                ...profileData,
+                pubkey: State.publicKey,
+                created_at: signedProfileEvent.created_at
+            });
+        } else {
+            // Cache only what the relays actually took. The rest of this save — Monero
+            // address, zap amounts, feed prefs — is independent and still runs.
+            Utils.showNotification("No relay accepted your profile changes, so they weren't saved. Your other settings were. Try again when you're connected.", 'error');
+        }
+        } // profileFieldsChanged — kind 0 untouched on every other Settings save
 
         if (moneroAddress) {
             await saveMoneroAddressToRelays(moneroAddress);

@@ -8,6 +8,7 @@ import * as UI from './ui/index.js';
 import * as PaywallUI from './paywall-ui.js';
 import * as FeedCache from './feed-cache.js';
 import * as IpfsPins from './ipfs-pins.js';
+import { isNewerVersion } from './replaceable.js';
 
 // Constants for feed management
 export const POSTS_PER_PAGE = 10;
@@ -1547,8 +1548,13 @@ async function loadFreshFollowingList() {
         updateHomeFeedStatus(`Following ${currentFollowingList.size} users (cached ${ageMin}m ago, refreshing...)`);
         console.log(`📦 Loaded ${currentFollowingList.size} follows from cache (age ${ageMin}m)`);
 
-        // Refresh from relays in the background - don't block feed render
-        _fetchFollowsFromRelays({ background: true }).catch(err => {
+        // Refresh from relays in the background - don't block feed render. The cached version
+        // rides along as the baseline: it is the newest list we know of, so a relay answering
+        // with an older copy must not be allowed to replace it.
+        _fetchFollowsFromRelays({
+            background: true,
+            held: { created_at: cached.kind3_created_at || 0, id: cached.kind3_id || null }
+        }).catch(err => {
             console.warn('Background follow refresh failed:', err);
         });
         return;
@@ -1564,11 +1570,16 @@ async function loadFreshFollowingList() {
 
 // Fetch fresh kind 3 from relays. Updates currentFollowingList, State.followingUsers, and cache.
 // background=true means cache was already populated; don't reset state on failure.
-async function _fetchFollowsFromRelays({ background }) {
+async function _fetchFollowsFromRelays({ background, held = null }) {
     try {
         const readRelays = Relays.getUserDataRelays(); // NIP-65 relays for personal data
+        // The current version, by NIP-01's rule: newest created_at, ties on the lowest id.
+        // This used to be the LARGEST list seen across relays, which is not a version rule at
+        // all — a relay still serving the copy from before an unfollow has more entries than
+        // the one that replaced it, so it won, the unfollow came back, and the oversized list
+        // was then written to the cache and republished on the next follow, deleting whatever
+        // had been added since. Size is not evidence of recency.
         let bestEvent = null;
-        let bestSize = currentFollowingList.size;
         let foundFollowingList = false;
 
         if (!background) {
@@ -1591,20 +1602,24 @@ async function _fetchFollowsFromRelays({ background }) {
 
                         if (followingFromRelay.size > 0) {
                             foundFollowingList = true;
-                            // Track best (largest) kind 3 event seen across relays
-                            if (followingFromRelay.size > bestSize) {
-                                bestSize = followingFromRelay.size;
+                            // An empty kind 3 is a real version — someone who unfollowed their
+                            // last account has one — but it is indistinguishable here from a
+                            // parse that found no p tags, so the size>0 guard above stays.
+                            // Compared against the newest thing we know of — a relay's earlier
+                            // answer, or failing that the cached version this fetch is
+                            // refreshing. Without that second half a relay serving a superseded
+                            // copy would replace a newer cached list, which is the same
+                            // regression by another route.
+                            if (isNewerVersion(event, bestEvent || held)) {
                                 bestEvent = event;
                                 currentFollowingList = followingFromRelay;
                                 State.setFollowingUsers(followingFromRelay);
-                                console.log('✓ Better following list found:', currentFollowingList.size, 'users');
+                                console.log(`✓ Newer following list: ${currentFollowingList.size} users (created_at ${event.created_at})`);
                                 if (!background) {
                                     updateHomeFeedStatus(`Following ${currentFollowingList.size} users`);
                                 }
                             } else {
-                                console.log(`📋 Relay response: ${followingFromRelay.size} users (keeping current ${currentFollowingList.size})`);
-                                // Still capture event for cache if we don't have one yet
-                                if (!bestEvent) bestEvent = event;
+                                console.log(`📋 Older copy from a relay: ${followingFromRelay.size} users (keeping the newer ${currentFollowingList.size})`);
                             }
                         }
                     } catch (error) {
