@@ -231,8 +231,10 @@ async function sendRequest(method, params = []) {
 
             console.log(`📤 Sending NIP-46 request: ${method}`, request);
 
-            // Encrypt request using NIP-44
-            const nip44Module = await import('https://esm.sh/nostr-tools@2.17.2/nip44');
+            // Encrypt request using NIP-44, from the LOCALLY BUNDLED nostr-tools. This was
+            // fetched from esm.sh and handed `clientSecretKey` — the key this session's whole
+            // bunker link is built on — so a compromised CDN response could take it.
+            const nip44Module = window.NostrTools.nip44;
             const plaintext = JSON.stringify(request);
 
             // Get conversation key and encrypt with v2
@@ -240,7 +242,7 @@ async function sendRequest(method, params = []) {
             const ciphertext = nip44Module.v2.encrypt(plaintext, conversationKey);
 
             // Create kind 24133 event
-            const { finalizeEvent, getPublicKey } = await import('https://esm.sh/nostr-tools@2.17.2');
+            const { finalizeEvent, getPublicKey } = window.NostrTools;
             clientPubkey = getPublicKey(clientSecretKey);
 
             const event = {
@@ -316,8 +318,8 @@ async function handleResponse(event) {
             contentLength: event.content.length
         });
 
-        // Decrypt response using NIP-44
-        const nip44Module = await import('https://esm.sh/nostr-tools@2.17.2/nip44');
+        // Decrypt response using NIP-44 — bundled locally, see the encrypt path above.
+        const nip44Module = window.NostrTools.nip44;
 
         // Get conversation key and decrypt with v2
         const conversationKey = nip44Module.getConversationKey(clientSecretKey, event.pubkey);
@@ -417,8 +419,8 @@ export async function connect(bunkerURI) {
             throw new Error('Nostr pool not initialized. Please refresh the page and try again.');
         }
 
-        // Import nostr-tools utilities
-        const { generateSecretKey, getPublicKey } = await import('https://esm.sh/nostr-tools@2.17.2');
+        // Bundled locally: this generates the client secret key for the bunker session.
+        const { generateSecretKey, getPublicKey } = window.NostrTools;
 
         // Store connection info (needed for ping attempt)
         remotePubkey = bunkerInfo.pubkey;

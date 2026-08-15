@@ -253,9 +253,15 @@ export async function handleSignup(e) {
       npub = result.npub;
       console.log('[Auth UI] Account created with existing nsec');
     } else {
-      // Generate new Nostr keypair using nostr-tools
-      const { generateSecretKey, getPublicKey } = await import('https://esm.sh/nostr-tools@2.7.0/pure');
-      const { nsecEncode, npubEncode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
+      // Generate a new Nostr keypair from the LOCALLY BUNDLED nostr-tools.
+      //
+      // This used to fetch the key-generation code from esm.sh at the moment of signup, so a
+      // compromised or MITM'd CDN response could hand back a generator that produced keys the
+      // attacker could predict — and nothing about the account would ever look wrong.
+      // lib/nostr-tools.bundle.js is a classic script loaded before every module, so
+      // window.NostrTools is always available here.
+      const { generateSecretKey, getPublicKey, nip19 } = window.NostrTools;
+      const { nsecEncode, npubEncode } = nip19;
 
       const privateKeyBytes = generateSecretKey();
       const publicKeyHex = getPublicKey(privateKeyBytes);
@@ -333,9 +339,10 @@ export async function handleKeysOnlySignup(e) {
   }
 
   try {
-    // Generate new Nostr keypair using nostr-tools
-    const { generateSecretKey, getPublicKey } = await import('https://esm.sh/nostr-tools@2.7.0/pure');
-    const { nsecEncode, npubEncode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
+    // Generate a new Nostr keypair from the LOCALLY BUNDLED nostr-tools — see the note on the
+    // other generation path above. Never fetch key-generation code at runtime.
+    const { generateSecretKey, getPublicKey, nip19 } = window.NostrTools;
+    const { nsecEncode, npubEncode } = nip19;
 
     const privateKeyBytes = generateSecretKey();
     const publicKeyHex = getPublicKey(privateKeyBytes);

@@ -17,19 +17,20 @@ let scrypt = null;
 let xchacha20poly1305 = null;
 
 /**
- * Load noble crypto libraries from CDN
- * Uses esm.sh for ESM-compatible builds
+ * Load the noble crypto libraries from lib/noble/ — never over the network.
  */
 async function loadNobleLibraries() {
   if (scrypt && xchacha20poly1305) return;
 
   try {
-    // Import scrypt from @noble/hashes
-    const hashesModule = await import('https://esm.sh/@noble/hashes@1.4.0/scrypt');
+    // Vendored locally — see lib/noble/. These two turn the user's PASSWORD into their nsec,
+    // so fetching them at runtime meant a compromised or MITM'd CDN response could walk off
+    // with the decrypted key on every password login. Byte-identical to the pinned npm
+    // packages, so existing ncryptsec accounts decrypt unchanged.
+    const hashesModule = await import('/lib/noble/scrypt.js');
     scrypt = hashesModule.scrypt;
 
-    // Import XChaCha20-Poly1305 from @noble/ciphers
-    const ciphersModule = await import('https://esm.sh/@noble/ciphers@0.5.3/chacha');
+    const ciphersModule = await import('/lib/noble/chacha.js');
     xchacha20poly1305 = ciphersModule.xchacha20poly1305;
 
     // Validate that libraries loaded correctly

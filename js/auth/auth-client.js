@@ -457,9 +457,11 @@ export async function resetPasswordWithNsec({ username, nsec, newPassword }) {
   // Decode nsec → secret key bytes + derive npub. nostr-tools is loaded at
   // the same version used elsewhere in the auth flow (handleSignup) so behavior
   // matches signup/login.
-  const { decode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
-  const { getPublicKey, finalizeEvent } = await import('https://esm.sh/nostr-tools@2.7.0/pure');
-  const { npubEncode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
+  // From the LOCALLY BUNDLED nostr-tools. These three handle the user's raw secret key —
+  // decoding the nsec they just pasted and signing with it — so fetching them from a CDN at
+  // login put key theft one compromised response away.
+  const { getPublicKey, finalizeEvent, nip19 } = window.NostrTools;
+  const { decode, npubEncode } = nip19;
 
   let secretKeyBytes;
   try {
@@ -556,9 +558,11 @@ export async function signupWithNsec({ nsec, username, password }) {
     throw new Error(passwordValidation.error);
   }
 
-  const { decode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
-  const { getPublicKey, finalizeEvent } = await import('https://esm.sh/nostr-tools@2.7.0/pure');
-  const { npubEncode } = await import('https://esm.sh/nostr-tools@2.7.0/nip19');
+  // From the LOCALLY BUNDLED nostr-tools. These three handle the user's raw secret key —
+  // decoding the nsec they just pasted and signing with it — so fetching them from a CDN at
+  // login put key theft one compromised response away.
+  const { getPublicKey, finalizeEvent, nip19 } = window.NostrTools;
+  const { decode, npubEncode } = nip19;
 
   let secretKeyBytes;
   try {
