@@ -56,3 +56,7 @@ nosmero-stats*
 nosmero-healthcheck*
 analytics.html
 test-client-tags.html
+
+# Dev-only test harnesses — never deployed (deploy-to-production.sh excludes smoke-*.mjs)
+# and never committed: /var/www/html is both the public web root and the public repo.
+smoke-*.mjs
