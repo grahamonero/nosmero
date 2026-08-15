@@ -3,6 +3,8 @@
 // Solves the problem: Nostr kind 3 timestamps show last contact list update, not actual follow time
 
 import * as State from './state.js';
+import * as Utils from './utils.js';
+import { fetchLatest, nextCreatedAt } from './replaceable.js';
 
 // Nosmero relay for app-specific data (not affected by user's NIP-65 settings)
 const NOSMERO_RELAY = window.location.protocol === 'https:'
@@ -262,39 +264,43 @@ export async function saveFollowerBaseline(baseline) {
         // Always update local cache first (fast)
         setLocalBaseline(baseline);
 
+        // Kind 30078 is addressable — this publish replaces the baseline every other device
+        // shares. A read that no relay answered is not "there is no baseline", and publishing
+        // on that silence replaces a newer baseline with this device's snapshot, which shows
+        // up as a wall of already-seen followers being re-notified.
+        const live = await fetchLatest({
+            pool: State.pool,
+            relays: [NOSMERO_RELAY],
+            filter: { kinds: [30078], authors: [State.publicKey], '#d': [BASELINE_D_TAG], limit: 1 },
+            timeoutMs: 8000,
+        });
+        if (!live.confirmed) {
+            console.warn('Follower baseline: relay did not answer — keeping the local copy, not publishing');
+            return false;
+        }
+
         // Encrypt the baseline
         const encryptedContent = await encryptBaseline(baseline);
 
-        // Create the kind 30078 event
-        const event = {
+        // Signed through the shared helper so NIP-46 bunker (Amber) accounts work — the
+        // hand-rolled branch here only handled extensions and in-memory keys, so a bunker user's
+        // baseline never saved.
+        const signedEvent = await Utils.signEvent({
             kind: 30078,
-            created_at: Math.floor(Date.now() / 1000),
+            created_at: nextCreatedAt(live.event?.created_at),
             tags: [['d', BASELINE_D_TAG]],
             content: encryptedContent
-        };
+        });
 
-        // Sign the event
-        let signedEvent;
-        if (State.getPrivateKeyForSigning() === 'extension' || State.getPrivateKeyForSigning() === 'nsec-app') {
-            // Use browser extension for signing
-            if (!window.nostr) {
-                throw new Error('Browser extension not available for signing');
-            }
-            signedEvent = await window.nostr.signEvent(event);
-        } else {
-            // Use local private key
-            const { finalizeEvent } = window.NostrTools;
-            signedEvent = finalizeEvent(event, State.getPrivateKeyForSigning());
+        // pool.publish returns one promise PER RELAY, so the old `await` on the bare array
+        // resolved immediately and the try/catch around it could never see a rejection —
+        // "saved successfully" was printed whether or not the relay took it.
+        const results = await Promise.allSettled(State.pool.publish([NOSMERO_RELAY], signedEvent));
+        if (!results.some(r => r.status === 'fulfilled')) {
+            console.error('Failed to publish follower baseline:', results[0]?.reason?.message || results[0]?.reason);
+            return false;
         }
-
-        // Publish to Nosmero relay
-        try {
-            await State.pool.publish([NOSMERO_RELAY], signedEvent);
-            console.log('Follower baseline saved successfully');
-        } catch (publishError) {
-            console.error('Failed to publish follower baseline to relay:', publishError);
-            throw publishError;
-        }
+        console.log('Follower baseline saved successfully');
 
         return true;
 

@@ -1,6 +1,8 @@
 // ==================== APP STATE MANAGEMENT ====================
 // Core application state variables that persist throughout the session
 
+import { shouldReplaceCachedProfile } from './profile-cache-rules.js';
+
 // WebSocket connection pool for connecting to multiple Nostr relays
 export let pool;
 
@@ -20,6 +22,26 @@ export let relays = [];  // Array of active relay URLs
 
 // Caching for improved performance
 export let profileCache = {};  // Cached user profiles (metadata) indexed by public key
+
+/**
+ * Write a profile into the cache only if it supersedes what is already held.
+ *
+ * Kind 0 is replaceable, so the cache holds a VERSION and which copy it keeps is a NIP-01
+ * question: newest created_at wins, ties on the lowest event id. Every display path used to
+ * assign here unconditionally — a feed, a search result, a DM header — so whichever relay
+ * answered last won, and a months-old copy routinely overwrote the current profile. That is
+ * not just a display bug: the profile save paths read this cache, so a stale entry could be
+ * re-signed and published as the user's whole profile.
+ *
+ * Pass the kind-0 event's `created_at` (and `id` where available) on the profile object.
+ * A profile with no created_at is treated as version 0 and will not displace a dated one.
+ */
+export function cacheProfile(pubkey, profile) {
+    if (!pubkey || !profile) return false;
+    if (!shouldReplaceCachedProfile(profile, profileCache[pubkey])) return false;
+    profileCache[pubkey] = profile;
+    return true;
+}
 export let eventCache = {};    // Cached Nostr events indexed by event ID
 export let likedPosts = new Set();  // Track posts liked by current user
 export let repostedPosts = new Set();  // Track posts reposted by current user

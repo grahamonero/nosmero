@@ -1713,6 +1713,7 @@ export async function fetchUserMuteList(pubkey) {
         const readRelays = Relays.getActiveRelays(); // Use active relays to fetch other users' data
 
         const mutedPubkeys = new Set();
+        let bestMuteEvent = null;
 
         await new Promise((resolve) => {
             const sub = State.pool.subscribeMany(readRelays, [
@@ -1720,6 +1721,13 @@ export async function fetchUserMuteList(pubkey) {
             ], {
                 onevent(event) {
                     try {
+                        // Kind 10000 is replaceable, so the copies relays return are VERSIONS
+                        // of one list — take the newest, never the union. Adding every copy's
+                        // entries together meant a relay still holding the pre-unmute list
+                        // re-added the pubkey the user had just unmuted, so unmutes never took.
+                        if (!isNewerVersion(event, bestMuteEvent)) return;
+                        bestMuteEvent = event;
+                        mutedPubkeys.clear();
                         event.tags.forEach(tag => {
                             if (tag[0] === 'p' && tag[1]) {
                                 mutedPubkeys.add(tag[1]);
@@ -2328,11 +2336,11 @@ async function renderFeedFromCache() {
         for (const pubkey of Object.keys(cachedProfiles)) {
             const entry = cachedProfiles[pubkey];
             if (entry?.profile) {
-                State.profileCache[pubkey] = {
+                State.cacheProfile(pubkey, {
                     ...entry.profile,
                     pubkey,
                     created_at: entry.kind0_created_at || 0
-                };
+                });
                 profileHits++;
             }
         }
@@ -4242,11 +4250,11 @@ export async function fetchProfiles(pubkeys) {
         for (const pubkey of Object.keys(cachedProfiles)) {
             const entry = cachedProfiles[pubkey];
             if (entry && entry.profile) {
-                State.profileCache[pubkey] = {
+                State.cacheProfile(pubkey, {
                     ...entry.profile,
                     pubkey,
                     created_at: entry.kind0_created_at || 0
-                };
+                });
                 cacheHits++;
             }
         }
@@ -4301,11 +4309,12 @@ export async function fetchProfiles(pubkeys) {
                         const profile = JSON.parse(event.content);
                         const hasLightning = profile.lud16 || profile.lud06;
 
-                        State.profileCache[event.pubkey] = {
+                        State.cacheProfile(event.pubkey, {
                             ...profile,
                             pubkey: event.pubkey,
-                            created_at: event.created_at
-                        };
+                            created_at: event.created_at,
+                            id: event.id
+                        });
 
                         // Queue for batch write to IndexedDB cache
                         freshProfilesForCache.push({
@@ -4377,6 +4386,7 @@ async function fetchMissingProfilesViaNIP65(missingPubkeys) {
         // NOTE: nostr.band removed Dec 28, 2025 - SSL cert expired Dec 22
         const majorRelays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
         const userRelayLists = {};
+        const newestRelayListByAuthor = new Map();
 
         await new Promise((resolve) => {
             const sub = State.pool.subscribeMany(majorRelays, [
@@ -4386,7 +4396,12 @@ async function fetchMissingProfilesViaNIP65(missingPubkeys) {
                 }
             ], {
                 onevent(event) {
-                    // Parse relay list from tags
+                    // Kind 10002 is replaceable, so these are versions of one announcement per
+                    // author. Whichever relay answered last used to win, which meant fetching
+                    // a user's notes from relays they had already moved away from.
+                    if (!isNewerVersion(event, newestRelayListByAuthor.get(event.pubkey))) return;
+                    newestRelayListByAuthor.set(event.pubkey, event);
+
                     const relays = event.tags
                         .filter(tag => tag[0] === 'r')
                         .map(tag => tag[1])
@@ -4427,11 +4442,12 @@ async function fetchMissingProfilesViaNIP65(missingPubkeys) {
                             onevent(event) {
                                 try {
                                     const profile = JSON.parse(event.content);
-                                    State.profileCache[event.pubkey] = {
+                                    State.cacheProfile(event.pubkey, {
                                         ...profile,
                                         pubkey: event.pubkey,
-                                        created_at: event.created_at
-                                    };
+                                        created_at: event.created_at,
+                                        id: event.id
+                                    });
                                     FeedCache.saveCachedProfiles([{
                                         pubkey: event.pubkey,
                                         profile,

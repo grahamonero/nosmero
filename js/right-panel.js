@@ -1070,9 +1070,17 @@ const RightPanel = {
                 since,
                 limit: LIMITS.FOLLOWERS_LIMIT
             });
-            // Count unique pubkeys who added user to their follow list
-            const uniqueFollowers = new Set(events.map(e => e.pubkey));
-            return uniqueFollowers.size;
+            // Count unique authors whose CURRENT contact list names this user. Relays return
+            // several versions of the same author's list, so counting distinct authors of any
+            // returned event counted people who have since unfollowed — and counted an author
+            // once per relay that still held an old copy.
+            const { isNewerVersion } = await import('./replaceable.js');
+            const newestByAuthor = new Map();
+            for (const e of (events || [])) {
+                if (isNewerVersion(e, newestByAuthor.get(e.pubkey))) newestByAuthor.set(e.pubkey, e);
+            }
+            return [...newestByAuthor.values()]
+                .filter(e => (e.tags || []).some(t => t[0] === 'p' && t[1] === pubkey)).length;
         } catch (e) {
             console.error('Error fetching followers:', e);
             return -1; // Return -1 to indicate error

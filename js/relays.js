@@ -226,9 +226,12 @@ async function fetchOtherUserRelayList(pubkey) {
         });
 
         if (events && events.length > 0) {
-            // Get the most recent relay list
-            const event = events.sort((a, b) => b.created_at - a.created_at)[0];
-            return parseRelayList(event);
+            // Kind 10002 is replaceable: NIP-01 picks the newest created_at and breaks a tie
+            // on the lowest event id. The hand-rolled sort had no tie-break, so two copies
+            // written in the same second resolved by whatever order the relay returned them.
+            const { pickNewest } = await import('./replaceable.js');
+            const event = pickNewest(events);
+            if (event) return parseRelayList(event);
         }
     } catch (error) {
         console.error(`Error fetching relay list for ${pubkey.slice(0, 8)}:`, error);
@@ -274,9 +277,10 @@ export async function prefetchRelayLists(pubkeys) {
         });
 
         // Group by pubkey and take most recent
+        const { isNewerVersion } = await import('./replaceable.js');
         const byPubkey = {};
         events.forEach(event => {
-            if (!byPubkey[event.pubkey] || event.created_at > byPubkey[event.pubkey].created_at) {
+            if (isNewerVersion(event, byPubkey[event.pubkey])) {
                 byPubkey[event.pubkey] = event;
             }
         });
@@ -367,9 +371,9 @@ export async function fetchUserRelayList(pubkey) {
         });
 
         if (relayListEvents.length > 0) {
-            // Get the most recent relay list event
-            const event = relayListEvents.sort((a, b) => b.created_at - a.created_at)[0];
-            return parseRelayList(event);
+            const { pickNewest } = await import('./replaceable.js');
+            const event = pickNewest(relayListEvents);
+            if (event) return parseRelayList(event);
         }
         return null;
     } catch (error) {
@@ -467,25 +471,58 @@ export async function publishRelayList(readRelays, writeRelays) {
 
     console.log('📋 Generated tags:', tags);
 
-    const event = {
-        kind: 10002,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: tags,
-        content: ''
-    };
-
-    console.log('📨 Event to publish:', event);
-
     try {
-        const Utils = await import('./utils.js');
-        const signedEvent = await Utils.signEvent(event);
-        console.log('✍️ Signed event:', signedEvent);
+        const { fetchLatest, nextCreatedAt, preserveUnmanagedTags, unreadNotice } = await import('./replaceable.js');
+        const publishRelays = [...new Set([...getReadRelays(), ...getWriteRelays(), ...getActiveRelays()])].filter(Boolean);
 
-        const publishRelays = getActiveRelays();
+        // Kind 10002 is replaceable and it is what every outbox-model client uses to decide
+        // where to read and write for this account — so replacing it blind with this device's
+        // idea of the list is how a relay added on another device stops being used network-wide.
+        const live = await fetchLatest({
+            pool: State.pool,
+            relays: publishRelays,
+            filter: { kinds: [10002], authors: [State.publicKey], limit: 1 },
+            timeoutMs: 8000,
+        });
+        if (!live.confirmed) {
+            console.warn('❌ No relay answered for the live NIP-65 announcement — not publishing');
+            return false;
+        }
+        const notice = unreadNotice(live);
+        if (notice) console.warn(`[NIP-65] ${notice}`);
+
+        // The announced set is the user's explicit choice and stays authoritative, so removing
+        // a relay here really removes it. But say plainly what is being dropped: silently
+        // un-announcing a relay another client added is the failure worth seeing.
+        const liveRelays = (live.event?.tags || []).filter(t => Array.isArray(t) && t[0] === 'r' && t[1]).map(t => t[1]);
+        const dropping = liveRelays.filter(url => !announced.has(url));
+        if (dropping.length) {
+            console.warn('[NIP-65] these relays are on your live announcement and are being removed by this save:', dropping);
+        }
+
+        const Utils = await import('./utils.js');
+        const signedEvent = await Utils.signEvent({
+            kind: 10002,
+            // Strictly newer than the version being replaced; on an equal timestamp NIP-01
+            // resolves the tie on event id and the older announcement can stay current.
+            created_at: nextCreatedAt(live.event?.created_at),
+            // `r` is ours; anything else on the live announcement belongs to whoever wrote it.
+            tags: preserveUnmanagedTags(live.event?.tags, tags, ['r']),
+            content: ''
+        });
+
         console.log('📡 Publishing to relays:', publishRelays);
 
-        await State.pool.publish(publishRelays, signedEvent);
-        console.log('✅ NIP-65 relay list published successfully');
+        // pool.publish returns one promise PER RELAY; awaiting the bare array waited for
+        // nothing and returned true even when every relay had refused the announcement.
+        const results = await Promise.allSettled(State.pool.publish(publishRelays, signedEvent));
+        const accepted = results.filter(r => r.status === 'fulfilled').length;
+        if (!accepted) {
+            results.forEach((r, i) => console.warn(`[NIP-65] ${publishRelays[i]} rejected:`, r.reason?.message || r.reason));
+            console.error('❌ No relay accepted the NIP-65 relay list');
+            return false;
+        }
+        console.log(`✅ NIP-65 relay list published to ${accepted}/${publishRelays.length} relays`);
         return true;
     } catch (error) {
         console.error('❌ Failed to publish relay list:', error);

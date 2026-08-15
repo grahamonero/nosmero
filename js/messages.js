@@ -154,12 +154,16 @@ async function fetchConversationProfiles(pubkeys) {
             onevent(event) {
                 try {
                     const profile = JSON.parse(event.content);
-                    State.profileCache[event.pubkey] = {
+                    // Version-checked: relays disagree, and the last one to answer used to win
+                    // here regardless of how old its copy was.
+                    State.cacheProfile(event.pubkey, {
                         ...profile,
                         pubkey: event.pubkey,
                         name: profile.name || profile.display_name || 'Unknown',
-                        picture: profile.picture
-                    };
+                        picture: profile.picture,
+                        created_at: event.created_at,
+                        id: event.id
+                    });
                     
                     // Update conversation profile if it exists
                     if (conversations[event.pubkey]) {
@@ -1394,12 +1398,16 @@ async function fetchNotificationProfilesIndividual(pubkeys, notifications) {
             onevent(event) {
                 try {
                     const profile = JSON.parse(event.content);
-                    State.profileCache[event.pubkey] = {
+                    // Version-checked: relays disagree, and the last one to answer used to win
+                    // here regardless of how old its copy was.
+                    State.cacheProfile(event.pubkey, {
                         ...profile,
                         pubkey: event.pubkey,
                         name: profile.name || profile.display_name || 'Unknown',
-                        picture: profile.picture
-                    };
+                        picture: profile.picture,
+                        created_at: event.created_at,
+                        id: event.id
+                    });
 
                     // Update profiles in individual notifications
                     notifications.forEach(notification => {

@@ -4,7 +4,7 @@
 
 import * as State from './state.js';
 import * as Utils from './utils.js';
-import { fetchLatest, applyUpdates, nextCreatedAt } from './replaceable.js';
+import { fetchLatest, applyUpdates, nextCreatedAt, preserveUnmanagedTags, unreadNotice, isNewerVersion } from './replaceable.js';
 import { shouldReplaceCachedProfile } from './profile-cache-rules.js';
 import * as Crypto from './crypto.js';
 import * as Relays from './relays.js';
@@ -59,6 +59,81 @@ const NIP78_STORAGE_RELAYS = [
 ];
 
 console.log('📡 NIP-78 relay configured:', NIP78_STORAGE_RELAYS);
+
+/**
+ * Change named fields on a NIP-78 app-data blob (kind 30078) without disturbing the rest.
+ *
+ * Kind 30078 is addressable, so publishing one replaces everything at that (pubkey, d)
+ * address. Each of these settings used to rebuild the entire blob from local values, which
+ * meant one feature's save silently reverted another's: `nosmero:payment` holds the Monero
+ * address AND both zap amounts, so rotating a subaddress republished the zap amounts from
+ * localStorage — resetting them to the 0.001/1000 defaults on any device that had not loaded
+ * them — and saving a zap amount republished `monero_address` from a cache that could be
+ * empty, blanking a live tip address.
+ *
+ * Only the keys in `updates` change; every other key on the live blob is carried forward, and
+ * so is every tag this writer does not own.
+ */
+async function saveAppData(dTag, updates, typeTag) {
+    if (!State.publicKey || !State.getPrivateKeyForSigning()) {
+        throw new Error('User not authenticated');
+    }
+
+    const live = await fetchLatest({
+        pool: State.pool,
+        relays: NIP78_STORAGE_RELAYS,
+        filter: { kinds: [30078], authors: [State.publicKey], '#d': [dTag], limit: 1 },
+        timeoutMs: 8000,
+    });
+
+    // Silence is not "you have no settings". Publishing on it replaces the live blob with
+    // whatever this tab happens to hold.
+    if (!live.confirmed) {
+        throw new Error(`Couldn't reach the settings relay to read your current ${dTag}. Nothing was changed, so nothing gets overwritten.`);
+    }
+    const notice = unreadNotice(live);
+    if (notice) console.warn(`[NIP-78 ${dTag}] ${notice}`);
+
+    let liveContent = {};
+    if (live.event?.content) {
+        try {
+            const parsed = JSON.parse(live.event.content);
+            if (parsed && typeof parsed === 'object') liveContent = parsed;
+            else throw new Error('not an object');
+        } catch (e) {
+            // Writing over a blob we cannot read would delete whatever it holds.
+            throw new Error(`Your saved ${dTag} could not be read, so it was left alone rather than replaced.`);
+        }
+    }
+
+    const content = applyUpdates(liveContent, {
+        ...updates,
+        updated_at: Math.floor(Date.now() / 1000),
+        app: 'nosmero',
+    });
+
+    const managed = typeTag ? ['d', 'type'] : ['d'];
+    const ours = typeTag ? [['d', dTag], ['type', typeTag]] : [['d', dTag]];
+    const tags = preserveUnmanagedTags(live.event?.tags, ours, managed);
+
+    const signedEvent = await Utils.signEvent({
+        kind: 30078,
+        created_at: nextCreatedAt(live.event?.created_at),
+        tags,
+        content: JSON.stringify(content),
+        pubkey: State.publicKey,
+    });
+
+    // pool.publish returns one promise PER RELAY; awaiting the bare array waited for nothing
+    // and reported success even when the relay refused the event.
+    const results = await Promise.allSettled(State.pool.publish(NIP78_STORAGE_RELAYS, signedEvent));
+    if (!results.some(r => r.status === 'fulfilled')) {
+        results.forEach((r, i) => console.warn(`[NIP-78 ${dTag}] ${NIP78_STORAGE_RELAYS[i]} rejected:`, r.reason?.message || r.reason));
+        throw new Error(`No relay accepted your ${dTag} settings, so they were not saved.`);
+    }
+    console.log(`✅ NIP-78 ${dTag} saved (${Object.keys(updates).join(', ')})`);
+    return signedEvent;
+}
 
 // ==================== APPLICATION INITIALIZATION ====================
 
@@ -2759,47 +2834,57 @@ async function saveLightningAddressToProfile(lightningAddress) {
         throw new Error('User not logged in');
     }
     
-    // Get current profile data from cache
-    const currentProfile = State.profileCache[State.publicKey] || {};
-    
-    // Create updated profile with lightning address
-    const profileData = {
-        name: currentProfile.name || undefined,
-        about: currentProfile.about || undefined,
-        picture: currentProfile.picture || undefined,
-        website: currentProfile.website || undefined,
-        nip05: currentProfile.nip05 || undefined,
-        lud16: lightningAddress || undefined  // Lightning address as lud16 field
-    };
-    
-    // Remove undefined fields
-    Object.keys(profileData).forEach(key => {
-        if (profileData[key] === undefined) {
-            delete profileData[key];
+    // Kind 0 is replaceable, so this publish REPLACES the whole profile. It used to be built
+    // from six fields off the local cache, which deleted display_name, banner, lud06, bot and
+    // every custom field — and `tags: []` deleted the NIP-39 identity claims with them. Only
+    // lud16 changes here, so read what is live and apply just that.
+    const live = await fetchLatest({
+        pool: State.pool,
+        relays: [...new Set([...Relays.getReadRelays(), ...Relays.getWriteRelays()])],
+        filter: { kinds: [0], authors: [State.publicKey] },
+        timeoutMs: 10000,
+    });
+    if (!live.confirmed) {
+        throw new Error("Couldn't reach any of your relays to read your current profile. Nothing was changed, so nothing gets overwritten.");
+    }
+    const notice = unreadNotice(live);
+    if (notice) console.warn(`[lightning address] ${notice}`);
+
+    let liveContent = {};
+    if (live.event?.content) {
+        try {
+            const parsed = JSON.parse(live.event.content);
+            if (parsed && typeof parsed === 'object') liveContent = parsed;
+            else throw new Error('not an object');
+        } catch (e) {
+            throw new Error('Your live profile could not be read, so it was left alone rather than replaced.');
         }
+    }
+
+    // An empty address is a deletion of the field, not a blank string on the profile.
+    const profileData = applyUpdates(liveContent, { lud16: lightningAddress || null });
+
+    const signedEvent = await Utils.signEvent({
+        kind: 0,
+        created_at: nextCreatedAt(live.event?.created_at),
+        tags: live.event?.tags || [],
+        content: JSON.stringify(profileData),
     });
 
-    // Create NIP-01 profile event (kind 0)
-    const event = {
-        kind: 0,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [],
-        content: JSON.stringify(profileData)
-    };
-    
     const writeRelays = Relays.getWriteRelays();
+    const results = await Promise.allSettled(State.pool.publish(writeRelays, signedEvent));
+    if (!results.some(r => r.status === 'fulfilled')) {
+        results.forEach((r, i) => console.warn(`[lightning address] ${writeRelays[i]} rejected:`, r.reason?.message || r.reason));
+        throw new Error('No relay accepted your profile, so the Lightning address was not saved.');
+    }
 
-    // Sign and publish event
-    const signedEvent = await Utils.signEvent(event);
-    await State.pool.publish(writeRelays, signedEvent);
-
-    // Update local cache
-    const updatedProfile = {
-        ...currentProfile,
+    // Cached only now, on proof the relays took it — a cache advanced ahead of the relays is
+    // what the next read republishes over the top of the real profile.
+    State.profileCache[State.publicKey] = {
         ...profileData,
-        pubkey: State.publicKey
+        pubkey: State.publicKey,
+        created_at: signedEvent.created_at,
     };
-    State.profileCache[State.publicKey] = updatedProfile;
 }
 
 // Save Monero address to relays using NIP-78 (application-specific data)
@@ -2809,45 +2894,11 @@ async function saveMoneroAddressToRelays(moneroAddress) {
     }
 
     console.log('Saving Monero address to relays using NIP-78...', moneroAddress);
-    console.log('Current public key:', State.publicKey);
-    console.log('Current private key type:', typeof State.getPrivateKeyForSigning());
 
-    // Get current zap amounts from localStorage to preserve them
-    const btcZapAmount = localStorage.getItem('default-btc-zap-amount') || '1000';
-    const xmrZapAmount = localStorage.getItem('default-zap-amount') || '0.001';
-
-    // Create NIP-78 event (kind 30078 - application-specific data)
-    // Store ALL payment-related settings in one event
-    const appDataEvent = {
-        kind: 30078,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-            ["d", "nosmero:payment"], // Application identifier for Nosmero payment data
-            ["type", "payment_settings"] // Now includes all payment settings
-        ],
-        content: JSON.stringify({
-            monero_address: moneroAddress,
-            btc_zap_amount: btcZapAmount,
-            xmr_zap_amount: xmrZapAmount,
-            updated_at: Math.floor(Date.now() / 1000),
-            app: "nosmero",
-            version: "2.0"
-        }),
-        pubkey: State.publicKey
-    };
-    
-    console.log('Created NIP-78 event:', appDataEvent);
-    
-    let signedEvent;
-    // Sign the event using helper function
-    signedEvent = await Utils.signEvent(appDataEvent);
-    console.log('Signed event:', signedEvent);
-
-    // Publish to private NIP-78 relay only
-    console.log('Publishing to private NIP-78 relay:', NIP78_STORAGE_RELAYS);
-
-    const publishResults = await State.pool.publish(NIP78_STORAGE_RELAYS, signedEvent);
-    console.log('Publish results:', publishResults);
+    // Only the address changes. The zap amounts share this address and used to be republished
+    // from localStorage here — on a device that had never loaded them, that reset the user's
+    // amounts to the defaults every time their subaddress rotated.
+    await saveAppData('nosmero:payment', { monero_address: moneroAddress }, 'payment_settings');
 
     // Update local profile cache with new Monero address
     if (State.profileCache[State.publicKey]) {
@@ -2937,39 +2988,13 @@ async function saveZapSettingsToRelays(btcAmount, xmrAmount) {
 
     console.log('💾 Saving zap settings to relays using NIP-78...', { btc: btcAmount, xmr: xmrAmount });
 
-    // Get current Monero address to preserve it
-    const moneroAddress = await getUserMoneroAddress(State.publicKey) || '';
-
-    // Create NIP-78 event (kind 30078 - application-specific data)
-    // Store ALL payment-related settings in one event
-    const paymentSettingsEvent = {
-        kind: 30078,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-            ["d", "nosmero:payment"], // Application identifier for Nosmero payment data
-            ["type", "payment_settings"] // Now includes all payment settings
-        ],
-        content: JSON.stringify({
-            monero_address: moneroAddress,
-            btc_zap_amount: btcAmount,
-            xmr_zap_amount: xmrAmount,
-            updated_at: Math.floor(Date.now() / 1000),
-            app: "nosmero",
-            version: "2.0"
-        }),
-        pubkey: State.publicKey
-    };
-
-    console.log('📤 Created payment settings NIP-78 event:', paymentSettingsEvent);
-
-    // Sign the event
-    const signedEvent = await Utils.signEvent(paymentSettingsEvent);
-    console.log('✍️ Signed payment settings event:', signedEvent);
-
-    // Publish to private NIP-78 relay
-    console.log('📡 Publishing payment settings to NIP-78 relay:', NIP78_STORAGE_RELAYS);
-    const publishResults = await State.pool.publish(NIP78_STORAGE_RELAYS, signedEvent);
-    console.log('✅ Payment settings publish results:', publishResults);
+    // Only the amounts change. This used to re-read the Monero address and republish it as
+    // part of the same blob — and getUserMoneroAddress falling back to '' meant saving a zap
+    // amount could blank a live tip address.
+    await saveAppData('nosmero:payment', {
+        btc_zap_amount: btcAmount,
+        xmr_zap_amount: xmrAmount,
+    }, 'payment_settings');
 
     console.log('✅ Payment settings saved to relays using NIP-78');
 }
@@ -3054,27 +3079,15 @@ async function saveRelayListToRelays() {
         announced: (relayList.announced || []).length
     });
 
-    const event = {
-        kind: 30078,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-            ["d", "nosmero:relay-list"],
-            ["type", "relay_list"]
-        ],
-        content: JSON.stringify({
-            read: relayList.read,
-            write: relayList.write,
-            announced: relayList.announced || [],
-            updated_at: Math.floor(Date.now() / 1000),
-            app: "nosmero",
-            version: "1.0"
-        }),
-        pubkey: State.publicKey
-    };
-
-    const signedEvent = await Utils.signEvent(event);
-    const publishResults = await State.pool.publish(NIP78_STORAGE_RELAYS, signedEvent);
-    console.log('✅ Relay list saved to NIP-78 relay', publishResults);
+    // The relay list is genuinely whole-state — the user edited it, and all three arrays are
+    // what they now want. saveAppData still reads the live blob first so a save is refused
+    // when the relay is unreachable rather than publishing this tab's copy blind, keeps any
+    // field a later version of Nosmero adds, and reports honestly when the publish is refused.
+    await saveAppData('nosmero:relay-list', {
+        read: relayList.read,
+        write: relayList.write,
+        announced: relayList.announced || [],
+    }, 'relay_list');
 }
 
 async function loadRelayListFromRelays() {
@@ -3135,25 +3148,10 @@ async function saveFeedPrefsToRelays(prefs) {
         throw new Error('User not authenticated');
     }
 
-    const event = {
-        kind: 30078,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-            ["d", "nosmero:feed-prefs"],
-            ["type", "feed_preferences"]
-        ],
-        content: JSON.stringify({
-            ...prefs,
-            updated_at: Math.floor(Date.now() / 1000),
-            app: "nosmero",
-            version: "1.0"
-        }),
-        pubkey: State.publicKey
-    };
-
-    const signedEvent = await Utils.signEvent(event);
-    const publishResults = await State.pool.publish(NIP78_STORAGE_RELAYS, signedEvent);
-    console.log('✅ Feed prefs saved to NIP-78 relay', publishResults);
+    // Only the preferences passed in change. The blob is shared by every feed preference, so
+    // rebuilding it from one caller's object dropped the ones that caller knew nothing about
+    // — which is what happens as soon as a second preference is added here.
+    await saveAppData('nosmero:feed-prefs', { ...prefs }, 'feed_preferences');
 }
 
 async function loadFeedPrefsFromRelays() {
@@ -3337,13 +3335,18 @@ async function loadFollowCounts(pubkey) {
 async function getFollowingCount(pubkey) {
     return new Promise((resolve) => {
         let following = [];
-        
+        let bestEvent = null;
+
         const sub = State.pool.subscribeMany(Relays.getUserDataRelays(), [
             { kinds: [3], authors: [pubkey], limit: 1 }
         ], {
             onevent(event) {
                 try {
-                    // Parse contact list (kind 3 event)
+                    // Kind 3 is replaceable: the copies relays return are versions of one
+                    // list. Taking whichever arrived last showed a count from whichever relay
+                    // happened to be slowest — routinely a pre-unfollow snapshot.
+                    if (!isNewerVersion(event, bestEvent)) return;
+                    bestEvent = event;
                     following = event.tags.filter(tag => tag[0] === 'p' && tag[1]).map(tag => tag[1]);
                 } catch (error) {
                     console.error('Error parsing contact list:', error);
@@ -3369,7 +3372,13 @@ async function getFollowersCount(pubkey) {
     const socialGraphRelays = Relays.SOCIAL_GRAPH_RELAYS;
 
     return new Promise((resolve) => {
-        const followers = new Set();
+        // Relays return several VERSIONS of the same author's contact list. Counting a
+        // follower the moment any version mentions the target meant someone who had since
+        // unfollowed still counted forever — the number could only ever go up. Keep the
+        // newest list per author and ask that one.
+        const newestByAuthor = new Map();
+        const countFollowers = () => [...newestByAuthor.values()]
+            .filter(e => e.tags.some(tag => tag[0] === 'p' && tag[1] === pubkey)).length;
         let processedEvents = 0;
         const maxEvents = 200; // Match getFollowersList limit
 
@@ -3378,19 +3387,14 @@ async function getFollowersCount(pubkey) {
         ], {
             onevent(event) {
                 try {
-                    // Check if this user follows the target pubkey
-                    const followsPubkey = event.tags.some(tag => 
-                        tag[0] === 'p' && tag[1] === pubkey
-                    );
-                    
-                    if (followsPubkey) {
-                        followers.add(event.pubkey);
+                    if (isNewerVersion(event, newestByAuthor.get(event.pubkey))) {
+                        newestByAuthor.set(event.pubkey, event);
                     }
-                    
+
                     processedEvents++;
                     if (processedEvents >= maxEvents) {
                         sub.close();
-                        resolve(followers.size);
+                        resolve(countFollowers());
                     }
                 } catch (error) {
                     console.error('Error processing follower event:', error);
@@ -3398,14 +3402,14 @@ async function getFollowersCount(pubkey) {
             },
             oneose: () => {
                 sub.close();
-                resolve(followers.size);
+                resolve(countFollowers());
             }
         });
-        
+
         // Timeout after 5 seconds
         setTimeout(() => {
             sub.close();
-            resolve(followers.size);
+            resolve(countFollowers());
         }, 5000);
     });
 }
@@ -3591,6 +3595,7 @@ async function getFollowingList(pubkey) {
 
     return new Promise((resolve) => {
         let following = [];
+        let bestEvent = null;
         let completedRelays = 0;
         let isResolved = false;
 
@@ -3607,14 +3612,16 @@ async function getFollowingList(pubkey) {
         ], {
             onevent(event) {
                 try {
-                    // Take the most recent/complete following list
-                    const newFollowing = event.tags
+                    // The LONGEST list used to win here, which is not a version rule at all:
+                    // an unfollow makes the list shorter, so a relay still serving the copy
+                    // from before it always beat the one that replaced it. This is the read
+                    // that showed the user a follow they had already removed. NIP-01: newest
+                    // created_at wins, ties on the lowest event id.
+                    if (!isNewerVersion(event, bestEvent)) return;
+                    bestEvent = event;
+                    following = event.tags
                         .filter(tag => tag[0] === 'p' && tag[1])
                         .map(tag => tag[1]);
-
-                    if (newFollowing.length > following.length) {
-                        following = newFollowing;
-                    }
                 } catch (error) {
                     console.error('Error parsing following list:', error);
                 }
@@ -3641,16 +3648,23 @@ async function getFollowersList(pubkey) {
     const socialGraphRelays = Relays.SOCIAL_GRAPH_RELAYS;
 
     return new Promise((resolve) => {
-        const followers = new Set();
+        // Newest contact list per author, then ask that one — an author whose older list still
+        // names the target but whose current one does not has unfollowed, and used to be
+        // listed as a follower anyway.
+        const newestByAuthor = new Map();
+        const followersNow = () => [...newestByAuthor.values()]
+            .filter(e => e.tags.some(tag => tag[0] === 'p' && tag[1] === pubkey))
+            .map(e => e.pubkey);
         let completedRelays = 0;
         let isResolved = false;
 
         const finishSearch = () => {
             if (isResolved) return;
             isResolved = true;
-            console.log(`Found ${followers.size} followers for ${pubkey.substring(0,8)}... from ${completedRelays}/${socialGraphRelays.length} relays`);
+            const followers = followersNow();
+            console.log(`Found ${followers.length} followers for ${pubkey.substring(0,8)}... from ${completedRelays}/${socialGraphRelays.length} relays`);
             sub.close();
-            resolve([...followers]);
+            resolve(followers);
         };
 
         const sub = State.pool.subscribeMany(socialGraphRelays, [
@@ -3658,12 +3672,8 @@ async function getFollowersList(pubkey) {
         ], {
             onevent(event) {
                 try {
-                    const followsPubkey = event.tags.some(tag =>
-                        tag[0] === 'p' && tag[1] === pubkey
-                    );
-
-                    if (followsPubkey) {
-                        followers.add(event.pubkey);
+                    if (isNewerVersion(event, newestByAuthor.get(event.pubkey))) {
+                        newestByAuthor.set(event.pubkey, event);
                     }
                 } catch (error) {
                     console.error('Error processing follower event:', error);
@@ -4380,10 +4390,17 @@ async function ensureUserProfile() {
         const Posts = await import('./posts.js');
         await Posts.fetchProfiles([State.publicKey]);
         
-        // If still no profile, create a default one
+        // If still no profile, show a placeholder.
+        //
+        // This is NOT a version of anything — it is what we display when no relay answered.
+        // It used to be stamped with the current time, which made it out-rank the user's real
+        // kind 0 forever: the placeholder won every comparison, so the real profile could
+        // never re-enter the cache, and a save seeded from it would publish "Anonymous" and
+        // "No profile information available" as the account's actual profile. Marked
+        // `_synthetic` and dated 0, it yields to any real profile and never displaces one.
         if (!State.profileCache[State.publicKey]) {
-            console.warn('Could not fetch user profile, creating default');
-            const defaultProfile = {
+            console.warn('Could not fetch user profile, showing a placeholder');
+            State.cacheProfile(State.publicKey, {
                 pubkey: State.publicKey,
                 name: 'Anonymous',
                 display_name: 'Anonymous User',
@@ -4391,9 +4408,9 @@ async function ensureUserProfile() {
                 picture: null,
                 nip05: null,
                 website: null,
-                created_at: Math.floor(Date.now() / 1000)
-            };
-            State.profileCache[State.publicKey] = defaultProfile;
+                created_at: 0,
+                _synthetic: true
+            });
         }
     } catch (error) {
         console.error('Error fetching user profile:', error);
@@ -4689,19 +4706,28 @@ async function saveSettings() {
         // fields with a fresh created_at silently reverts the user's newest profile
         // everywhere — kind 0 is replaceable, newest timestamp wins.
         let currentProfile = State.profileCache[State.publicKey] || {};
+        let liveProfileEvent = null;
+        let profileReadable = false;
         try {
             const relaySet = [...new Set([...(await Relays.getReadRelays()), ...(await Relays.getWriteRelays())])];
-            const live = await Promise.race([
-                State.pool.querySync(relaySet, { kinds: [0], authors: [State.publicKey] }),
-                new Promise(resolve => setTimeout(() => resolve(null), 8000))
-            ]);
-            const newest = (live || []).reduce((a, b) => (!a || b.created_at > a.created_at) ? b : a, null);
-            if (newest && newest.created_at > (currentProfile.created_at || 0)) {
-                currentProfile = { ...JSON.parse(newest.content), pubkey: State.publicKey, created_at: newest.created_at };
+            // querySync + a timeout race cannot tell "no profile" from "no relay answered",
+            // and falling back to the cache on silence is what re-signs a stale profile.
+            const liveRead = await fetchLatest({
+                pool: State.pool,
+                relays: relaySet,
+                filter: { kinds: [0], authors: [State.publicKey] },
+                timeoutMs: 10000,
+            });
+            profileReadable = liveRead.confirmed;
+            const notice = unreadNotice(liveRead);
+            if (notice) console.warn(`[settings] ${notice}`);
+            if (liveRead.event) {
+                liveProfileEvent = liveRead.event;
+                currentProfile = { ...JSON.parse(liveRead.event.content), pubkey: State.publicKey, created_at: liveRead.event.created_at };
                 saveProfileToCache(State.publicKey, currentProfile);
             }
         } catch (e) {
-            console.warn('Live profile fetch before save failed — falling back to the cached copy:', e?.message || e);
+            console.warn('Live profile fetch before save failed:', e?.message || e);
         }
 
         // Settings can only change the Lightning address and the banner. When neither
@@ -4713,6 +4739,12 @@ async function saveSettings() {
 
         if (!profileFieldsChanged) {
             console.log('📤 Profile fields unchanged — skipping the kind-0 publish');
+        } else if (!profileReadable) {
+            // No relay told us what the live profile is, so anything published here would be a
+            // whole-state guess built on a cache. The other settings below are independent and
+            // still save.
+            console.warn('📤 Live profile unreadable — leaving kind 0 alone');
+            Utils.showNotification("Couldn't reach your relays to read your current profile, so your Lightning address and banner were left unchanged. Your other settings were saved.", 'error');
         } else {
         // PRESERVE ALL EXISTING PROFILE FIELDS
         const profileData = {
@@ -4741,8 +4773,13 @@ async function saveSettings() {
 
         const profileEvent = {
             kind: 0,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [],
+            // Strictly newer than the version being replaced, so a save made in the same
+            // second as another client's edit cannot lose NIP-01's id tie and silently not
+            // take.
+            created_at: nextCreatedAt(liveProfileEvent?.created_at),
+            // `tags: []` here deleted the NIP-39 identity claims (Twitter/GitHub verification)
+            // on every Settings save. Kind 0 tags belong to whoever set them; carry them.
+            tags: liveProfileEvent?.tags || [],
             content: JSON.stringify(profileData)
         };
 

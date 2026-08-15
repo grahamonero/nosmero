@@ -2,6 +2,7 @@
 // Handles profile viewing, follow/unfollow, and profile page rendering
 
 import { showWarningToast, showSuccessToast, showErrorToast } from './toasts.js';
+import { isNewerVersion } from '../replaceable.js';
 import { showSkeletonLoader } from './skeleton.js';
 import * as PaywallUI from '../paywall-ui.js';
 
@@ -1020,6 +1021,7 @@ async function getFollowingCount(pubkey) {
 
         return new Promise((resolve) => {
             let count = 0;
+            let bestEvent = null;
             const timeout = setTimeout(() => {
                 resolve(count);
             }, TIMEOUTS.FOLLOW_COUNT);
@@ -1029,7 +1031,10 @@ async function getFollowingCount(pubkey) {
             ], {
                 onevent(event) {
                     try {
-                        // Count 'p' tags (users being followed)
+                        // Kind 3 is replaceable — take the newest version, not whichever relay
+                        // answered last, or the count shown is from a superseded copy.
+                        if (!isNewerVersion(event, bestEvent)) return;
+                        bestEvent = event;
                         const pTags = event.tags.filter(tag => tag[0] === 'p' && tag[1]);
                         count = pTags.length;
                     } catch (error) {
@@ -1061,9 +1066,15 @@ async function getFollowersCount(pubkey) {
         const socialGraphRelays = RelaysModule.SOCIAL_GRAPH_RELAYS;
 
         return new Promise((resolve) => {
-            const followers = new Set();
+            // Relays return several VERSIONS of the same author's contact list, so counting a
+            // follower as soon as any version mentions the target made the number one-way:
+            // someone who unfollowed still counted, because their older list still said so.
+            const newestByAuthor = new Map();
+            const countFollowers = () => [...newestByAuthor.values()]
+                .filter(e => e.tags.some(tag => tag[0] === 'p' && tag[1] === pubkey)).length;
+
             const timeout = setTimeout(() => {
-                resolve(followers.size);
+                resolve(countFollowers());
             }, TIMEOUTS.FOLLOW_COUNT);
 
             const sub = StateModule.pool.subscribeMany(socialGraphRelays, [
@@ -1071,10 +1082,8 @@ async function getFollowersCount(pubkey) {
             ], {
                 onevent(event) {
                     try {
-                        // Check if this contact list contains our pubkey
-                        const hasFollow = event.tags.some(tag => tag[0] === 'p' && tag[1] === pubkey);
-                        if (hasFollow) {
-                            followers.add(event.pubkey);
+                        if (isNewerVersion(event, newestByAuthor.get(event.pubkey))) {
+                            newestByAuthor.set(event.pubkey, event);
                         }
                     } catch (error) {
                         console.error('Error parsing follower event:', error);
@@ -1083,7 +1092,7 @@ async function getFollowersCount(pubkey) {
                 oneose() {
                     clearTimeout(timeout);
                     sub.close();
-                    resolve(followers.size);
+                    resolve(countFollowers());
                 }
             });
         });
