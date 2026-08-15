@@ -771,6 +771,31 @@ function buildArticleTags({ identifier, title, summary, image, topics, published
     return tags;
 }
 
+// The tags this editor owns. Anything else on a live article — zap splits, `alt`, NIP-32
+// labels, a `r` source link — was put there by whoever wrote it and has to survive an edit.
+export const MANAGED_ARTICLE_TAGS = ['d', 'title', 'summary', 'image', 'published_at', 't', 'client'];
+
+/**
+ * Read the live version of an addressable event before replacing it.
+ *
+ * Kind 30023 is addressable: publishing replaces everything at (pubkey, kind, d). Editing used
+ * to rebuild the event from the editor form alone, so an article edited from another client
+ * was reverted, and every tag this editor does not know about was dropped.
+ */
+export async function fetchLiveArticle(kind, identifier) {
+    return fetchLiveAddressable(kind, identifier);
+}
+
+async function fetchLiveAddressable(kind, identifier) {
+    const { fetchLatest } = await import('./replaceable.js');
+    return fetchLatest({
+        pool: State.pool,
+        relays: [...new Set([...(Relays.getReadRelays?.() || []), ...(Relays.getWriteRelays?.() || [])])].filter(Boolean),
+        filter: { kinds: [kind], authors: [State.publicKey], '#d': [identifier], limit: 1 },
+        timeoutMs: 8000,
+    });
+}
+
 // Internal: sign + publish to write relays, awaiting all relays so silent
 // rejections surface. Throws if zero relays accept.
 async function signAndPublish(template) {
@@ -812,13 +837,29 @@ export async function publishArticle({
     if (!body || !body.trim()) throw new Error('Article body is required');
 
     const slug = identifier || generateSlug(title);
-    const createdAt = Math.floor(Date.now() / 1000);
-    const pubAt = publishedAt || createdAt;
+
+    const live = await fetchLiveAddressable(ARTICLE_KIND, slug);
+    if (!live.confirmed) {
+        throw new Error("Couldn't reach any of your relays to check for an existing version of this article. Nothing was published, so nothing gets overwritten — try again when you're connected.");
+    }
+
+    const { nextCreatedAt, preserveUnmanagedTags } = await import('./replaceable.js');
+
+    // published_at is the date the article FIRST went out and must not move on an edit; the
+    // live copy is the authority for it, since this device may never have seen the original.
+    const livePublishedAt = (live.event?.tags || []).find(t => t[0] === 'published_at')?.[1];
+    const pubAt = publishedAt || (livePublishedAt ? Number(livePublishedAt) : null) || Math.floor(Date.now() / 1000);
 
     const template = {
         kind: ARTICLE_KIND,
-        created_at: createdAt,
-        tags: buildArticleTags({ identifier: slug, title, summary, image, topics, publishedAt: pubAt }),
+        // Strictly newer than the version being replaced, so an edit made in the same second
+        // as the original cannot lose the id tie and silently not take.
+        created_at: nextCreatedAt(live.event?.created_at),
+        tags: preserveUnmanagedTags(
+            live.event?.tags,
+            buildArticleTags({ identifier: slug, title, summary, image, topics, publishedAt: pubAt }),
+            MANAGED_ARTICLE_TAGS
+        ),
         content: body,
     };
 
@@ -842,14 +883,26 @@ export async function publishDraft({
     if (!State.publicKey) throw new Error('Must be logged in to save drafts');
 
     const slug = identifier || generateSlug(title);
-    const createdAt = Math.floor(Date.now() / 1000);
+
+    // Drafts are addressable too, so a save replaces the stored draft. Read it first: a save
+    // stamped with the same second as the last one can lose NIP-01's id tie and silently not
+    // take, which reads to the user as "my edit disappeared".
+    const live = await fetchLiveAddressable(DRAFT_KIND, slug);
+    if (!live.confirmed) {
+        throw new Error("Couldn't reach any of your relays to save this draft. Nothing was changed.");
+    }
+    const { nextCreatedAt, preserveUnmanagedTags } = await import('./replaceable.js');
 
     const template = {
         kind: DRAFT_KIND,
-        created_at: createdAt,
+        created_at: nextCreatedAt(live.event?.created_at),
         // Drafts include the same tags as the article so the existing
         // parseArticleMetadata helper works on them too.
-        tags: buildArticleTags({ identifier: slug, title, summary, image, topics, publishedAt: null }),
+        tags: preserveUnmanagedTags(
+            live.event?.tags,
+            buildArticleTags({ identifier: slug, title, summary, image, topics, publishedAt: null }),
+            MANAGED_ARTICLE_TAGS
+        ),
         content: body,
     };
 

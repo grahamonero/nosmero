@@ -504,8 +504,19 @@ async function publishWithPaywall() {
     } catch (_) {}
 
     const publicContent = Articles.buildPaywalledPublicContent(publicMarkdown, priceXmr, naddr);
-    const createdAt = Math.floor(Date.now() / 1000);
-    const pubAt = editorState.publishedAt || createdAt;
+
+    // Kind 30023 is addressable: this replaces everything at (pubkey, kind, d). Read the live
+    // version so an edit lands strictly newer than it, keeps its published_at, and carries
+    // forward every tag this editor does not own — zap splits, `alt`, labels.
+    const live = await Articles.fetchLiveArticle(Articles.ARTICLE_KIND, editorState.identifier);
+    if (!live.confirmed) {
+        throw new Error("Couldn't reach any of your relays to check for an existing version of this article. Nothing was published, so nothing gets overwritten.");
+    }
+    const { nextCreatedAt, preserveUnmanagedTags } = await import('./replaceable.js');
+
+    const createdAt = nextCreatedAt(live.event?.created_at);
+    const livePublishedAt = (live.event?.tags || []).find(t => t[0] === 'published_at')?.[1];
+    const pubAt = editorState.publishedAt || (livePublishedAt ? Number(livePublishedAt) : null) || Math.floor(Date.now() / 1000);
 
     // Build the NIP-23 tags + the existing paywall tag set side by side.
     const articleTags = [
@@ -530,7 +541,11 @@ async function publishWithPaywall() {
     const template = {
         kind: Articles.ARTICLE_KIND,
         created_at: createdAt,
-        tags: [...articleTags, ...paywallTags],
+        tags: preserveUnmanagedTags(
+            live.event?.tags,
+            [...articleTags, ...paywallTags],
+            [...Articles.MANAGED_ARTICLE_TAGS, 'paywall', 'preview', 'encrypted']
+        ),
         content: publicContent,
     };
 
