@@ -24,6 +24,18 @@
 import * as State from './state.js';
 import * as Utils from './utils.js';
 import * as Relays from './relays.js';
+import { fetchLatest, nextCreatedAt, unreadNotice } from './replaceable.js';
+
+// Lists are read from and published to the SAME set — the union of the read and write relays.
+// Reading one set and publishing to another leaves a version we never saw sitting on a relay we
+// never read, and the next whole-state replacement destroys it. The union also means a list
+// published here is where other clients look for it under the outbox model.
+function listRelays() {
+    return [...new Set([...Relays.getUserDataRelays(), ...Relays.getWriteRelays()])].filter(Boolean);
+}
+
+// The tag-merge rules live in their own module so they can be exercised directly.
+import { hasTag, addItem, removeItem, normTag, normWord } from './list-tags.js';
 
 const KIND_MUTE = 10000;
 const KIND_PIN = 10001;
@@ -45,13 +57,22 @@ export const lists = {
     _migrationDone: false,
 };
 
+// Kinds whose private half we hold but cannot decrypt. Writing one would drop every private
+// item on it, so those lists go read-only for the session rather than silently losing data.
+// A change attempted against one throws with an explanation the UI surfaces.
+const unreadablePrivate = new Set();
+
 // ==================== ENCRYPTION ABSTRACTION ====================
 
-let _nip44Module = null;
-async function getNip44Module() {
-    if (_nip44Module) return _nip44Module;
-    _nip44Module = await import('https://esm.sh/nostr-tools@2.17.2/nip44');
-    return _nip44Module;
+// From the LOCALLY BUNDLED nostr-tools. This was fetched from esm.sh at runtime and then
+// handed the user's raw secret key (getConversationKey(sk, me)), so a compromised CDN response
+// could exfiltrate it. Verified wire-compatible with the esm.sh build it replaces — encrypting
+// with one and decrypting with the other round-trips in both directions — so mute lists and
+// private bookmarks written before this change still decrypt.
+function getNip44Module() {
+    const nip44 = window.NostrTools?.nip44;
+    if (!nip44) throw new Error('nostr-tools bundle not loaded');
+    return nip44;
 }
 
 /**
@@ -98,7 +119,7 @@ async function encryptToSelf(plaintext) {
             if (!matches) throw new Error('Invalid hex private key');
             sk = new Uint8Array(matches.map(b => parseInt(b, 16)));
         }
-        const { v2, getConversationKey } = await getNip44Module();
+        const { v2, getConversationKey } = getNip44Module();
         const conversationKey = getConversationKey(sk, me);
         return v2.encrypt(plaintext, conversationKey);
     }
@@ -121,7 +142,7 @@ async function decryptFromSelf(ciphertext) {
         }
         const sk = State.getPrivateKeyForSigning();
         if (sk) {
-            const { v2, getConversationKey } = await getNip44Module();
+            const { v2, getConversationKey } = getNip44Module();
             return v2.decrypt(ciphertext, getConversationKey(sk, me));
         }
         throw new Error('No NIP-44 decrypt available');
@@ -150,113 +171,202 @@ async function decryptFromSelf(ciphertext) {
 
 // ==================== READ ====================
 
+// Returns the fetchLatest result — `{ event, confirmed, complete, unread }` — NOT a bare event.
+//
+// The old version resolved `null` for two opposite situations: "you have no such list" and
+// "every relay stayed silent". It also trusted `oneose`, which nostr-tools fires off its own
+// 4400ms timer whether or not a relay said anything, under a 5000ms cap — so on a slow link a
+// user with 50 bookmarks read as a user with none, and the next bookmark click published a
+// one-item list over the top of them.
 async function fetchListEvent(kind) {
-    return new Promise((resolve) => {
-        const events = [];
-        const sub = State.pool.subscribeMany(Relays.getUserDataRelays(), [{
-            kinds: [kind],
-            authors: [State.publicKey],
-            limit: 1,
-        }], {
-            onevent(e) { events.push(e); },
-            oneose() {
-                sub.close();
-                events.sort((a, b) => b.created_at - a.created_at);
-                resolve(events[0] || null);
-            },
-        });
-        setTimeout(() => { sub.close(); resolve(null); }, 5000);
+    return fetchLatest({
+        pool: State.pool,
+        relays: listRelays(),
+        filter: { kinds: [kind], authors: [State.publicKey], limit: 1 },
+        // Never below ~8000: the library allows 4400ms for the connect alone.
+        timeoutMs: 8000,
     });
 }
 
-async function parseListEvent(event, schema) {
-    if (!event) return { publicTags: [], privateTags: [] };
+// `privateReadable` is false when the event carries private items we could not decrypt. The
+// caller MUST NOT republish on that — the private items would be silently dropped, which for
+// kind 10000 means quietly unmuting everyone the user has ever muted.
+async function parseListEvent(event) {
+    if (!event) return { publicTags: [], privateTags: [], privateReadable: true };
     const publicTags = event.tags || [];
     let privateTags = [];
+    let privateReadable = true;
     if (event.content && event.content.length > 0) {
         try {
             const decrypted = await decryptFromSelf(event.content);
             const parsed = JSON.parse(decrypted);
             if (Array.isArray(parsed)) privateTags = parsed;
+            else privateReadable = false;
         } catch (e) {
             console.warn(`Failed to decrypt private items for kind ${event.kind}:`, e?.message || e);
+            privateReadable = false;
         }
     }
-    return { publicTags, privateTags };
+    return { publicTags, privateTags, privateReadable };
+}
+
+// Fold a parsed list into the in-memory sets. Used on load AND after a successful publish, so
+// what the app shows is always what the relays were last known to hold — never a guess made
+// before the write was accepted.
+function applyToMemory(kind, publicTags, privateTags) {
+    const all = [...(publicTags || []), ...(privateTags || [])];
+    const values = (name) => all.filter(t => Array.isArray(t) && t[0] === name && t[1]).map(t => t[1]);
+
+    if (kind === KIND_MUTE) {
+        lists.mutePubkeys = new Set(values('p'));
+        lists.muteHashtags = new Set(values('t').map(normTag));
+        lists.muteWords = new Set(values('word').map(normWord));
+        lists.muteThreads = new Set(values('e'));
+        if (typeof State.setMutedUsers === 'function') State.setMutedUsers(new Set(lists.mutePubkeys));
+    } else if (kind === KIND_PIN) {
+        lists.pinnedNoteIds = new Set(values('e'));
+    } else if (kind === KIND_BOOKMARK) {
+        lists.bookmarkedNoteIds = new Set(values('e'));
+        lists.bookmarkedHashtags = new Set(values('t').map(normTag));
+        lists.bookmarkedUrls = new Set(values('r'));
+        lists.bookmarkedAddrs = new Set(values('a'));
+    }
 }
 
 export async function loadAllLists() {
     if (!State.publicKey || !State.pool) return;
 
-    const [muteEv, pinEv, bookEv] = await Promise.all([
+    const [muteRes, pinRes, bookRes] = await Promise.all([
         fetchListEvent(KIND_MUTE),
         fetchListEvent(KIND_PIN),
         fetchListEvent(KIND_BOOKMARK),
     ]);
 
-    // Migrate from old kind 30000 d:mute if no kind 10000 exists yet
-    let muteEventToUse = muteEv;
-    if (!muteEv && !lists._migrationDone) {
+    // Migrating means publishing a kind 10000 built from the legacy kind 30000. Do that ONLY on
+    // proof that no kind 10000 exists — `complete`, every relay answered. On the old `!muteEv`
+    // test a silent relay set read as "no mute list", and the migration then republished an
+    // ancient list over the live one.
+    let muteEvent = muteRes.event;
+    if (!muteEvent && muteRes.complete && !lists._migrationDone) {
         const oldMute = await fetchOldMuteList();
         if (oldMute) {
             console.log('🔁 Migrating mute list from kind 30000 → kind 10000');
             await migrateOldMuteToNew(oldMute);
-            muteEventToUse = await fetchListEvent(KIND_MUTE);
+            muteEvent = (await fetchListEvent(KIND_MUTE)).event;
         }
         lists._migrationDone = true;
+    } else if (!muteEvent && !muteRes.complete) {
+        console.warn(`📋 Mute list unread — ${unreadNotice(muteRes) || 'no relay answered'}; not migrating`);
     }
 
-    // Parse mute (kind 10000)
-    if (muteEventToUse) {
-        const { publicTags, privateTags } = await parseListEvent(muteEventToUse);
-        const all = [...publicTags, ...privateTags];
-        lists.mutePubkeys = new Set(all.filter(t => t[0] === 'p').map(t => t[1]).filter(Boolean));
-        lists.muteHashtags = new Set(all.filter(t => t[0] === 't').map(t => t[1]?.toLowerCase()).filter(Boolean));
-        lists.muteWords = new Set(all.filter(t => t[0] === 'word').map(t => t[1]?.toLowerCase()).filter(Boolean));
-        lists.muteThreads = new Set(all.filter(t => t[0] === 'e').map(t => t[1]).filter(Boolean));
+    for (const [kind, event] of [[KIND_MUTE, muteEvent], [KIND_PIN, pinRes.event], [KIND_BOOKMARK, bookRes.event]]) {
+        if (!event) continue;
+        const { publicTags, privateTags, privateReadable } = await parseListEvent(event);
+        applyToMemory(kind, publicTags, privateTags);
+        if (!privateReadable) {
+            // Recorded so a later write can refuse rather than republish the list without the
+            // half it could not read.
+            unreadablePrivate.add(kind);
+            console.warn(`📋 kind ${kind}: private items could not be decrypted — this list is read-only this session`);
+        } else {
+            unreadablePrivate.delete(kind);
+        }
     }
 
-    // Parse pin (kind 10001) — public items only per spec
-    if (pinEv) {
-        const all = pinEv.tags || [];
-        lists.pinnedNoteIds = new Set(all.filter(t => t[0] === 'e').map(t => t[1]).filter(Boolean));
-    }
-
-    // Parse bookmarks (kind 10003)
-    if (bookEv) {
-        const { publicTags, privateTags } = await parseListEvent(bookEv);
-        const all = [...publicTags, ...privateTags];
-        lists.bookmarkedNoteIds = new Set(all.filter(t => t[0] === 'e').map(t => t[1]).filter(Boolean));
-        lists.bookmarkedHashtags = new Set(all.filter(t => t[0] === 't').map(t => t[1]?.toLowerCase()).filter(Boolean));
-        lists.bookmarkedUrls = new Set(all.filter(t => t[0] === 'r').map(t => t[1]).filter(Boolean));
-        lists.bookmarkedAddrs = new Set(all.filter(t => t[0] === 'a').map(t => t[1]).filter(Boolean));
-    }
-
-    // Sync into State.mutedUsers so existing feed filters keep working
-    if (typeof State.setMutedUsers === 'function') {
-        State.setMutedUsers(new Set(lists.mutePubkeys));
-    }
     console.log(`📋 NIP-51 loaded: ${lists.mutePubkeys.size} muted users, ${lists.muteHashtags.size} muted tags, ${lists.muteWords.size} muted words, ${lists.bookmarkedNoteIds.size} bookmarks, ${lists.pinnedNoteIds.size} pinned`);
 }
 
 // ==================== WRITE ====================
 
-async function publishList(kind, allTags, opts = {}) {
-    const { encryptAll = false } = opts;
-    let publicTags = [];
-    let privateTags = [];
+/**
+ * Apply ONE change to a list and publish the result.
+ *
+ * Every one of these lists is a replaceable event: publishing one destroys the previous
+ * version, so what goes out has to be built on the version that is live RIGHT NOW. The old
+ * code rebuilt the whole list from the in-memory sets, which meant a list that failed to load
+ * — a slow relay, a 5s timeout, a decrypt failure — was republished as whatever little the
+ * app happened to hold. One bookmark click on a bad connection deleted the other fifty.
+ *
+ * `mutate` receives the LIVE tags, already split into public and private, and returns the new
+ * pair — or null for "nothing to change", which skips the publish entirely.
+ */
+function snapshotLists() {
+    return {
+        mutePubkeys: new Set(lists.mutePubkeys),
+        muteHashtags: new Set(lists.muteHashtags),
+        muteWords: new Set(lists.muteWords),
+        muteThreads: new Set(lists.muteThreads),
+        pinnedNoteIds: new Set(lists.pinnedNoteIds),
+        bookmarkedNoteIds: new Set(lists.bookmarkedNoteIds),
+        bookmarkedHashtags: new Set(lists.bookmarkedHashtags),
+        bookmarkedUrls: new Set(lists.bookmarkedUrls),
+        bookmarkedAddrs: new Set(lists.bookmarkedAddrs),
+    };
+}
 
-    if (encryptAll) {
-        privateTags = allTags;
-    } else {
-        publicTags = allTags;
+function restoreLists(snap) {
+    Object.assign(lists, snap);
+    if (typeof State.setMutedUsers === 'function') State.setMutedUsers(new Set(lists.mutePubkeys));
+}
+
+async function updateList(kind, mutate, optimistic) {
+    if (!State.publicKey || !State.pool) throw new Error('Sign in to change your lists');
+
+    // The screen flips immediately — mute has to feel instant — but the flip is a claim, not a
+    // fact, so it is rolled back if the relays refuse. Previously it stood regardless and the
+    // app showed a mute that had never been published.
+    const before = snapshotLists();
+    if (optimistic) {
+        optimistic();
+        if (typeof State.setMutedUsers === 'function') State.setMutedUsers(new Set(lists.mutePubkeys));
+    }
+    try {
+        return await updateListInner(kind, mutate);
+    } catch (e) {
+        restoreLists(before);
+        throw e;
+    }
+}
+
+async function updateListInner(kind, mutate) {
+
+    if (unreadablePrivate.has(kind)) {
+        throw new Error("Some items on this list are encrypted with a key this session can't read. Changing it would delete them, so it's locked until you sign in with the key that wrote them.");
     }
 
-    if (opts.split) {
-        publicTags = opts.split.public || [];
-        privateTags = opts.split.private || [];
+    const live = await fetchListEvent(kind);
+
+    // Total silence is not "you have no list". Publishing on it replaces whatever is really
+    // out there with what this tab happens to hold.
+    if (!live.confirmed) {
+        throw new Error("Couldn't reach any of your relays to read your current list. Nothing was changed, so nothing gets overwritten — try again when you're connected.");
     }
 
+    const { publicTags, privateTags, privateReadable } = await parseListEvent(live.event);
+    if (!privateReadable) {
+        unreadablePrivate.add(kind);
+        throw new Error("This list has private items this session can't decrypt. Saving would delete them, so nothing was changed.");
+    }
+
+    const next = mutate({ publicTags: [...publicTags], privateTags: [...privateTags] });
+    if (!next) {
+        // The live list already says what we wanted it to. Nothing to publish — but sync the
+        // screen to what is actually out there, so an optimistic flip against a list that
+        // disagreed with us is corrected rather than left showing a state no relay holds.
+        applyToMemory(kind, publicTags, privateTags);
+        return live.event;
+    }
+
+    const notice = unreadNotice(live);
+    if (notice) console.warn(`[NIP-51 kind ${kind}] ${notice}`);
+
+    const signed = await publishList(kind, next.publicTags, next.privateTags, live.event?.created_at);
+    // Local state advances only now, on proof the relays took it.
+    applyToMemory(kind, next.publicTags, next.privateTags);
+    return signed;
+}
+
+async function publishList(kind, publicTags, privateTags, priorCreatedAt = 0) {
     let content = '';
     if (privateTags.length > 0) {
         try {
@@ -269,7 +379,10 @@ async function publishList(kind, allTags, opts = {}) {
 
     const template = {
         kind,
-        created_at: Math.floor(Date.now() / 1000),
+        // Land strictly newer than the version being replaced: on an equal timestamp NIP-01
+        // resolves the tie on event id, which can leave the older copy current — so a second
+        // change made inside the same second could silently not take.
+        created_at: nextCreatedAt(priorCreatedAt),
         tags: publicTags,
         content,
     };
@@ -282,7 +395,7 @@ async function publishList(kind, allTags, opts = {}) {
         throw new Error('Could not sign list event: ' + (e?.message || e));
     }
 
-    const relays = Relays.getUserDataRelays();
+    const relays = listRelays();
     const pubPromises = State.pool.publish(relays, signed);
     // pubPromises is an array of Promise<string> — one per relay.
     // Await all with settle so a single bad relay doesn't break us, but
@@ -305,81 +418,60 @@ async function publishList(kind, allTags, opts = {}) {
 
 // ---- Mute API ----
 
+// New pubkey and word mutes go in the PRIVATE half (publishing them signals who and what you
+// block); new hashtag mutes go public. An item ALREADY on the list keeps whichever side it is
+// on — the old code read both halves into one set and wrote them all back to its default side,
+// which quietly published private mutes as public tags. See list-tags.js.
 export async function muteUser(pubkey) {
     if (!pubkey) return false;
-    lists.mutePubkeys.add(pubkey);
-    if (typeof State.setMutedUsers === 'function') State.setMutedUsers(new Set(lists.mutePubkeys));
-    await publishMuteList();
+    await updateList(KIND_MUTE, addItem('p', pubkey, true), () => lists.mutePubkeys.add(pubkey));
     return true;
 }
 
 export async function unmuteUser(pubkey) {
     if (!pubkey) return false;
-    lists.mutePubkeys.delete(pubkey);
-    if (typeof State.setMutedUsers === 'function') State.setMutedUsers(new Set(lists.mutePubkeys));
-    await publishMuteList();
+    await updateList(KIND_MUTE, removeItem('p', pubkey), () => lists.mutePubkeys.delete(pubkey));
     return true;
 }
 
 export async function muteHashtag(tag) {
     if (!tag) return false;
-    lists.muteHashtags.add(tag.toLowerCase().replace(/^#/, ''));
-    await publishMuteList();
+    const t = normTag(tag);
+    await updateList(KIND_MUTE, addItem('t', t, false), () => lists.muteHashtags.add(t));
     return true;
 }
 
 export async function unmuteHashtag(tag) {
-    lists.muteHashtags.delete(tag.toLowerCase().replace(/^#/, ''));
-    await publishMuteList();
+    const t = normTag(tag);
+    await updateList(KIND_MUTE, removeItem('t', t), () => lists.muteHashtags.delete(t));
     return true;
 }
 
 export async function muteWord(word) {
     if (!word) return false;
-    lists.muteWords.add(word.toLowerCase());
-    await publishMuteList();
+    const w = normWord(word);
+    await updateList(KIND_MUTE, addItem('word', w, true), () => lists.muteWords.add(w));
     return true;
 }
 
 export async function unmuteWord(word) {
-    lists.muteWords.delete(word.toLowerCase());
-    await publishMuteList();
+    const w = normWord(word);
+    await updateList(KIND_MUTE, removeItem('word', w), () => lists.muteWords.delete(w));
     return true;
-}
-
-async function publishMuteList() {
-    // Pubkey + word mutes are PRIVATE (avoid signalling who/what you block).
-    // Hashtag + thread mutes can be public since they're less sensitive.
-    const privateTags = [
-        ...Array.from(lists.mutePubkeys).map(p => ['p', p]),
-        ...Array.from(lists.muteWords).map(w => ['word', w]),
-    ];
-    const publicTags = [
-        ...Array.from(lists.muteHashtags).map(t => ['t', t]),
-        ...Array.from(lists.muteThreads).map(e => ['e', e]),
-    ];
-    return publishList(KIND_MUTE, [], { split: { public: publicTags, private: privateTags } });
 }
 
 // ---- Pin API ----
 
 export async function pinNote(noteId) {
     if (!noteId) return false;
-    lists.pinnedNoteIds.add(noteId);
-    await publishPinList();
+    // kind 10001 is public per spec.
+    await updateList(KIND_PIN, addItem('e', noteId, false), () => lists.pinnedNoteIds.add(noteId));
     return true;
 }
 
 export async function unpinNote(noteId) {
-    lists.pinnedNoteIds.delete(noteId);
-    await publishPinList();
+    await updateList(KIND_PIN, removeItem('e', noteId), () => lists.pinnedNoteIds.delete(noteId));
     return true;
-}
-
-async function publishPinList() {
-    // kind 10001 pin list is public per spec.
-    const tags = Array.from(lists.pinnedNoteIds).map(id => ['e', id]);
-    return publishList(KIND_PIN, tags);
 }
 
 export function isPinned(noteId) {
@@ -388,30 +480,18 @@ export function isPinned(noteId) {
 
 // ---- Bookmark API ----
 
+// New bookmarks default to PUBLIC — bookmarking a note is generally not sensitive. Bookmarks
+// the user already keeps PRIVATE stay private: the old code read both halves into one set and
+// republished the lot as public tags, which exposed every private bookmark on the next save.
 export async function bookmarkNote(noteId) {
     if (!noteId) return false;
-    lists.bookmarkedNoteIds.add(noteId);
-    await publishBookmarkList();
+    await updateList(KIND_BOOKMARK, addItem('e', noteId, false), () => lists.bookmarkedNoteIds.add(noteId));
     return true;
 }
 
 export async function unbookmarkNote(noteId) {
-    lists.bookmarkedNoteIds.delete(noteId);
-    await publishBookmarkList();
+    await updateList(KIND_BOOKMARK, removeItem('e', noteId), () => lists.bookmarkedNoteIds.delete(noteId));
     return true;
-}
-
-async function publishBookmarkList() {
-    // Bookmarks default to PUBLIC — bookmarking a note is generally not
-    // sensitive (Twitter exposes likes; bookmarks are similar). Users who
-    // want private bookmarks can extend this later with a separate flow.
-    const tags = [
-        ...Array.from(lists.bookmarkedNoteIds).map(id => ['e', id]),
-        ...Array.from(lists.bookmarkedAddrs).map(a => ['a', a]),
-        ...Array.from(lists.bookmarkedHashtags).map(t => ['t', t]),
-        ...Array.from(lists.bookmarkedUrls).map(u => ['r', u]),
-    ];
-    return publishList(KIND_BOOKMARK, tags);
 }
 
 export function isBookmarked(noteId) {
@@ -422,14 +502,12 @@ export function isBookmarked(noteId) {
 // `a` value is `kind:pubkey:d-tag` per NIP-01.
 export async function bookmarkAddress(a) {
     if (!a) return false;
-    lists.bookmarkedAddrs.add(a);
-    await publishBookmarkList();
+    await updateList(KIND_BOOKMARK, addItem('a', a, false), () => lists.bookmarkedAddrs.add(a));
     return true;
 }
 
 export async function unbookmarkAddress(a) {
-    lists.bookmarkedAddrs.delete(a);
-    await publishBookmarkList();
+    await updateList(KIND_BOOKMARK, removeItem('a', a), () => lists.bookmarkedAddrs.delete(a));
     return true;
 }
 
@@ -440,19 +518,13 @@ export function isBookmarkedAddress(a) {
 // ==================== MIGRATION ====================
 
 async function fetchOldMuteList() {
-    return new Promise((resolve) => {
-        let found = null;
-        const sub = State.pool.subscribeMany(Relays.getUserDataRelays(), [{
-            kinds: [KIND_OLD_MUTE],
-            authors: [State.publicKey],
-            '#d': [OLD_MUTE_D_TAG],
-            limit: 1,
-        }], {
-            onevent(e) { if (!found || e.created_at > found.created_at) found = e; },
-            oneose() { sub.close(); resolve(found); },
-        });
-        setTimeout(() => { sub.close(); resolve(found); }, 5000);
+    const { event } = await fetchLatest({
+        pool: State.pool,
+        relays: listRelays(),
+        filter: { kinds: [KIND_OLD_MUTE], authors: [State.publicKey], '#d': [OLD_MUTE_D_TAG], limit: 1 },
+        timeoutMs: 8000,
     });
+    return event;
 }
 
 async function migrateOldMuteToNew(oldEvent) {
@@ -466,11 +538,21 @@ async function migrateOldMuteToNew(oldEvent) {
             return;
         }
     }
-    const pubkeys = oldTags.filter(t => t[0] === 'p' && t[1]).map(t => t[1]);
-    lists.mutePubkeys = new Set(pubkeys);
+    if (!Array.isArray(oldTags)) return;
+
+    // Carry every kind of mute across, not just pubkeys — the old migration dropped muted
+    // words, hashtags and threads on the floor. Same public/private split as a fresh mute.
+    const keep = (name) => oldTags.filter(t => Array.isArray(t) && t[0] === name && t[1]);
+    const privateTags = [...keep('p'), ...keep('word')];
+    const publicTags = [...keep('t'), ...keep('e')];
+    if (!privateTags.length && !publicTags.length) return;
+
     try {
-        await publishMuteList();
-        console.log(`✅ Migrated ${pubkeys.length} mute(s) to kind 10000`);
+        // Reached only when every relay confirmed there is no kind 10000, so there is no live
+        // version to merge onto and prior created_at is genuinely 0.
+        await publishList(KIND_MUTE, publicTags, privateTags, 0);
+        applyToMemory(KIND_MUTE, publicTags, privateTags);
+        console.log(`✅ Migrated ${privateTags.length + publicTags.length} mute item(s) to kind 10000`);
     } catch (e) {
         console.error('Mute migration publish failed:', e?.message || e);
     }
