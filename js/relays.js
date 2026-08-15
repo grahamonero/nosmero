@@ -106,6 +106,22 @@ export let userRelayList = {
     announced: [...DEFAULT_RELAYS]
 };
 
+// Which account's own relay list has actually been loaded.
+//
+// The getters above can never answer this: `userRelayList` is seeded with DEFAULT_RELAYS, so
+// they return a populated list from the first line of the first script and a caller cannot
+// tell the user's relays from the public defaults. That matters to anything publishing a
+// replaceable event, because writing one to the defaults puts a NEWER version of that address
+// on relays the whole network reads, out-ranking the copy the user's own relays hold — the
+// clobber happens without a single stale cache being involved.
+//
+// Keyed by pubkey rather than a bare flag so it can't survive an account switch.
+let relayListConfirmedFor = null;
+
+export function isRelayListConfirmed() {
+    return !!State.publicKey && relayListConfirmedFor === State.publicKey;
+}
+
 // Performance tracking for relays
 let relayPerformance = {};
 
@@ -551,6 +567,7 @@ export async function loadUserRelayList() {
                 write: fromNip78.write,
                 announced: fromNip78.announced
             };
+            relayListConfirmedFor = State.publicKey;
             saveUserRelayList();
             return;
         }
@@ -558,8 +575,12 @@ export async function loadUserRelayList() {
         console.error('NIP-78 relay-list lookup failed, falling back to cache/kind 10002:', error);
     }
 
-    // NIP-78 had no data. If we hydrated from localStorage, keep that.
-    if (hadCache) return;
+    // NIP-78 had no data. If we hydrated from localStorage, keep that. The cache is keyed by
+    // pubkey, so a hit here is this account's own list and not an anonymous visit's defaults.
+    if (hadCache) {
+        relayListConfirmedFor = State.publicKey;
+        return;
+    }
 
     // No cache + no NIP-78: try kind 10002 as last resort.
     const fetched = await fetchUserRelayList(State.publicKey);
@@ -569,6 +590,7 @@ export async function loadUserRelayList() {
             write: fetched.write,
             announced: Array.from(new Set([...fetched.read, ...fetched.write]))
         };
+        relayListConfirmedFor = State.publicKey;
         saveUserRelayList();
     }
 }
@@ -576,6 +598,10 @@ export async function loadUserRelayList() {
 // Save user relay list to localStorage
 export function saveUserRelayList() {
     localStorage.setItem(relayStorageKey(), JSON.stringify(userRelayList));
+    // Writing this account's list is as good a confirmation as loading one — otherwise an
+    // account that configures its relays for the first time stays permanently unconfirmed,
+    // because nothing was there to load at login.
+    if (State.publicKey) relayListConfirmedFor = State.publicKey;
     updateActiveRelays();
 }
 
