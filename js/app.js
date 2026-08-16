@@ -521,8 +521,25 @@ async function checkExistingSession() {
             }
         }
 
-        // Update disclosed tips widget after session restoration
         if (State.publicKey) {
+            // Load the user's relay list. initializeRelays() already called this
+            // once, but that runs before the session is restored, so it saw a null
+            // publicKey and returned without reading anything — which left every
+            // reload using DEFAULT_RELAYS however carefully the list had been set.
+            // Restoring a session is a login; it needs the same relay load one.
+            //
+            // Awaited, and placed ahead of startApplication(), because the profile
+            // fetch, the follow list and the feed all resolve their relays through
+            // getUserDataRelays(). Reading them off the defaults first and
+            // correcting afterwards is the race this is here to close.
+            try {
+                const Relays = await import('./relays.js');
+                await Relays.loadUserRelayList();
+            } catch (error) {
+                console.error('Error loading NIP-65 relay list on session restore:', error);
+            }
+
+            // Update disclosed tips widget after session restoration
             try {
                 const Posts = await import('./posts.js');
                 await Posts.updateWidgetForAuthState();
