@@ -60,3 +60,6 @@ test-client-tags.html
 node_modules/
 api/node_modules/
 trending-cache.json
+
+# Dev-only test harnesses — never deploy or publish (JUMPSTART rule 7)
+smoke-*.mjs

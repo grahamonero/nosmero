@@ -1064,3 +1064,84 @@ body.tab-compose #composeView    { display: flex !important; }
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+/* ==================== MAGNET LINK CARD ====================
+   Renders a magnet: URI found in note content. Nothing is downloaded or
+   seeded — "Open" hands the URI to the user's own torrent client.
+   Modelled on .embedded-note. See js/magnet.js. */
+.magnet-card {
+    display: block;
+    margin: var(--space-sm) 0;
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.magnet-card-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-xs);
+    min-width: 0;
+}
+
+.magnet-card-icon {
+    font-size: var(--type-lg);
+    flex-shrink: 0;
+}
+
+.magnet-card-name {
+    color: var(--text);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.magnet-card-meta {
+    color: var(--text-muted);
+    font-size: var(--type-xs);
+    margin-bottom: var(--space-sm);
+    overflow-wrap: anywhere;
+}
+
+.magnet-card-sep {
+    margin: 0 var(--space-xs);
+    opacity: 0.5;
+}
+
+.magnet-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+/* Tap targets: kept at 32px min so they clear the thumb-size floor without
+   making the card taller than the note text around it. */
+.magnet-card-btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 var(--space-md);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    font-size: var(--type-sm);
+    cursor: pointer;
+    user-select: none;
+}
+
+.magnet-card-btn:active {
+    background: var(--bg-input);
+}
+
+.magnet-card-btn-primary {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+}

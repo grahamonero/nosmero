@@ -287,7 +287,7 @@ function openProfileEditor(profile, pubkey) {
             <h2 style="margin:0">Edit profile</h2>
             <label class="field">
                 <span>Display name</span>
-                <input type="text" name="display_name" value="${escapeAttr(profile.display_name || '')}">
+                <input type="text" name="display_name" value="${escapeAttr(profile.display_name || '')}" spellcheck="true">
             </label>
             <label class="field">
                 <span>Username (@handle)</span>
@@ -295,7 +295,7 @@ function openProfileEditor(profile, pubkey) {
             </label>
             <label class="field">
                 <span>About</span>
-                <textarea name="about" rows="3">${escapeHtml(profile.about || '')}</textarea>
+                <textarea name="about" rows="3" spellcheck="true">${escapeHtml(profile.about || '')}</textarea>
             </label>
             <label class="field">
                 <span>Picture URL</span>
