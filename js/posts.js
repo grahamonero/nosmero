@@ -3897,8 +3897,14 @@ export async function fetchParentPosts(posts, customRelays = null) {
             
             if (State.pool && relays.length > 0) {
                 await new Promise((resolve) => {
+                    // `kinds` is required, not optional: purplepag.es is in
+                    // DEFAULT_RELAYS and answers a bare {ids} filter with
+                    // CLOSED "blocked: filters must specify at least one kind",
+                    // so every parent fetch burned that connection for nothing.
+                    // The listed kinds are what a reply's `e` tag can point at
+                    // and what the parent card is able to render.
                     const sub = State.pool.subscribeMany(relays, [
-                        { ids: parentIdsToFetch }
+                        { ids: parentIdsToFetch, kinds: [1, 6, 1111] }
                     ], {
                         onevent(event) {
                             State.eventCache[event.id] = event;

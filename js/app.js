@@ -3131,7 +3131,9 @@ async function loadRelayListFromRelays() {
             write: data.write.length,
             announced: announced.length
         });
-        return { read: data.read, write: data.write, announced };
+        // created_at rides along so loadUserRelayList can weigh this blob against
+        // a kind 10002 published from another client.
+        return { read: data.read, write: data.write, announced, created_at: latest.created_at };
     } catch (error) {
         console.error('❌ Error loading relay list from NIP-78 relay:', error);
         return null;

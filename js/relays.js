@@ -118,6 +118,12 @@ export let userRelayList = {
 // Keyed by pubkey rather than a bare flag so it can't survive an account switch.
 let relayListConfirmedFor = null;
 
+// When the copy currently in `userRelayList` was written, in unix seconds. This is
+// what makes the list comparable against a kind 10002 published from another
+// client; without it there was no way to tell a fresh local edit from a cache old
+// enough that the network had moved on. 0 = unknown, so the network wins.
+let localListUpdatedAt = 0;
+
 export function isRelayListConfirmed() {
     return !!State.publicKey && relayListConfirmedFor === State.publicKey;
 }
@@ -373,7 +379,9 @@ export async function fetchUserRelayList(pubkey) {
         if (relayListEvents.length > 0) {
             const { pickNewest } = await import('./replaceable.js');
             const event = pickNewest(relayListEvents);
-            if (event) return parseRelayList(event);
+            // created_at rides along so callers can tell whether this published
+            // list is newer than the copy they already hold.
+            if (event) return { ...parseRelayList(event), created_at: event.created_at, id: event.id };
         }
         return null;
     } catch (error) {
@@ -566,6 +574,9 @@ function relayStorageKey() {
 function hydrateFromStorage() {
     const key = relayStorageKey();
     const stored = localStorage.getItem(key);
+    // Cleared first so an account switch can't leave the previous account's
+    // write time in place and make this account's list look newer than it is.
+    localListUpdatedAt = 0;
     if (!stored) return false;
     try {
         const parsed = JSON.parse(stored);
@@ -577,6 +588,10 @@ function hydrateFromStorage() {
             : [...new Set([...read, ...write])];
 
         userRelayList = { read, write, announced };
+        // Absent on lists cached before this field existed. Left at 0 so any
+        // published kind 10002 outranks them, which is the whole point: those
+        // are exactly the caches that were shadowing the network copy.
+        localListUpdatedAt = Number(parsed.updatedAt) || 0;
         updateActiveRelays();
         return true;
     } catch (error) {
@@ -585,56 +600,82 @@ function hydrateFromStorage() {
     }
 }
 
-// Load user's relay list. NIP-78 is the cross-device source of truth and is
-// ALWAYS consulted when logged in, so changes on Machine A propagate to
-// Machine B on next login. localStorage is a fast-path bootstrap that gets
-// overwritten when NIP-78 returns data; if NIP-78 is unreachable, the cache
-// keeps the user functional. Kind 10002 is the last resort for accounts that
-// have never written to NIP-78.
+// Load user's relay list.
+//
+// All three stores are consulted and the most recently written one wins. Kind
+// 10002 used to be a last resort reached only when NIP-78 AND the cache were
+// both empty, which meant either of them shadowed it permanently — a relay list
+// published from another client could never reach Nosmero while this browser
+// held any copy at all, however old. Reading it every time is what lets a change
+// made elsewhere arrive.
+//
+// NIP-78 and kind 10002 are fetched together rather than in sequence so this
+// costs one round-trip at login, not two.
 export async function loadUserRelayList() {
     const hadCache = hydrateFromStorage();
     if (!State.publicKey) return;
 
-    // Always consult NIP-78 — it has the user's full state across devices.
-    try {
-        const fromNip78 = await window.loadRelayListFromRelays?.();
-        if (fromNip78 && (fromNip78.read.length > 0 || fromNip78.write.length > 0)) {
-            userRelayList = {
-                read: fromNip78.read,
-                write: fromNip78.write,
-                announced: fromNip78.announced
-            };
-            relayListConfirmedFor = State.publicKey;
-            saveUserRelayList();
-            return;
-        }
-    } catch (error) {
-        console.error('NIP-78 relay-list lookup failed, falling back to cache/kind 10002:', error);
+    const [nip78Settled, kind10002Settled] = await Promise.allSettled([
+        Promise.resolve(window.loadRelayListFromRelays?.()),
+        fetchUserRelayList(State.publicKey)
+    ]);
+
+    if (nip78Settled.status === 'rejected') {
+        console.error('NIP-78 relay-list lookup failed:', nip78Settled.reason);
+    }
+    if (kind10002Settled.status === 'rejected') {
+        console.error('kind 10002 relay-list lookup failed:', kind10002Settled.reason);
     }
 
-    // NIP-78 had no data. If we hydrated from localStorage, keep that. The cache is keyed by
-    // pubkey, so a hit here is this account's own list and not an anonymous visit's defaults.
-    if (hadCache) {
+    const fromNip78 = nip78Settled.status === 'fulfilled' ? nip78Settled.value : null;
+    const fromKind10002 = kind10002Settled.status === 'fulfilled' ? kind10002Settled.value : null;
+
+    const { pickNewestRelayList, mergeAnnouncedList } = await import('./relay-list-rules.js');
+
+    const winner = pickNewestRelayList([
+        { source: 'local', at: localListUpdatedAt, list: hadCache ? userRelayList : null },
+        { source: 'nip78', at: fromNip78?.created_at, list: fromNip78 },
+        { source: 'kind10002', at: fromKind10002?.created_at, list: fromKind10002 }
+    ]);
+
+    if (!winner) {
+        // Nothing anywhere. Leave the DEFAULT_RELAYS seed in place and, critically,
+        // do NOT mark the list confirmed — publishing a replaceable event onto the
+        // public defaults out-ranks the copy the user's own relays hold.
+        return;
+    }
+
+    if (winner.source === 'local') {
+        // This browser holds the newest edit; it may simply not be published yet.
         relayListConfirmedFor = State.publicKey;
         return;
     }
 
-    // No cache + no NIP-78: try kind 10002 as last resort.
-    const fetched = await fetchUserRelayList(State.publicKey);
-    if (fetched && (fetched.read.length > 0 || fetched.write.length > 0)) {
+    if (winner.source === 'nip78') {
         userRelayList = {
-            read: fetched.read,
-            write: fetched.write,
-            announced: Array.from(new Set([...fetched.read, ...fetched.write]))
+            read: fromNip78.read,
+            write: fromNip78.write,
+            announced: fromNip78.announced
         };
-        relayListConfirmedFor = State.publicKey;
-        saveUserRelayList();
+    } else {
+        // kind 10002 carries only the announced subset, so it is merged onto what
+        // is held rather than replacing it — see mergeAnnouncedList.
+        userRelayList = mergeAnnouncedList(userRelayList, fromKind10002);
     }
+
+    console.log(`📡 Relay list adopted from ${winner.source} (created_at ${winner.at})`);
+    saveUserRelayList(winner.at);
 }
 
-// Save user relay list to localStorage
-export function saveUserRelayList() {
-    localStorage.setItem(relayStorageKey(), JSON.stringify(userRelayList));
+// Save user relay list to localStorage.
+//
+// `updatedAt` records WHEN this copy was written so the next login can compare it
+// against a published kind 10002. It defaults to now for a local edit; adopting a
+// network version passes that event's created_at instead, so a stale copy can't
+// stamp itself as the newest thing on the account.
+export function saveUserRelayList(updatedAt = Math.floor(Date.now() / 1000)) {
+    localListUpdatedAt = updatedAt;
+    localStorage.setItem(relayStorageKey(), JSON.stringify({ ...userRelayList, updatedAt }));
     // Writing this account's list is as good a confirmation as loading one — otherwise an
     // account that configures its relays for the first time stays permanently unconfirmed,
     // because nothing was there to load at login.
@@ -775,26 +816,10 @@ export async function importRelayList() {
 
     const fetched = await fetchUserRelayList(State.publicKey);
     if (fetched && (fetched.read.length > 0 || fetched.write.length > 0)) {
-        const announced = userRelayList.announced || [];
-        // Local-only = present in read/write but NOT in announced.
-        const localOnlyReads = (userRelayList.read || []).filter(url => !announced.includes(url));
-        const localOnlyWrites = (userRelayList.write || []).filter(url => !announced.includes(url));
-
-        const mergedRead = Array.from(new Set([...fetched.read, ...localOnlyReads]));
-        const mergedWrite = Array.from(new Set([...fetched.write, ...localOnlyWrites]));
-
-        userRelayList = {
-            read: mergedRead,
-            write: mergedWrite,
-            // Announced set is everything fetched from kind 10002 — the user has
-            // already declared those as announced — plus any existing announced
-            // entries still in the merged read/write set.
-            announced: Array.from(new Set([
-                ...fetched.read,
-                ...fetched.write,
-                ...announced.filter(url => mergedRead.includes(url) || mergedWrite.includes(url))
-            ]))
-        };
+        const { mergeAnnouncedList } = await import('./relay-list-rules.js');
+        userRelayList = mergeAnnouncedList(userRelayList, fetched);
+        // Stamped now, not with the event's created_at: the user asked for this
+        // import, so it is the newest statement about the list.
         saveUserRelayList();
         return true;
     }
