@@ -1,6 +1,7 @@
 // ==================== UTILITY FUNCTIONS ====================
 import { profileCache, setProfileCache } from './state.js';
 import * as State from './state.js';
+import { stashMagnets, restoreMagnets, restoreMagnetsAsText } from './magnet.js';
 
 // Show notification toast message
 export function showNotification(message, type = 'success') {
@@ -193,7 +194,7 @@ function isValidUrlScheme(url) {
 }
 
 // Parse content with markdown support
-function parseMarkdownContent(content, skipEmbeddedNotes = false) {
+function parseMarkdownContent(content, skipEmbeddedNotes = false, magnets = []) {
     // Store nostr mentions to restore after markdown parsing
     const mentions = [];
     let mentionIndex = 0;
@@ -212,6 +213,10 @@ function parseMarkdownContent(content, skipEmbeddedNotes = false) {
         const mention = mentions[parseInt(index)];
         return processNostrMention(mention, skipEmbeddedNotes);
     });
+
+    // Swap magnet placeholders for cards BEFORE sanitizing, so the card is
+    // subject to DOMPurify like everything else rather than bypassing it.
+    parsed = restoreMagnets(parsed, magnets);
 
     // Sanitize with DOMPurify - allow markdown tags
     if (typeof DOMPurify !== 'undefined') {
@@ -294,18 +299,25 @@ function processNostrMention(mention, skipEmbeddedNotes = false) {
 
 // Parse and format post content: links, images, mentions, and embedded notes
 export function parseContent(content, skipEmbeddedNotes = false) {
+    // Stash magnet URIs before anything else touches them. escapeHtml() below
+    // would turn their `&` separators into `&amp;`, and the markdown detector
+    // matches `_` — which most torrent display names contain — routing them to
+    // marked.js, which mangles the URI. Restored just before DOMPurify in both
+    // paths. See js/magnet.js.
+    const { text: stashedContent, magnets } = stashMagnets(content);
+
     // Check if content has markdown syntax
-    const hasMarkdown = /(\*\*|__|\*|_|#{1,6}\s|```|`|^\s*[-*+]\s|^\s*\d+\.\s|^\s*>)/m.test(content);
+    const hasMarkdown = /(\*\*|__|\*|_|#{1,6}\s|```|`|^\s*[-*+]\s|^\s*\d+\.\s|^\s*>)/m.test(stashedContent);
 
     // If marked.js is available and content has markdown, use markdown parsing
     if (window.marked && hasMarkdown) {
-        return parseMarkdownContent(content, skipEmbeddedNotes);
+        return parseMarkdownContent(stashedContent, skipEmbeddedNotes, magnets);
     }
 
     // Otherwise use standard parsing
     // Extract image URLs from any existing HTML img tags before escaping
     // This handles notes where clients embedded <img> tags directly
-    let cleanContent = content.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, '$1');
+    let cleanContent = stashedContent.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, '$1');
 
     // First escape HTML to prevent XSS
     let parsed = escapeHtml(cleanContent);
@@ -479,6 +491,9 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     // Restore stashed media tags now that mention/URL processing is done
     parsed = parsed.replace(/\x00MEDIA_(\d+)\x00/g, (m, idx) => mediaTags[parseInt(idx, 10)] || '');
 
+    // Swap magnet placeholders for cards BEFORE sanitizing (see above).
+    parsed = restoreMagnets(parsed, magnets);
+
     // Sanitize with DOMPurify to prevent XSS
     if (typeof DOMPurify !== 'undefined') {
         parsed = DOMPurify.sanitize(parsed, {
@@ -488,8 +503,10 @@ export function parseContent(content, skipEmbeddedNotes = false) {
             ADD_ATTR: ['target']
         });
     } else {
-        // Fallback: return escaped plaintext if DOMPurify is not available
-        return escapeHtml(content);
+        // Fallback: return escaped plaintext if DOMPurify is not available.
+        // Restore the magnet placeholders to their original URIs so the note
+        // still reads correctly, rather than leaking stash tokens to the user.
+        return escapeHtml(restoreMagnetsAsText(stashedContent, magnets));
     }
     
     return parsed;

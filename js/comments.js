@@ -286,7 +286,7 @@ export function renderCommentThread(rootEvent, comments) {
     const composer = State.publicKey
         ? `
             <form class="article-comment-form" data-action="article-comment-top-submit">
-                <textarea class="article-comment-textarea" placeholder="Write a comment…" rows="3" required></textarea>
+                <textarea class="article-comment-textarea" placeholder="Write a comment…" rows="3" required spellcheck="true"></textarea>
                 <div class="article-comment-form-actions">
                     <button type="submit" class="article-comment-submit-btn">Post comment</button>
                 </div>
@@ -357,7 +357,7 @@ function toggleReplyForm(replyBtn, rootEvent, container) {
     slot.removeAttribute('hidden');
     slot.innerHTML = `
         <form class="article-comment-form article-comment-form--reply">
-            <textarea class="article-comment-textarea" placeholder="Reply…" rows="2" required></textarea>
+            <textarea class="article-comment-textarea" placeholder="Reply…" rows="2" required spellcheck="true"></textarea>
             <div class="article-comment-form-actions">
                 <button type="button" class="article-comment-submit-btn" data-action="article-comment-reply-submit" data-parent-comment-id="${escapeAttr(commentId)}">Reply</button>
                 <button type="button" class="article-comment-cancel-btn" data-action="article-comment-reply-cancel" data-parent-comment-id="${escapeAttr(commentId)}">Cancel</button>

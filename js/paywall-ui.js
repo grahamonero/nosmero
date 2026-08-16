@@ -1194,7 +1194,7 @@ export function addPaywallToggle(composeContainer) {
                 </div>
                 <div id="paywallPreviewSuggested" class="paywall-preview-suggested"></div>
                 <div id="paywallPreviewEdit" class="paywall-preview-edit">
-                    <textarea id="paywallPreviewText" placeholder="Auto-generated from first paragraph..." rows="3"></textarea>
+                    <textarea id="paywallPreviewText" placeholder="Auto-generated from first paragraph..." rows="3" spellcheck="true"></textarea>
                     <div class="paywall-preview-hint">Leave empty to auto-generate from your post's first paragraph</div>
                 </div>
             </div>

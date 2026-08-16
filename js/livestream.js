@@ -803,7 +803,7 @@ function renderStreamInRightPanel(stream, profile) {
                 </div>
                 ${State.publicKey ? `
                     <div class="chat-input-container">
-                        <input type="text" id="chatInput" class="chat-input" placeholder="Send a message..." maxlength="280">
+                        <input type="text" id="chatInput" class="chat-input" placeholder="Send a message..." maxlength="280" spellcheck="true">
                         <button class="chat-send-btn" onclick="window.NostrLivestream.sendChatMessage()">Send</button>
                     </div>
                 ` : `
@@ -892,7 +892,7 @@ function renderStreamModal(stream, profile) {
                 </div>
                 ${State.publicKey ? `
                     <div class="chat-input-container">
-                        <input type="text" id="chatInput" class="chat-input" placeholder="Send a message..." maxlength="280">
+                        <input type="text" id="chatInput" class="chat-input" placeholder="Send a message..." maxlength="280" spellcheck="true">
                         <button class="chat-send-btn" onclick="window.NostrLivestream.sendChatMessage()">Send</button>
                     </div>
                 ` : `
@@ -1197,7 +1197,7 @@ export async function showTipModal() {
                 <div class="tip-message-section">
                     <label>Message (optional)</label>
                     <input type="text" id="tipMessage" class="tip-message-input"
-                           placeholder="Love the stream!" maxlength="140">
+                           placeholder="Love the stream!" maxlength="140" spellcheck="true">
                     <div class="char-count"><span id="tipMsgCount">0</span>/140</div>
                 </div>
 

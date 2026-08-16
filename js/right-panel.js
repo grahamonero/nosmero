@@ -2397,7 +2397,7 @@ const RightPanel = {
                 </div>
                 <div id="panelPaywallPreview" style="display: none; margin-top: 10px;">
                     <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Preview text (visible to non-payers):</label>
-                    <textarea id="panelPaywallPreviewText" placeholder="Leave empty to auto-generate from first paragraph..." rows="3" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; resize: vertical; box-sizing: border-box;"></textarea>
+                    <textarea id="panelPaywallPreviewText" placeholder="Leave empty to auto-generate from first paragraph..." rows="3" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; resize: vertical; box-sizing: border-box;" spellcheck="true"></textarea>
                 </div>
             </div>
         ` : '';
@@ -2406,7 +2406,7 @@ const RightPanel = {
             ${replyTo ? `<div class="reply-context" style="padding: 12px; background: var(--card-bg); border-radius: 8px; margin-bottom: 12px; font-size: 14px; color: var(--text-secondary);">
                 Replying to: <span id="replyToPreview">Loading...</span>
             </div>` : ''}
-            <textarea class="compose-textarea" id="panelComposeText" placeholder="${replyTo ? 'Write your reply...' : 'What\'s happening?'}" maxlength="4000"></textarea>
+            <textarea class="compose-textarea" id="panelComposeText" placeholder="${replyTo ? 'Write your reply...' : 'What\'s happening?'}" maxlength="4000" spellcheck="true"></textarea>
             <div id="panelMediaPreview" class="media-preview" style="display: none;"></div>
             <div id="panelComposePreview" class="compose-preview" style="display: none;"></div>
             <div class="compose-toolbar">

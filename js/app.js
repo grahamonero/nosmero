@@ -4166,14 +4166,14 @@ function showEditProfileModal() {
                         <label style="color: #ccc; display: block; margin-bottom: 8px; font-size: 14px;">Display Name</label>
                         <input type="text" id="editProfileName" value="${Utils.escapeHtml(currentProfile.name || currentProfile.display_name || '')}" 
                                style="width: 100%; padding: 12px; background: #000; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px;" 
-                               placeholder="Your display name">
+                               placeholder="Your display name" spellcheck="true">
                     </div>
                     
                     <div style="margin-bottom: 16px;">
                         <label style="color: #ccc; display: block; margin-bottom: 8px; font-size: 14px;">Bio / About</label>
                         <textarea id="editProfileAbout" rows="4" 
                                   style="width: 100%; padding: 12px; background: #000; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px; resize: vertical;" 
-                                  placeholder="Tell people about yourself...">${Utils.escapeHtml(currentProfile.about || '')}</textarea>
+                                  placeholder="Tell people about yourself..." spellcheck="true">${Utils.escapeHtml(currentProfile.about || '')}</textarea>
                     </div>
                     
                     <div style="margin-bottom: 16px;">

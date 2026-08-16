@@ -1276,7 +1276,10 @@
             padding: 8px 0;
             /* Ensure cursor is always visible */
             text-shadow: none;
-            -webkit-text-fill-color: #fff;
+            /* Follows the theme — a hardcoded white here left compose text
+               invisible on the light theme in any browser that misses the
+               -webkit-min-device-pixel-ratio override below. */
+            -webkit-text-fill-color: var(--text-primary);
             /* Force caret visibility on webkit browsers */
             -webkit-appearance: none;
             -moz-appearance: none;
@@ -5661,4 +5664,91 @@ body.viewing-article-editor > .container > .right-panel {
     border-radius: 8px;
     color: var(--accent, #FF6600);
     text-align: center;
+}
+
+/* ==================== MAGNET LINK CARD ====================
+   Renders a magnet: URI found in note content. Nothing is downloaded or
+   seeded — "Open" hands the URI to the user's own torrent client.
+   Styled with classes rather than inline style= on purpose: the CSP work
+   of 2026-08-16 is trying to shrink desktop's inline-attribute count, not
+   grow it. See js/magnet.js. */
+.magnet-card {
+    display: block;
+    margin: 8px 0;
+    padding: 12px;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 8px;
+    background: var(--card-bg, rgba(255, 255, 255, 0.03));
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.magnet-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    min-width: 0;
+}
+
+.magnet-card-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.magnet-card-name {
+    color: var(--text-primary, #fff);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.magnet-card-meta {
+    color: var(--text-muted, #888);
+    font-size: 12px;
+    margin-bottom: 10px;
+    overflow-wrap: anywhere;
+}
+
+.magnet-card-sep {
+    margin: 0 6px;
+    opacity: 0.5;
+}
+
+.magnet-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.magnet-card-btn {
+    display: inline-block;
+    padding: 5px 12px;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary, #a0a0a0);
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.magnet-card-btn:hover {
+    background: var(--bg-hover, #2a2a2a);
+    color: var(--text-primary, #fff);
+    border-color: var(--border-hover, rgba(255, 255, 255, 0.15));
+}
+
+.magnet-card-btn-primary {
+    border-color: var(--monero-orange, #FF6600);
+    color: var(--monero-orange, #FF6600);
+}
+
+.magnet-card-btn-primary:hover {
+    background: rgba(255, 102, 0, 0.12);
+    border-color: var(--monero-orange, #FF6600);
+    color: var(--monero-orange, #FF6600);
 }

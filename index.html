@@ -9,7 +9,7 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.14"
             integrity="sha384-pOfkGbK3mm4nyDNvreNZgI7TJ8PQJT3CuFmi0HMrTVDE8KHeVlHS3AyJT4ucszCo"
             crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="/styles.css?v=1.9.2-emoji">
+    <link rel="stylesheet" href="/styles.css?v=1.9.4-compose-color">
     <link rel="stylesheet" href="/css/livestream.css?v=1.0.4">
 
 </head>
@@ -274,7 +274,7 @@
         </div>
 
         <div id="compose" class="compose-area" style="display: none;">
-            <textarea class="compose-textarea" placeholder="What's happening?" maxlength="4000" style="min-height: 120px; resize: vertical;" oninput="updateCharacterCount(this, 'mainCharCount')"></textarea>
+            <textarea class="compose-textarea" placeholder="What's happening?" maxlength="4000" spellcheck="true" style="min-height: 120px; resize: vertical;" oninput="updateCharacterCount(this, 'mainCharCount')"></textarea>
             <div id="composePreview" class="compose-preview" style="display: none;"></div>
             <div class="compose-toolbar">
                 <button type="button" data-format="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
@@ -315,7 +315,7 @@
                         </div>
                         <div id="paywallPreviewSuggested" class="paywall-preview-suggested"></div>
                         <div id="paywallPreviewEdit" class="paywall-preview-edit">
-                            <textarea id="paywallPreviewText" placeholder="Auto-generated from first paragraph..." rows="3"></textarea>
+                            <textarea id="paywallPreviewText" placeholder="Auto-generated from first paragraph..." rows="3" spellcheck="true"></textarea>
                             <div class="paywall-preview-hint">Leave empty to auto-generate from your post's first paragraph</div>
                         </div>
                     </div>
@@ -382,7 +382,7 @@
                         <!-- Messages will appear here -->
                     </div>
                     <div id="messageComposer" class="message-composer" style="display: none;">
-                        <textarea id="messageInput" placeholder="Type your message..." rows="3"></textarea>
+                        <textarea id="messageInput" placeholder="Type your message..." rows="3" spellcheck="true"></textarea>
                         <button onclick="sendMessage()" class="send-message-btn">Send</button>
                     </div>
                 </div>
@@ -442,8 +442,8 @@
                     <button id="articleCoverUploadBtn" class="btn-secondary" type="button">Upload cover</button>
                 </div>
 
-                <input id="articleTitle" class="article-title-input" type="text" placeholder="Title" maxlength="200" />
-                <input id="articleSummary" class="article-summary-input" type="text" placeholder="One-sentence summary (shown in feeds)" maxlength="300" />
+                <input id="articleTitle" class="article-title-input" type="text" placeholder="Title" maxlength="200" spellcheck="true" />
+                <input id="articleSummary" class="article-summary-input" type="text" placeholder="One-sentence summary (shown in feeds)" maxlength="300" spellcheck="true" />
                 <input id="articleTopics" class="article-topics-input" type="text" placeholder="Topics, space-separated (e.g. #monero #privacy)" />
 
                 <fieldset id="articlePaywallSection" class="article-paywall-section">
@@ -477,7 +477,7 @@
                     <button id="articleInsertPaywallBreakBtn" class="article-fmt-btn" type="button" title="Insert paywall break">🔒</button>
                 </div>
 
-                <textarea id="articleBody" class="article-body-textarea" placeholder="Write your article in markdown…" rows="20"></textarea>
+                <textarea id="articleBody" class="article-body-textarea" placeholder="Write your article in markdown…" rows="20" spellcheck="true"></textarea>
             </div>
 
             <div id="articleEditorPreview" class="article-editor-preview" style="display: none;"></div>
@@ -1123,7 +1123,7 @@
     <div class="modal" id="newPostModal">
         <div class="modal-content">
             <div class="modal-header">Create Note</div>
-            <textarea id="newPostContent" placeholder="What's happening?" maxlength="4000" style="width: 100%; min-height: 150px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;" oninput="updateCharacterCount(this, 'modalCharCount')"></textarea>
+            <textarea id="newPostContent" placeholder="What's happening?" maxlength="4000" spellcheck="true" style="width: 100%; min-height: 150px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;" oninput="updateCharacterCount(this, 'modalCharCount')"></textarea>
             <div style="text-align: right; color: #666; font-size: 12px; margin-top: 4px;">
                 <span id="modalCharCount">0/4000</span>
             </div>
@@ -1147,7 +1147,7 @@
         <div class="modal-content">
             <div class="modal-header">Reply to Post</div>
             <div id="replyingTo" style="padding: 12px; background: #1a1a1a; border-radius: 8px; margin-bottom: 16px; font-size: 14px; color: #999;"></div>
-            <textarea id="replyContent" placeholder="Write your reply..." maxlength="1000" style="width: 100%; min-height: 120px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
+            <textarea id="replyContent" placeholder="Write your reply..." maxlength="1000" spellcheck="true" style="width: 100%; min-height: 120px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
             
             <!-- Media Upload Section for Replies -->
             <div class="media-upload-section">
@@ -1170,7 +1170,7 @@
         <div class="modal-content">
             <div class="modal-header">📌 Publish Highlight</div>
             <blockquote id="highlightPreview" style="padding: 12px 14px; background: rgba(255, 235, 100, 0.08); border-left: 3px solid rgba(255, 235, 100, 0.6); border-radius: 4px; margin: 0 0 16px; font-style: italic; color: #ddd; line-height: 1.55; max-height: 200px; overflow-y: auto;"></blockquote>
-            <textarea id="highlightComment" placeholder="Add a comment (optional)" maxlength="500" style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px; resize: vertical; box-sizing: border-box;"></textarea>
+            <textarea id="highlightComment" placeholder="Add a comment (optional)" maxlength="500" spellcheck="true" style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 14px; resize: vertical; box-sizing: border-box;"></textarea>
             <div class="modal-actions">
                 <button class="close-btn" id="highlightCancelBtn" type="button">Cancel</button>
                 <button class="send-btn" id="highlightPublishBtn" type="button">Publish</button>
@@ -1196,7 +1196,7 @@
 
             <!-- Comment Section (hidden by default) -->
             <div id="repostCommentSection" class="compose-area" style="display: none; margin-bottom: 16px;">
-                <textarea id="repostComment" class="compose-textarea" placeholder="Add your thoughts..." maxlength="1000" style="width: 100%; min-height: 100px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
+                <textarea id="repostComment" class="compose-textarea" placeholder="Add your thoughts..." maxlength="1000" spellcheck="true" style="width: 100%; min-height: 100px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #000; color: #fff; font-size: 16px; resize: vertical;"></textarea>
                 <div class="compose-toolbar">
                     <button type="button" data-format="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
                     <button type="button" data-format="italic" title="Italic (Ctrl+I)"><em>I</em></button>
@@ -1359,7 +1359,7 @@
                 <!-- Message Field (shown for all public options) -->
                 <div id="messageSection" style="display: none; margin-bottom: 20px;">
                     <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Message (optional)</label>
-                    <textarea id="disclosurePromptMessage" rows="3"
+                    <textarea id="disclosurePromptMessage" rows="3" spellcheck="true"
                               placeholder="Add a message with your tip..."
                               style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #fff; resize: vertical;"></textarea>
                 </div>
@@ -1540,7 +1540,7 @@
     </dialog>
 
     <!-- Load the modular v2 application (UI modules consolidated into /js/ui/) -->
-    <script type="module" src="/js/app.js?v=3.1.4-replaceable"></script>
+    <script type="module" src="/js/app.js?v=3.1.5-magnet"></script>
 
     <!-- XMR Wallet Modal (replaces wallet.html) -->
     <script type="module" src="/js/wallet-modal.js?v=1.0.2-three-column"></script>
