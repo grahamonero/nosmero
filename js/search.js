@@ -14,6 +14,7 @@ import {
     setCurrentPage
 } from './state.js';
 import * as PaywallUI from './paywall-ui.js';
+import { highlightSearchTerm } from './search-highlight.js';
 
 // ==================== GLOBAL VARIABLES ====================
 
@@ -2356,8 +2357,7 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
     // Highlight search term in content
     let highlightedContent = parseContent(post.content);
     if (currentSearchQuery && !currentSearchQuery.startsWith('#') && !currentSearchQuery.startsWith('@')) {
-        const regex = new RegExp(`(${escapeRegex(currentSearchQuery)})`, 'gi');
-        highlightedContent = highlightedContent.replace(regex, '<mark style="background: linear-gradient(135deg, #FF6600, #8B5CF6); color: #000; padding: 2px; border-radius: 2px;">$1</mark>');
+        highlightedContent = highlightSearchTerm(highlightedContent, currentSearchQuery);
     }
 
     return `
@@ -2552,10 +2552,6 @@ function getLightningAddress(post) {
     return null;
 }
 
-// Escape special regex characters to prevent regex injection
-function escapeRegex(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 // Parse content using the full utils.js implementation
 function parseContent(content) {

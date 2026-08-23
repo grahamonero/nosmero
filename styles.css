@@ -5752,3 +5752,12 @@ body.viewing-article-editor > .container > .right-panel {
     border-color: var(--monero-orange, #FF6600);
     color: var(--monero-orange, #FF6600);
 }
+
+/* Search-result term highlight. Applied by highlightSearchTerm() in js/search.js,
+   which marks text nodes only — never inside a tag or attribute. */
+.search-hit {
+    background: linear-gradient(135deg, #FF6600, #8B5CF6);
+    color: #000;
+    padding: 2px;
+    border-radius: 2px;
+}
