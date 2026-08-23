@@ -9,6 +9,7 @@ import * as PaywallUI from './paywall-ui.js';
 import * as FeedCache from './feed-cache.js';
 import * as IpfsPins from './ipfs-pins.js';
 import { isNewerVersion } from './replaceable.js';
+import { authorsNeedingLookup, filterPostsWithTips } from './monero-tips.js';
 
 // Constants for feed management
 export const POSTS_PER_PAGE = 10;
@@ -1765,6 +1766,108 @@ export async function fetchUserMuteList(pubkey) {
 
 // Track Web of Trust feed state
 let webOfTrustOffset = 0;
+
+// ---- Suggested Follows: "Monero tips available" filter --------------------
+// Narrows the feed to authors who can actually receive a tip. The choice
+// sticks across navigation because this feed reloads from scratch every time
+// it is opened.
+const WOT_TIPS_ONLY_KEY = 'nosmero:wot-tips-only';
+
+let webOfTrustTipsOnly = (() => {
+    try {
+        return localStorage.getItem(WOT_TIPS_ONLY_KEY) === '1';
+    } catch (_) {
+        return false; // private mode / storage disabled
+    }
+})();
+
+// Look up kind-30078 `nosmero:payment` for several authors at once. Resolving
+// one author at a time costs a subscription each; the feed asks about ten.
+async function fetchTipAddresses(pubkeys) {
+    const addresses = {};
+    if (!pubkeys.length || !State.pool) return addresses;
+
+    const relay = Relays.getNosmeroRelay();
+    await new Promise((resolve) => {
+        let settled = false;
+        const done = () => {
+            if (settled) return;
+            settled = true;
+            try { sub.close(); } catch (_) { /* already closed */ }
+            resolve();
+        };
+        const sub = State.pool.subscribeMany([relay], [{
+            kinds: [30078],
+            authors: pubkeys,
+            '#d': ['nosmero:payment'],
+        }], {
+            onevent(event) {
+                try {
+                    const address = JSON.parse(event.content)?.monero_address;
+                    // Replaceable event: keep the newest per author.
+                    const seen = addresses[event.pubkey];
+                    if (!seen || event.created_at > seen.at) {
+                        addresses[event.pubkey] = { address, at: event.created_at };
+                    }
+                } catch (_) {
+                    // Malformed payment blob — treat as no address.
+                }
+            },
+            oneose: done,
+        });
+        setTimeout(done, 3000);
+    });
+
+    return Object.fromEntries(
+        Object.entries(addresses).map(([pubkey, v]) => [pubkey, v.address]));
+}
+
+// Drop notes whose author cannot receive a tip. Only queries the relay for
+// authors the cheap sources could not already answer for.
+async function applyTipsOnlyFilter(posts) {
+    if (!webOfTrustTipsOnly || !posts.length) return posts;
+
+    const pending = authorsNeedingLookup(posts, State.profileCache);
+    const nip78 = pending.length ? await fetchTipAddresses(pending) : {};
+    const kept = filterPostsWithTips(posts, State.profileCache, nip78);
+
+    console.log(`🔶 Monero tips filter: kept ${kept.length}/${posts.length} notes (${pending.length} authors needed a relay lookup)`);
+    return kept;
+}
+
+function renderSuggestedFollowsHeader() {
+    const on = webOfTrustTipsOnly;
+    return `
+        <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-primary); background: rgba(255, 255, 255, 0.02);">
+            <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Suggested Follows</h3>
+            <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
+                Posts from high-scoring users in your extended network (past 24 hours)
+            </p>
+            <button id="wotTipsOnlyToggle" onclick="toggleWebOfTrustTipsOnly()" aria-pressed="${on}"
+                title="Show only people who can receive a Monero tip"
+                style="margin-top: 12px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+                       padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+                       border: 1px solid ${on ? '#FF6600' : 'var(--border-primary)'};
+                       background: ${on ? 'rgba(255, 102, 0, 0.15)' : 'transparent'};
+                       color: ${on ? '#FF6600' : 'var(--text-secondary)'};">
+                ${on ? '✓' : '🔶'} Monero tips available
+            </button>
+        </div>
+    `;
+}
+
+// Flip the filter and reload the feed under the new setting.
+export function toggleWebOfTrustTipsOnly() {
+    webOfTrustTipsOnly = !webOfTrustTipsOnly;
+    try {
+        localStorage.setItem(WOT_TIPS_ONLY_KEY, webOfTrustTipsOnly ? '1' : '0');
+    } catch (_) {
+        // Not persisting is fine; the filter still applies for this session.
+    }
+    loadWebOfTrustFeed();
+}
+
+window.toggleWebOfTrustTipsOnly = toggleWebOfTrustTipsOnly;
 let webOfTrustPosts = [];
 
 // Get Web of Trust users (follow Ys from follow Xs)
@@ -2031,8 +2134,13 @@ export async function loadWebOfTrustFeed() {
         // Sort by timestamp (newest first)
         webOfTrustPosts.sort((a, b) => b.created_at - a.created_at);
 
-        // Take first 10 posts
-        const postsToDisplay = webOfTrustPosts.slice(0, 10);
+        // The tips filter reads the author's profile (cached address, about
+        // text), so those have to be in cache before it decides what to keep.
+        if (webOfTrustTipsOnly) await fetchProfiles(followYsArray);
+
+        // Filter before slicing, or the 10 we keep would rarely contain 10 matches
+        const eligiblePosts = await applyTipsOnlyFilter(webOfTrustPosts);
+        const postsToDisplay = eligiblePosts.slice(0, 10);
 
         console.log(`📊 Posts by author:`);
         Object.entries(postsPerAuthor).forEach(([pubkey, posts]) => {
@@ -2041,12 +2149,27 @@ export async function loadWebOfTrustFeed() {
 
         // Render posts
         if (postsToDisplay.length === 0) {
+            // Always render the header — with the filter on it holds the only
+            // control that can turn it back off.
             feed.innerHTML = `
+                ${renderSuggestedFollowsHeader()}
                 <div style="text-align: center; color: #666; padding: 40px;">
-                    <p>No recent posts from suggested follows.</p>
-                    <p style="font-size: 14px; margin-top: 10px;">
-                        Check back later for new content from your extended network!
-                    </p>
+                    ${webOfTrustTipsOnly ? `
+                        <p>No one in this batch has Monero tips available.</p>
+                        <p style="font-size: 14px; margin-top: 10px;">
+                            Load more to keep looking, or switch the filter off to see everyone.
+                        </p>
+                        <div style="margin-top: 20px;">
+                            <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                                Load More Posts
+                            </button>
+                        </div>
+                    ` : `
+                        <p>No recent posts from suggested follows.</p>
+                        <p style="font-size: 14px; margin-top: 10px;">
+                            Check back later for new content from your extended network!
+                        </p>
+                    `}
                 </div>
             `;
         } else {
@@ -2087,12 +2210,7 @@ export async function loadWebOfTrustFeed() {
             `;
 
             feed.innerHTML = `
-                <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-primary); background: rgba(255, 255, 255, 0.02);">
-                    <h3 style="margin: 0; font-size: 18px; color: var(--text-primary);">Suggested Follows</h3>
-                    <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-secondary);">
-                        Posts from high-scoring users in your extended network (past 24 hours)
-                    </p>
-                </div>
+                ${renderSuggestedFollowsHeader()}
                 <div id="homeFeedList">
                     ${renderedPosts.filter(p => p).join('')}
                 </div>
@@ -2193,7 +2311,12 @@ export async function loadMoreWebOfTrustPosts() {
 
         // Sort and take first 10 new posts
         newPosts.sort((a, b) => b.created_at - a.created_at);
-        const postsToDisplay = newPosts.slice(0, 10);
+
+        // Same rule as the first page: fetch profiles the filter needs, then
+        // narrow before slicing.
+        if (webOfTrustTipsOnly) await fetchProfiles(followYsArray);
+        const eligibleNewPosts = await applyTipsOnlyFilter(newPosts);
+        const postsToDisplay = eligibleNewPosts.slice(0, 10);
 
         console.log(`📊 New posts by author:`);
         Object.entries(newPostsPerAuthor).forEach(([pubkey, posts]) => {
@@ -2258,7 +2381,7 @@ export async function loadMoreWebOfTrustPosts() {
             if (loadMoreContainer) {
                 loadMoreContainer.innerHTML = `
                     <div id="webOfTrustLoadMoreContainer" style="text-align: center; padding: 20px; border-top: 1px solid var(--border-primary);">
-                        <p style="color: #666; margin-bottom: 12px;">No posts in this batch</p>
+                        <p style="color: #666; margin-bottom: 12px;">${webOfTrustTipsOnly ? 'No one with Monero tips in this batch' : 'No posts in this batch'}</p>
                         <button onclick="loadMoreWebOfTrustPosts()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
                             Load More Posts
                         </button>

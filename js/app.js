@@ -6,6 +6,7 @@ import * as State from './state.js';
 import * as Utils from './utils.js';
 import { fetchLatest, applyUpdates, nextCreatedAt, preserveUnmanagedTags, unreadNotice, isNewerVersion } from './replaceable.js';
 import { shouldReplaceCachedProfile } from './profile-cache-rules.js';
+import { findMoneroAddress } from './monero-tips.js';
 import * as Crypto from './crypto.js';
 import * as Relays from './relays.js';
 import * as Nip05 from './nip05.js';
@@ -3277,34 +3278,13 @@ async function getUserMoneroAddress(pubkey) {
 
 // Extract Monero address from text using regex pattern matching
 function extractMoneroAddressFromText(text) {
-    if (!text) return null;
-
-    console.log('🔍 Scanning text for Monero address, length:', text.length);
-
-    // Check for "monero:XXXXX..." format first
-    const moneroLabelRegex = /monero:\s*([48][0-9AB][1-9A-HJ-NP-Za-km-z]{93,105})/i;
-    const labelMatch = text.match(moneroLabelRegex);
-    if (labelMatch && labelMatch[1]) {
-        console.log('✅ Found Monero address with monero: prefix:', labelMatch[1].slice(0, 10) + '...');
-        return labelMatch[1];
-    }
-
-    // Monero address regex patterns (standalone):
-    // - Standard addresses start with 4 (95 chars)
-    // - Subaddresses start with 8 (95 chars)
-    // - Integrated addresses start with 4 (106 chars)
-    const moneroRegex = /\b[48][0-9AB][1-9A-HJ-NP-Za-km-z]{93,105}\b/g;
-
-    const matches = text.match(moneroRegex);
-    console.log('🔍 Monero address regex matches:', matches ? matches.length : 0);
-    if (matches && matches.length > 0) {
-        console.log('✅ Found Monero address:', matches[0].slice(0, 10) + '...');
-        // Return first match
-        return matches[0];
-    }
-
-    console.log('❌ No Monero address found in text');
-    return null;
+    // The address patterns live in monero-tips.js so the Suggested Follows
+    // tips filter and this path can't drift apart.
+    const address = findMoneroAddress(text);
+    console.log(address
+        ? `✅ Found Monero address: ${address.slice(0, 10)}...`
+        : '❌ No Monero address found in text');
+    return address;
 }
 
 // Clear all data
