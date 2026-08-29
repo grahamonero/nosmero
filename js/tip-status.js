@@ -123,6 +123,19 @@ export function createTipStatusStore() {
             return released;
         },
 
+        /**
+         * Drop everything known about one author, whatever state they are in.
+         *
+         * Unlike release(), which only lets go of an in-flight claim, this also
+         * discards a settled answer — needed when the account changes its own
+         * address, because settle() deliberately refuses to downgrade an address
+         * it already holds and would otherwise keep showing the old one.
+         * The next paint asks the relay and learns the truth.
+         */
+        forget(pubkey) {
+            return byPubkey.delete(pubkey);
+        },
+
         /** Session reset — logout, or a test wanting a clean slate. */
         clear() {
             byPubkey.clear();
@@ -216,6 +229,46 @@ export function applyLookupResult(store, { batch = [], events = [], completed = 
         store.release(unanswered);
     }
     return changed;
+}
+
+/**
+ * What saving the profile editor should do about the tip address.
+ *
+ * Four inputs, because three different "empty" states have to be told apart:
+ *   typed     what is in the box now
+ *   showing   what the box was filled with when the editor opened
+ *   known     what NIP-78 is KNOWN to hold — null when the lookup has not answered
+ *   hasLegacyKind0  whether the public profile still carries an address
+ *
+ * The traps:
+ *   - An untouched box holding a legacy kind-0 address still has to be written to
+ *     NIP-78. That is the migration; skipping it and stripping kind 0 anyway
+ *     destroys the address.
+ *   - An empty box is only a clear if the user emptied it. If the lookup has not
+ *     answered, the box is empty because nothing filled it, and writing that would
+ *     delete an address the account actually has.
+ *   - kind 0 must never be stripped on the strength of a write that did not
+ *     happen, so `stripKind0` is only valid once any required write succeeded.
+ *
+ * @returns {{write:boolean, value:string|null, stripKind0:boolean}}
+ *          `value` is null for a delete, matching applyUpdates' convention.
+ */
+export function tipSavePlan({ typed = '', showing = '', known = null, hasLegacyKind0 = false } = {}) {
+    const address = String(typed ?? '').trim();
+    const was = String(showing ?? '').trim();
+    const edited = address !== was;
+
+    const migrating = !!address && address !== known;
+    const clearing  = !address && edited;
+    const write = migrating || clearing;
+
+    // Note there is no "is it safe to strip yet" term here, and there cannot be a
+    // useful one: any address not already in NIP-78 makes `migrating` true, so by
+    // this point NIP-78 either holds it or is about to. What this cannot know is
+    // whether that write SUCCEEDS, and that is the case that would destroy the
+    // address — so the caller must not act on `stripKind0` until the write it was
+    // told to make has actually returned.
+    return { write, value: address || null, stripKind0: hasLegacyKind0 };
 }
 
 /**

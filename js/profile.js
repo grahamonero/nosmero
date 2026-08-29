@@ -19,9 +19,10 @@ import { signAndPublish, fetchOne, fetchEvents, hexToNpub, npubToHex } from './n
 import { getReadRelaysWithDefaults, DEFAULT_RELAYS, SEARCH_RELAYS } from './relays.js';
 import { renderPost, registerEvents } from './feed.js';
 import { escapeHtml, toast, timeAgo, decodeNip19 } from './utils.js';
-import { moneroAddressFromKind0 } from './monero-tips.js';
-import { tipDisplayState, TIP_STATE_ADDRESS, TIP_STATE_NONE } from './tip-status.js';
-import { tipStatusOf, ensureTipAddresses, subscribeTipUpdates } from './monero-resolver.js';
+import { moneroAddressFromKind0, isMoneroAddress } from './monero-tips.js';
+import { saveAppData } from './nip78.js';
+import { tipDisplayState, tipSavePlan, TIP_STATE_ADDRESS, TIP_STATE_NONE } from './tip-status.js';
+import { tipStatusOf, tipAddressOf, setTipAddress, ensureTipAddresses, subscribeTipUpdates } from './monero-resolver.js';
 import { openOverlay, closeOverlay } from './app.js';
 
 let _userProfileTarget = null;
@@ -358,7 +359,8 @@ function openProfileEditor(profile, pubkey) {
             </label>
             <label class="field">
                 <span>Monero address (for tips)</span>
-                <input type="text" name="monero_address" value="${escapeAttr(profile.monero_address || '')}">
+                <input type="text" name="monero_address" value="${escapeAttr(tipEditValue(profile, pubkey))}">
+                <span class="text-small muted">Saved to your Nosmero settings, not to your public profile.</span>
             </label>
             <div style="display:flex;gap:8px;margin-top:8px">
                 <button type="submit" class="btn btn-primary" style="flex:1">Save</button>
@@ -368,6 +370,11 @@ function openProfileEditor(profile, pubkey) {
     `;
 
     const form = document.getElementById('profileEditForm');
+    // What the tip field was filled with. Only a real edit writes to the relay,
+    // so opening and saving the form before the address has resolved cannot be
+    // read as "the user cleared it".
+    const tipWasShowing = tipEditValue(profile, pubkey);
+
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const fd = new FormData(form);
@@ -376,12 +383,69 @@ function openProfileEditor(profile, pubkey) {
             const trimmed = String(v).trim();
             if (trimmed) updates[k] = trimmed;
         }
-        await publishProfileUpdate(profile, updates);
-        renderOwnProfileTab();
+
+        const tipAddress = String(fd.get('monero_address') || '').trim();
+        if (tipAddress && !isMoneroAddress(tipAddress)) {
+            toast('That does not look like a Monero address', 'error');
+            return;
+        }
+
+        // The tip address is NIP-78 data, not profile metadata. Publishing it in
+        // kind 0 put it in front of every client on every relay, and a stale copy
+        // there outranks the current one on read, so tips went to an old address.
+        delete updates.monero_address;
+
+        const plan = tipSavePlan({
+            typed: tipAddress,
+            showing: tipWasShowing,
+            known: tipAddressOf(pubkey),
+            hasLegacyKind0: !!profile.monero_address,
+        });
+        let stripKind0 = plan.stripKind0;
+
+        const submit = form.querySelector('button[type="submit"]');
+        if (submit) submit.disabled = true;
+        try {
+            if (plan.write) {
+                // First, because this is the write that can legitimately refuse: if the
+                // settings relay cannot be read, nothing is saved and nothing is lost.
+                await saveAppData('nosmero:payment',
+                    { monero_address: plan.value }, 'payment_settings');
+                setTipAddress(pubkey, tipAddress);
+                stripKind0 = !!profile.monero_address;
+            }
+        } catch (err) {
+            toast(err.message || 'Could not save your tip address', 'error');
+            if (submit) submit.disabled = false;
+            return;                      // the profile is untouched, nothing is half-saved
+        }
+
+        // null removes the key from the published profile, clearing a legacy copy.
+        if (stripKind0) updates.monero_address = null;
+
+        try {
+            await publishProfileUpdate(profile, updates);   // reports its own outcome
+            renderOwnProfileTab();
+        } catch {
+            /* publishProfileUpdate has already told the user */
+        } finally {
+            if (submit) submit.disabled = false;
+        }
     });
 
     form.querySelector('[data-action="profile-edit-cancel"]')
         ?.addEventListener('click', () => renderOwnProfileTab());
+}
+
+/**
+ * What to show in the tip field when the editor opens.
+ *
+ * The NIP-78 record is the source of truth, so it wins. A kind-0 address is
+ * only a legacy copy from before this app wrote to NIP-78 — showing it means
+ * the next save migrates it across and strips it from the public profile.
+ */
+function tipEditValue(profile, pubkey) {
+    return tipAddressOf(pubkey) || (isMoneroAddress(profile?.monero_address) ? profile.monero_address : '');
 }
 
 export async function publishProfileUpdate(currentProfile, updates) {

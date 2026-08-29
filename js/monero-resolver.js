@@ -21,6 +21,7 @@
 import { State } from './state.js';
 import { pool } from './nostr.js';
 import { NIP78_RELAYS } from './relays.js';
+import { isMoneroAddress } from './monero-tips.js';
 import { createTipStatusStore, pubkeysNeedingLookup, applyLookupResult } from './tip-status.js';
 
 const PAYMENT_D_TAG = 'nosmero:payment';
@@ -60,6 +61,23 @@ function notify(pubkeys) {
     if (!pubkeys.length) return;
     for (const cb of _subscribers) {
         try { cb(pubkeys); } catch (e) { console.error('[tips] subscriber error:', e); }
+    }
+}
+
+/**
+ * Record an address this account just saved, so its own profile repaints at
+ * once instead of waiting out a relay round trip it already knows the answer to.
+ *
+ * Clearing is not the same as knowing there is no address: the entry is dropped
+ * so the next paint re-reads the relay, rather than asserting `none` from a
+ * write this device merely believes went through.
+ */
+export function setTipAddress(pubkey, address) {
+    if (!pubkey) return;
+    if (isMoneroAddress(address)) {
+        notify(_store.settle([pubkey], { [pubkey]: address }));
+    } else if (_store.forget(pubkey)) {
+        notify([pubkey]);
     }
 }
 
