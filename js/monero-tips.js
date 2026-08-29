@@ -4,17 +4,22 @@
 // One place to answer "can this author actually receive a Monero
 // tip, and at which address?".
 //
-// The answer comes from four sources, cheapest first: the note's own
-// per-note subaddress tag, the author's cached profile address, an
-// address written into their profile "about" text, and finally their
-// NIP-78 kind-30078 `nosmero:payment` blob — the only one that costs
-// a relay round trip, so callers batch it through monero-resolver.js.
+// Four sources. In precedence order: the note's own per-note subaddress
+// tag, the author's NIP-78 kind-30078 `nosmero:payment` record, the
+// address on their cached kind-0 profile, and an address written into
+// their profile "about" text.
 //
-// That order is deliberate and load-bearing: the first three are free
-// because every surface already fetches kind 0, and kind 0 therefore
-// outranks NIP-78. Desktop Nosmero keeps its users' addresses OUT of
-// kind 0 on purpose, which is why the NIP-78 source has to exist at
-// all — without it a desktop user's tip button never appears here.
+// NIP-78 is the source of truth for an account's address — it is where
+// both clients now save it — so it outranks kind 0 even though it is the
+// only source that costs a relay round trip. A kind-0 address is a
+// leftover from before this app wrote to NIP-78, or another client's, and
+// letting a leftover win is how tips reached an address its owner had
+// already replaced. Because the record has to be consulted even when kind
+// 0 could answer, the lookup is batched per page in monero-resolver.js
+// rather than skipped.
+//
+// The per-note tag stays above all of it: that is subaddress rotation,
+// and an account-level address overriding it would defeat the point.
 //
 // Ported from desktop's js/monero-tips.js so the two clients agree on
 // what an address is. Pure and DOM-free: smoke-monero-tips.mjs
@@ -56,15 +61,21 @@ export function tipAddressFromPost(post) {
 // from a batched kind-30078 lookup, or undefined when it wasn't fetched.
 // Pass a null post for the surfaces that show an author rather than a note.
 export function tipAddressFor(post, profile, nip78Address) {
+    // A per-note subaddress still wins. It is the most specific answer there is,
+    // and it is the whole mechanism behind rotation: overriding it with the
+    // account-level address would make every note payable to the same place.
     const fromPost = tipAddressFromPost(post);
     if (fromPost) return fromPost;
 
+    // Then NIP-78, because that is where this account's address is kept — both
+    // clients save it there. A kind-0 address is another client's, or a leftover
+    // from before, and a leftover outranking the live record sends tips to an
+    // address its owner already replaced.
+    if (isMoneroAddress(nip78Address)) return nip78Address;
+
     if (isMoneroAddress(profile?.monero_address)) return profile.monero_address;
 
-    const fromAbout = findMoneroAddress(profile?.about);
-    if (fromAbout) return fromAbout;
-
-    return isMoneroAddress(nip78Address) ? nip78Address : null;
+    return findMoneroAddress(profile?.about);
 }
 
 export function hasTipAddress(post, profile, nip78Address) {

@@ -7,9 +7,10 @@
 // feed, thread, search, profile — goes through here, so a page of
 // rows costs one subscription rather than one per row.
 //
-// It exists because the address is often NOT in kind 0: desktop
-// Nosmero deliberately keeps it out, so for those users this query is
-// the only source there is.
+// Every author on a page is asked about, not just the ones kind 0
+// cannot answer for: the NIP-78 record OUTRANKS a kind-0 address, so
+// skipping an author who has one would mean the record that is meant to
+// win never gets read.
 //
 // The state machine lives in tip-status.js (pure, smoke-tested). What
 // this module adds is the round trip, and one rule about it: a result
@@ -18,7 +19,6 @@
 // the next paint retries.
 // ============================================================
 
-import { State } from './state.js';
 import { pool } from './nostr.js';
 import { NIP78_RELAYS } from './relays.js';
 import { isMoneroAddress } from './monero-tips.js';
@@ -95,7 +95,7 @@ export function resetTipCache() {
  * already definitively answered all drop out before anything is sent.
  */
 export async function ensureTipAddresses(pubkeys) {
-    const wanted = pubkeysNeedingLookup(pubkeys, State.get('profileCache'), _store);
+    const wanted = pubkeysNeedingLookup(pubkeys, _store);
     const batch = _store.claim(wanted);
     if (!batch.length) return;
 

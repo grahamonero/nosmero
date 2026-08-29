@@ -150,17 +150,22 @@ export function createTipStatusStore() {
 /**
  * Which of these authors still costs a relay round trip?
  *
- * Anyone the cheap kind-0 sources can already answer for is left out, as is
- * anyone already pending or already definitively answered. `profileCache` is
- * State's Map<pubkey, kind-0 content>; any Map-like with .get() works.
+ * Anyone already pending, or already definitively answered, is left out.
+ * Having a kind-0 address is NOT a reason to skip an author: NIP-78 wins on
+ * read, so it has to be read. The saving is that a page asks once for all of
+ * them, not that some are never asked about — which is why the profile cache
+ * this used to consult is no longer a parameter.
  */
-export function pubkeysNeedingLookup(pubkeys, profileCache, store) {
+export function pubkeysNeedingLookup(pubkeys, store) {
     const out = [];
     const seen = new Set();
     for (const pk of pubkeys || []) {
         if (!pk || seen.has(pk)) continue;
         seen.add(pk);
-        if (tipAddressFor(null, profileCache?.get?.(pk))) continue;
+        // An author whose kind 0 carries an address used to be skipped as already
+        // answered. That cannot happen now NIP-78 outranks kind 0: skipping them
+        // would mean the record that is supposed to win is never even read, and
+        // the precedence would be a no-op for exactly the accounts it is for.
         if (store.status(pk) !== TIP_UNKNOWN) continue;
         out.push(pk);
     }
