@@ -21,9 +21,18 @@ import {
     toast,
     moneroAddressFromKind0,
 } from './utils.js';
+import {
+    FEED_INITIAL_LIMIT,
+    selectPage,
+    loadMoreState,
+    untilBound,
+    olderFilter,
+    resetPage,
+    nextPage,
+    pageScoreIds,
+} from './feed-paging.js';
+import { parentEventRef, parentCardHtml } from './reply-parent.js';
 
-const FEED_PAGE_SIZE  = 30;
-const FEED_INITIAL_LIMIT = 200;
 const PROFILE_FETCH_BATCH = 50;
 
 // Default feed is decided by `bootInitialFeed()` based on login state —
@@ -35,6 +44,29 @@ let _profileFetchTimer = null;
 let _seenEventIds = new Set();
 let _renderedEventIds = new Set();
 let _feedEvents = [];               // newest-first sorted snapshot
+
+// Paging. _page counts how many pages of FEED_PAGE_SIZE are painted; the feeds
+// fetch far more than one page, so the first few presses of Load-more cost no
+// relay traffic at all. _renderedCount is how many rows #feedList actually
+// holds, which lets a page bump append its new tail instead of rebuilding
+// rows that haven't changed. _relaysExhausted latches once a query for older
+// events comes back empty — that is what retires the button on a finite feed.
+let _page = resetPage();
+let _renderedCount = 0;
+let _loadingMore = false;
+let _relaysExhausted = false;
+
+// Ids an engagement lookup has been ISSUED for. Held apart from the
+// engagement store because that store cannot answer the question: it gets an
+// all-zero row for every id a lookup was asked about, so a quiet note that
+// genuinely has no likes reads the same as one nobody ever asked about, and
+// for the eight seconds a lookup is open there is no row at all. Without this
+// every Load-more press would re-ask for the rows already on screen.
+//
+// Cleared by clearFeed(), so a pull-to-refresh still refreshes the counts on
+// the page it lands on — the point of the set is to stop repeat asks WITHIN
+// a paging session, not to pin counts for the life of the tab.
+let _engagementRequested = new Set();
 
 // Cross-view event registry so the document-level post click handler can find
 // the full event object even when the post was rendered by thread/profile/
@@ -114,6 +146,15 @@ function clearFeed() {
     _seenEventIds = new Set();
     _renderedEventIds = new Set();
     _feedEvents = [];
+    // Every path in here — feed switch, reload, pull-to-refresh — puts the
+    // reader back at the top, so the page counter goes back with it.
+    _page = resetPage();
+    _renderedCount = 0;
+    _loadingMore = false;
+    _relaysExhausted = false;
+    _engagementRequested = new Set();
+    setLoadMoreBusy(false);
+    hideLoadMore();
     const el = document.getElementById('feedList');
     if (el) el.innerHTML = '';
 }
@@ -141,13 +182,10 @@ async function loadFollowing() {
     clearSkeletonRows();
     ingestEvents(initial);
 
-    // Background: fetch engagement for what we're about to display + repaint.
-    initial.sort((a, b) => b.created_at - a.created_at);
-    const displayedIds = initial.slice(0, FEED_PAGE_SIZE).map((e) => e.id);
-    fetchEngagementCounts(displayedIds).then((counts) => {
-        storeEngagement(counts);
-        paintFeed();
-    }).catch(() => {});
+    // Background: score the first page and repaint. Only the first page —
+    // every further page is scored by scorePage() as Load-more reveals it,
+    // so a reader who never scrolls never pays for 200 lookups.
+    scorePage().catch(console.error);
 }
 
 // ----- Popular feed (engagement-sorted from last 24h) -----------
@@ -212,6 +250,9 @@ async function loadTrendingMonero() {
                         reposts:   e.reposts   || 0,
                         zaps:      e.zaps      || 0,
                     });
+                    // The cache IS the answer for these — scorePage() must not
+                    // re-query them page by page as the reader scrolls.
+                    _engagementRequested.add(n.id);
                 }
                 clearSkeletonRows();
                 // Preserve cache's score-based ordering (already sorted high → low)
@@ -261,7 +302,11 @@ function totalEngagement(eventId) {
 
 function storeEngagement(map) {
     const target = State.get('engagement');
-    for (const [id, counts] of Object.entries(map)) target.set(id, counts);
+    for (const [id, counts] of Object.entries(map)) {
+        target.set(id, counts);
+        // An answer is an answer, zeros included — don't ask again this session.
+        _engagementRequested.add(id);
+    }
 }
 
 /**
@@ -350,25 +395,244 @@ function ingestEvents(events, sortFn) {
     paintFeed();
 }
 
+// The paged view of the buffer. Mutes are applied before the slice, never
+// after: filtering a slice would hand back a page of 30 minus however many
+// authors the user has muted, and the shortfall would grow with every page.
+function currentSlice() {
+    const muteList = State.get('muteList');
+    return selectPage(_feedEvents, _page, { isMuted: (ev) => isMuted(ev, muteList) });
+}
+
+// The ONLY caller that asks for parent cards. renderPost() draws the reply
+// header on every card including the compact ones the embedded-note resolver
+// paints, so a default-on parent card would have each resolved parent emit a
+// placeholder for ITS parent and walk the thread a relay fetch at a time.
+// Opting in here — and only here — caps the nesting at one level: the card a
+// feed row grows is compact, and compact cards ask for nothing.
+function renderSlice(events) {
+    const profileCache = State.get('profileCache');
+    return events.map((ev) => renderPost(ev, { profileCache, showParent: true })).join('');
+}
+
 function paintFeed() {
     const list = document.getElementById('feedList');
     if (!list) return;
 
-    const muteList = State.get('muteList');
-    const visible = _feedEvents.filter((ev) => !isMuted(ev, muteList));
-    const slice = visible.slice(0, FEED_PAGE_SIZE);
+    const { visible, slice } = currentSlice();
 
     if (slice.length === 0) {
+        _renderedCount = 0;
         renderEmptyState('No posts yet — try a different feed.');
+        updateLoadMore(visible.length);
         return;
     }
 
     // Repaint the full top-N every time. paintFeed is called both when new
     // events arrive AND when profile cache hydrates, so we can't skip even
     // when the event IDs haven't changed — the profile data has.
-    const profileCache = State.get('profileCache');
-    const html = slice.map((ev) => renderPost(ev, { profileCache })).join('');
-    list.innerHTML = html;
+    //
+    // That repaint drops every row, including <img> elements that had already
+    // decoded, so the list can momentarily measure shorter than it did — and a
+    // shorter scrollHeight clamps the reader's offset back toward the top.
+    // Carry the offset across the swap.
+    const view = document.getElementById('feedView');
+    const scrollTop = view ? view.scrollTop : 0;
+
+    list.innerHTML = renderSlice(slice);
+    _renderedCount = slice.length;
+
+    if (view && scrollTop > 0 && view.scrollTop !== scrollTop) view.scrollTop = scrollTop;
+
+    updateLoadMore(visible.length);
+}
+
+// The Load-more step when the rows come straight out of the buffer. What is
+// already on screen is byte-identical to what a full repaint would produce,
+// so appending only the new tail leaves those rows — and the scroll offset,
+// and their decoded images — untouched.
+function appendNextPage() {
+    const list = document.getElementById('feedList');
+    if (!list) return;
+
+    const { visible, slice } = currentSlice();
+
+    // Anything that isn't a clean extension of what's rendered falls back to a
+    // full repaint: skeleton rows, an empty state, a buffer that shrank, or a
+    // mute applied since the last paint (nothing subscribes to muteList, so
+    // the muted row is still on screen). #feedList holds exactly one element
+    // per row — a kind-6 repost wraps its inner article in one .post-repost-wrap
+    // — so a child count that disagrees means the tail can't be trusted.
+    if (_renderedCount === 0 || slice.length <= _renderedCount || list.children.length !== _renderedCount) {
+        paintFeed();
+        return;
+    }
+
+    list.insertAdjacentHTML('beforeend', renderSlice(slice.slice(_renderedCount)));
+    _renderedCount = slice.length;
+    updateLoadMore(visible.length);
+}
+
+// ----- Load more --------------------------------------------------
+
+function hideLoadMore() {
+    const row = document.getElementById('feedLoadMore');
+    if (row) row.hidden = true;
+}
+
+function setLoadMoreBusy(busy) {
+    const btn = document.getElementById('feedLoadMoreBtn');
+    if (!btn) return;
+    btn.disabled = busy;
+    btn.textContent = busy ? 'Loading…' : 'Load more';
+}
+
+function updateLoadMore(visibleCount) {
+    const row = document.getElementById('feedLoadMore');
+    if (!row) return;
+    const { show } = loadMoreState({
+        visibleCount,
+        page: _page,
+        feedKind: _currentFeed,
+        relaysExhausted: _relaysExhausted,
+    });
+    row.hidden = !show;
+}
+
+/**
+ * scorePage() — fetch engagement for whatever the current page paints and
+ * hasn't been asked about yet, then repaint so the numbers appear.
+ *
+ * Lazy and per-page by design. The loaders buffer FEED_INITIAL_LIMIT events
+ * and paint 30; scoring all 200 at load time would put a second relay
+ * round-trip in front of time-to-first-paint for counts most readers never
+ * scroll to. Each page pays for itself, once, as it is revealed.
+ *
+ * popular and trending-monero already score every candidate at load time
+ * because they RANK by engagement, so their ids are in the requested set
+ * before this ever runs and it finds nothing to do — one filtered pass and
+ * out. Following is the feed this exists for.
+ */
+async function scorePage() {
+    const muteList = State.get('muteList');
+    const ids = pageScoreIds(_feedEvents, _page, {
+        isMuted: (ev) => isMuted(ev, muteList),
+        requested: _engagementRequested,
+    });
+    if (!ids.length) return;
+
+    // Claim the ids before the round-trip, not after: the lookup holds its
+    // collection window open for 8s, and a reader can easily press Load-more
+    // again inside that. storeEngagement() marks them again on the way back,
+    // which is harmless.
+    for (const id of ids) _engagementRequested.add(id);
+
+    try {
+        storeEngagement(await fetchEngagementCounts(ids));
+        paintFeed();
+    } catch (e) {
+        // A failed lookup must not pin these ids as asked-for forever —
+        // the next page press should be free to retry them.
+        for (const id of ids) _engagementRequested.delete(id);
+        console.warn('[feed] engagement lookup failed', e);
+    }
+}
+
+/**
+ * loadMore() — one press of the Load-more button.
+ *
+ * Buffered rows first: the loaders fetch FEED_INITIAL_LIMIT events and paint
+ * one page of them, so the first several presses are free. Only once that is
+ * spent do we go back to the relays with an `until:` bound. If that returns
+ * nothing new the feed has ended — latch it, so the button retires instead of
+ * leaving the reader pressing a dead control.
+ */
+async function loadMore() {
+    if (_loadingMore) return;
+
+    const visibleCount = currentSlice().visible.length;
+    const { show, mode } = loadMoreState({
+        visibleCount,
+        page: _page,
+        feedKind: _currentFeed,
+        relaysExhausted: _relaysExhausted,
+    });
+
+    if (!show) { updateLoadMore(visibleCount); return; }
+
+    if (mode === 'buffer') {
+        _page = nextPage(_page);
+        appendNextPage();
+        scorePage().catch(console.error);
+        return;
+    }
+
+    _loadingMore = true;
+    setLoadMoreBusy(true);
+    try {
+        const before = _feedEvents.length;
+        await fetchOlder();
+        if (_feedEvents.length > before) {
+            _page = nextPage(_page);
+        } else {
+            _relaysExhausted = true;
+            toast('No older notes', 'info', 1500);
+        }
+    } catch (e) {
+        console.warn('[feed] load more failed', e);
+        toast('Could not load more', 'error');
+    } finally {
+        _loadingMore = false;
+        setLoadMoreBusy(false);
+        // Full repaint, not an append: ingestEvents re-sorts the buffer, and on
+        // the engagement-ranked feeds a newly-scored arrival can land above
+        // rows that are already on screen.
+        paintFeed();
+        // The following branch of fetchOlder() deliberately does no scoring of
+        // its own — its arrivals are just more rows, and this scores whichever
+        // of them the page bump actually revealed.
+        scorePage().catch(console.error);
+    }
+}
+
+/**
+ * fetchOlder() — extend the current feed's own query backwards past the
+ * oldest event held. The filter is the same shape the initial loader built
+ * (olderFilter in feed-paging.js), so what comes back belongs to the set the
+ * reader is already looking at rather than a differently-defined one.
+ *
+ * trending-monero is served from the static /trending-cache.json, so it has
+ * no query to extend and never reaches here.
+ */
+async function fetchOlder() {
+    const until = untilBound(_feedEvents);
+    if (until === null) return;
+
+    if (_currentFeed === 'following') {
+        const follows = State.get('followingUsers');
+        const filter = olderFilter('following', { authors: [...(follows || [])], until });
+        if (!filter) return;
+        const older = await fetchEvents(filter, {
+            relays: getReadRelaysWithDefaults(),
+            timeoutMs: 6000,
+        });
+        ingestEvents(older);
+        return;
+    }
+
+    if (_currentFeed === 'popular') {
+        const relays = [...new Set([...DEFAULT_RELAYS, ...getReadRelaysWithDefaults()])];
+        const since = Math.floor(Date.now() / 1000) - 24 * 3600;
+        const filter = olderFilter('popular', { until, since });
+        if (!filter) return;
+        const older = await fetchEvents(filter, { relays, timeoutMs: 7000 });
+        // Popular ranks by engagement, so score the arrivals before they get
+        // sorted in — otherwise they all rank 0 and sink straight to the end.
+        const fresh = older.filter((ev) => !_seenEventIds.has(ev.id));
+        if (fresh.length) {
+            storeEngagement(await fetchEngagementCounts(fresh.map((e) => e.id), relays));
+        }
+        ingestEvents(older, (a, b) => totalEngagement(b.id) - totalEngagement(a.id));
+    }
 }
 
 function renderEmptyState(message) {
@@ -434,6 +698,10 @@ function isMuted(event, muteList) {
  * opts.profileCache  — Map<pubkey, kind-0 content>
  * opts.repostContext — { reposterPubkey } when called from a kind-6 wrapper
  * opts.compact       — render without action footer (for nested previews)
+ * opts.showParent    — when this is a reply, draw the parent note as a card
+ *                      under the "↳ Replying to" line. Opt-in, and set from
+ *                      exactly one place (renderSlice) — see reply-parent.js
+ *                      for why default-on cannot work.
  */
 export function renderPost(event, opts = {}) {
     const profileCache = opts.profileCache || State.get('profileCache');
@@ -455,7 +723,11 @@ export function renderPost(event, opts = {}) {
     const avatar  = profile.picture || '';
     const moneroAddress = profile.monero_address || '';
 
+    // The label and the card go together, never one instead of the other: the
+    // label is there before the card resolves and is all that is left when the
+    // parent can't be fetched.
     const replyHeader = renderReplyHeader(event, profileCache);
+    const parentCard  = parentCardHtml(event, opts);
     const body = sanitizeHtml(parseContent(event.content || ''));
 
     // Engagement counts (may be 0 / undefined before the background fetch lands)
@@ -475,6 +747,7 @@ export function renderPost(event, opts = {}) {
                 <button type="button" class="post-actions-btn" data-action="post-menu" aria-label="More">⋯</button>
             </div>
             ${replyHeader}
+            ${parentCard}
             <div class="post-body">${body}</div>
             ${opts.compact ? '' : `
                 <div class="post-foot">
@@ -491,33 +764,14 @@ export function renderPost(event, opts = {}) {
     `;
 }
 
+// The NIP-10 marker semantics behind both this label and the parent card live
+// in reply-parent.js, so the two can never disagree about which event the
+// parent is.
 function renderReplyHeader(event, profileCache) {
-    if (event.kind !== 1) return '';
-    const eTags = event.tags.filter((t) => t[0] === 'e');
-    if (eTags.length === 0) return '';
+    const ref = parentEventRef(event);
+    if (!ref) return '';
 
-    // NIP-10 marker semantics:
-    //   - "root"/"reply" markers ⇒ this is a reply
-    //   - "mention" marker only ⇒ this is a quote-repost (let parseContent
-    //                              + the embedded-note resolver inline it)
-    //   - no markers anywhere   ⇒ legacy positional NIP-10: last e-tag is parent
-    const hasMarkers   = eTags.some((t) => t[3]);
-    const replyMarker  = eTags.find((t) => t[3] === 'reply');
-    const rootMarker   = eTags.find((t) => t[3] === 'root');
-
-    let parentEvent;
-    if (replyMarker)        parentEvent = replyMarker;
-    else if (rootMarker)    parentEvent = rootMarker;
-    else if (!hasMarkers)   parentEvent = eTags[eTags.length - 1];  // positional fallback
-    else                    return '';                              // mention-only: quote-repost, no header
-
-    const parentId = parentEvent?.[1];
-    if (!parentId) return '';
-
-    // NIP-10 marker e-tags carry author in field [4]; positional-style doesn't.
-    // Fall back to last p-tag.
-    const pTags = event.tags.filter((t) => t[0] === 'p');
-    const parentAuthor = parentEvent[4] || pTags[pTags.length - 1]?.[1] || null;
+    const parentAuthor = ref.author;
     const profile = parentAuthor && profileCache?.get(parentAuthor);
     let name;
     if (profile?.display_name)      name = profile.display_name;
@@ -755,6 +1009,10 @@ export function wireFeed() {
             modal.close();
         }
         // post-mute handled by lists.js wireLists() — but close modal here
+    });
+
+    document.getElementById('feedLoadMoreBtn')?.addEventListener('click', () => {
+        loadMore().catch(console.error);
     });
 
     // Pull-to-refresh on feedView

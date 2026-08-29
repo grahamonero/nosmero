@@ -616,6 +616,22 @@ body.tab-compose #composeView    { display: flex !important; }
 
 .embedded-note .post-foot { display: none; }
 
+/* The parent note of a reply, drawn as a card in the feed row itself.
+   Column 2 so it lines up with the reply body instead of the avatar gutter.
+   The min-height is the point: the card is filled in asynchronously, after
+   paint, so without a floor every reply row on screen grows the moment its
+   parent lands and shoves everything below it down. ~68px is a one-line
+   card — head plus the 40px avatar plus this card's own padding. */
+.post > .post-parent-note {
+    grid-column: 2;
+    margin: 0 0 var(--space-xs);
+    min-height: 68px;
+}
+.post-parent-note:not(.embedded-note-resolved) {
+    display: flex;
+    align-items: center;
+}
+
 .embedded-note-loading,
 .embedded-note-failed {
     color: var(--text-muted);
