@@ -1,8 +1,10 @@
 // ============================================================
 // Nosmero Mobile — notifications
 //
-// Single merged-timeline sub against the user's read relays:
-//   { kinds: [1, 6, 7, 9735], "#p": [pubkey], limit: 200 }
+// Single merged timeline against the user's read relays — one
+// catch-up fetch plus one live subscription:
+//   { kinds: [1, 6, 7, 9735], "#p": [pubkey], limit: 50 }
+//   { kinds: [1, 6, 7, 9735], "#p": [pubkey], since: now }
 //
 // Row content depends on event.kind:
 //   1   — "replied" or "mentioned you"  + truncated reply body
@@ -10,9 +12,20 @@
 //   7   — "reacted ❤"                   (or custom emoji)
 //   9735 — "zapped X sats"              + zap comment
 //
+// The subscription is a BACKGROUND one: it starts when a pubkey
+// becomes available (fresh sign-in or restored session) and stays
+// open across tab changes until logout. That is what the badge
+// depends on — it used to run only while the Notifications tab was
+// open, so the unread list was empty everywhere else and the dot
+// could never light.
+//
+// Opening the tab therefore paints what the background sub has
+// already collected (instant) rather than re-fetching from scratch.
+//
 // Read state: `nosmero-mobile-notif-last-seen-<pubkey>` in
 // localStorage; updated when the user opens the tab. Tab badge
-// dot lit while unread events exist.
+// dot lit while unread events exist. The rules deciding "unread"
+// live in notif-rules.js so they can be tested without a DOM.
 // ============================================================
 
 import { State, subscribe as stateSubscribe } from './state.js';
@@ -20,17 +33,122 @@ import { subscribe as nostrSubscribe, fetchEvents, fetchOne } from './nostr.js';
 import { getReadRelaysWithDefaults } from './relays.js';
 import { escapeHtml, timeAgo, parseContent, sanitizeHtml, toast } from './utils.js';
 import { openOverlay } from './app.js';
+import {
+    NOTIF_KINDS,
+    lastSeenKey,
+    parseLastSeen,
+    isUnread,
+    countUnread,
+    newestCountableTimestamp,
+} from './notif-rules.js';
 
 const MAX_NOTIFS = 200;
+const CATCHUP_LIMIT = 50;          // background catch-up — only has to answer
+                                   // "is there anything new", not fill a screen
 const TRUNCATE_LEN = 100;
-const NOTIF_KINDS = [1, 6, 7, 9735];
 
-let _sub = null;
+let _sub = null;                   // live background sub — survives tab changes
+let _bgPubkey = null;              // account the background sub is running for
+let _bgReady = null;               // promise: catch-up done + live sub open
+let _bgEpoch = 0;                  // bumped on every start/stop; stale starts abort
+let _bgCaughtUp = false;
 let _notifs = [];                  // newest-first
 let _seenIds = new Set();
 let _originalsCache = new Map();   // event id → original kind-1 (for context)
 let _pendingFetches = new Set();
 let _fetchTimer = null;
+
+// ----- Background subscription -----------------------------------
+
+/**
+ * Start (or reuse) the persistent notification subscription.
+ *
+ * Resolves once the catch-up fetch has landed and the live sub is
+ * open, so callers can await it and know the list is populated.
+ * Idempotent: a second login for the same pubkey returns the
+ * in-flight promise instead of stacking another subscription.
+ *
+ * `keepTimeline` re-points an already-running sub at a new relay
+ * list without throwing away what it has already collected — see
+ * the userRelayList subscription in wireNotifications().
+ */
+export function startBackgroundNotifications(pubkey, { keepTimeline = false } = {}) {
+    if (!pubkey) return Promise.resolve();
+    if (!keepTimeline && _bgPubkey === pubkey && _bgReady) return _bgReady;
+
+    const carried = keepTimeline
+        ? { notifs: _notifs, seen: _seenIds, originals: _originalsCache, caughtUp: _bgCaughtUp }
+        : null;
+    stopBackgroundNotifications();
+    if (carried) {
+        _notifs = carried.notifs;
+        _seenIds = carried.seen;
+        _originalsCache = carried.originals;
+        _bgCaughtUp = carried.caughtUp;
+        updateBadge();   // stopBackgroundNotifications() darkened it
+    }
+    _bgPubkey = pubkey;
+    const epoch = ++_bgEpoch;
+
+    _bgReady = (async () => {
+        try {
+            const relays = getReadRelaysWithDefaults();
+            const events = await fetchEvents(
+                { kinds: NOTIF_KINDS, '#p': [pubkey], limit: CATCHUP_LIMIT },
+                { relays, timeoutMs: 6000 }
+            );
+            // A logout or a re-login landed while we were fetching — this
+            // result belongs to a session that no longer exists.
+            if (epoch !== _bgEpoch) return;
+
+            ingest(events);
+            _bgCaughtUp = true;
+            updateBadge();
+            repaintIfActive();
+
+            const since = Math.floor(Date.now() / 1000);
+            _sub = nostrSubscribe(
+                [{ kinds: NOTIF_KINDS, '#p': [pubkey], since }],
+                {
+                    relays,
+                    onevent: (ev) => {
+                        ingest([ev]);
+                        if (isNotifTabActive()) {
+                            // The user is looking at the tab: paint it as new,
+                            // then stamp it read so the dot does not light
+                            // behind the very list showing the event.
+                            repaint();
+                            markRead(pubkey);
+                        } else {
+                            updateBadge();
+                        }
+                    },
+                }
+            );
+            if (epoch !== _bgEpoch) closeSub();
+        } catch (e) {
+            console.error('[notifications] background start failed', e);
+        }
+    })();
+
+    return _bgReady;
+}
+
+/** Tear the background sub down and forget the account's timeline. */
+export function stopBackgroundNotifications() {
+    _bgEpoch++;
+    closeSub();
+    _bgPubkey = null;
+    _bgReady = null;
+    _bgCaughtUp = false;
+    _notifs = [];
+    _seenIds = new Set();
+    _originalsCache = new Map();
+    _pendingFetches = new Set();
+    if (_fetchTimer) { clearTimeout(_fetchTimer); _fetchTimer = null; }
+    const badge = document.getElementById('notifBadge');
+    if (badge) badge.hidden = true;
+}
 
 // ----- Lifecycle -------------------------------------------------
 
@@ -40,26 +158,19 @@ export async function loadNotifications() {
         renderEmpty('Sign in to see notifications.');
         return;
     }
-    closeSub();
-    _notifs = [];
-    _seenIds = new Set();
 
-    showSkeletons();
+    // The background sub owns the timeline; the tab paints what it already
+    // holds. Skeletons only for the case where the catch-up is still in
+    // flight (tab opened during or before it).
+    if (_notifs.length === 0 && !_bgCaughtUp) showSkeletons();
 
-    const relays = getReadRelaysWithDefaults();
-    const events = await fetchEvents(
-        { kinds: NOTIF_KINDS, '#p': [pubkey], limit: MAX_NOTIFS },
-        { relays, timeoutMs: 6000 }
-    );
-    ingest(events);
+    // Normally a no-op resolving immediately — the sub started at login.
+    await startBackgroundNotifications(pubkey);
+
+    // Paint FIRST, stamp SECOND. repaint() reads the stored last-seen, so
+    // everything that arrived since the last visit still carries `unread`;
+    // markRead() then clears the dot.
     repaint();
-
-    const since = Math.floor(Date.now() / 1000);
-    _sub = nostrSubscribe(
-        [{ kinds: NOTIF_KINDS, '#p': [pubkey], since }],
-        { relays, onevent: (ev) => { ingest([ev]); repaint(); } }
-    );
-
     markRead(pubkey);
 }
 
@@ -104,10 +215,19 @@ async function flushOriginalFetches() {
         { relays: getReadRelaysWithDefaults(), timeoutMs: 4000 }
     );
     for (const ev of events) _originalsCache.set(ev.id, ev);
-    repaint();
+    repaintIfActive();
 }
 
 // ----- Render ----------------------------------------------------
+
+function isNotifTabActive() {
+    return document.body?.classList.contains('tab-notif') === true;
+}
+
+/** Background events must not repaint a list nobody is looking at. */
+function repaintIfActive() {
+    if (isNotifTabActive()) repaint();
+}
 
 function repaint() {
     const host = document.getElementById('notifList');
@@ -153,7 +273,7 @@ function renderNotifRow(ev, lastSeen) {
     const profile = State.get('profileCache')?.get(ev.pubkey) || {};
     const display = profile.display_name || profile.name || ev.pubkey.slice(0, 8) + '…';
     const avatar = profile.picture || '';
-    const isUnread = ev.created_at > lastSeen;
+    const unread = isUnread(ev, lastSeen);
     const eTag = ev.tags.find((t) => t[0] === 'e');
     const origId = eTag?.[1];
     const original = origId ? _originalsCache.get(origId) : null;
@@ -161,7 +281,7 @@ function renderNotifRow(ev, lastSeen) {
     const { verb, body } = describeEvent(ev, original);
 
     return `
-        <div class="notif-row ${isUnread ? 'unread' : ''}" data-event-id="${escapeAttr(ev.id)}" data-origin="${escapeAttr(origId || '')}">
+        <div class="notif-row ${unread ? 'unread' : ''}" data-event-id="${escapeAttr(ev.id)}" data-origin="${escapeAttr(origId || '')}">
             ${avatar
                 ? `<img class="avatar" src="${escapeAttr(avatar)}" alt="" loading="lazy">`
                 : `<div class="avatar"></div>`
@@ -240,23 +360,32 @@ function truncate(text, max) {
 
 // ----- Read state -------------------------------------------------
 
-function lsKey(pubkey) { return `nosmero-mobile-notif-last-seen-${pubkey}`; }
-function getLastSeen(pubkey) { return parseInt(localStorage.getItem(lsKey(pubkey)) || '0', 10); }
-function setLastSeen(pubkey, ts) { localStorage.setItem(lsKey(pubkey), String(ts)); }
+function getLastSeen(pubkey) { return parseLastSeen(localStorage.getItem(lastSeenKey(pubkey))); }
+function setLastSeen(pubkey, ts) { localStorage.setItem(lastSeenKey(pubkey), String(ts)); }
 
 function markRead(pubkey) {
-    if (_notifs.length === 0) return;
-    setLastSeen(pubkey, _notifs[0].created_at);
+    const newest = newestCountableTimestamp(_notifs, {
+        me: pubkey,
+        muteList: State.get('muteList'),
+    });
+    // Nothing to stamp — never write a "seen" marker we cannot justify, or a
+    // failed relay fetch would silently swallow the user's real unread items.
+    if (!newest) return;
+    setLastSeen(pubkey, newest);
     updateBadge();
 }
 
 function updateBadge() {
-    const me = State.get('publicKey');
     const badge = document.getElementById('notifBadge');
-    if (!me || !badge) return;
-    const lastSeen = getLastSeen(me);
-    const hasUnread = _notifs.some((ev) => ev.created_at > lastSeen);
-    badge.hidden = !hasUnread;
+    if (!badge) return;
+    const me = State.get('publicKey');
+    if (!me) { badge.hidden = true; return; }
+    const unread = countUnread(_notifs, {
+        me,
+        muteList: State.get('muteList'),
+        lastSeen: getLastSeen(me),
+    });
+    badge.hidden = unread === 0;
 }
 
 function escapeAttr(s) {
@@ -266,11 +395,11 @@ function escapeAttr(s) {
 // ----- Wire-up ----------------------------------------------------
 
 export function wireNotifications() {
+    // Leaving the tab deliberately does NOT close the subscription any more —
+    // it is the thing keeping the badge honest while the user is elsewhere.
     document.addEventListener('nosmero:tab', (e) => {
         if (e.detail?.tab === 'notif') {
             loadNotifications().catch(console.error);
-        } else if (_sub) {
-            closeSub();
         }
     });
 
@@ -283,12 +412,34 @@ export function wireNotifications() {
         }
     });
 
-    // Initial badge state on login
+    // Start with the session, stop with it. This covers a fresh sign-in AND a
+    // restored one: finalizeLogin() sets publicKey on both paths, and boot()
+    // calls wireNotifications() before restoreSession(). State.clear() on
+    // logout notifies with null.
     stateSubscribe('publicKey', (pk) => {
-        if (pk) updateBadge();
-        else {
-            const badge = document.getElementById('notifBadge');
-            if (badge) badge.hidden = true;
-        }
+        if (pk) startBackgroundNotifications(pk).catch(console.error);
+        else stopBackgroundNotifications();
     });
+
+    // The mute list hydrates asynchronously after login, so the first count can
+    // include authors the user has muted. Recount when it lands or changes.
+    stateSubscribe('muteList', () => {
+        updateBadge();
+        repaintIfActive();
+    });
+
+    // finalizeLogin() sets publicKey BEFORE it fetches the user's kind 10002,
+    // so the sub above opens against DEFAULT_RELAYS. Re-point it at the real
+    // NIP-65 read list the moment that lands, keeping everything collected so
+    // far — only the transport changes.
+    stateSubscribe('userRelayList', () => {
+        const pk = State.get('publicKey');
+        if (!pk || _bgPubkey !== pk) return;
+        startBackgroundNotifications(pk, { keepTimeline: true }).catch(console.error);
+    });
+
+    // Defensive: a session restored before this ran would never fire the
+    // subscription above.
+    const pubkey = State.get('publicKey');
+    if (pubkey) startBackgroundNotifications(pubkey).catch(console.error);
 }
