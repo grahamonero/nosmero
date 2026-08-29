@@ -7,18 +7,30 @@
 // • publishProfileUpdate(updates) — kind-0 publish (merges into
 //     current kind-0 content so unspecified fields aren't wiped)
 //
-// monero_address surfaces a QR + copy + monero: URI deeplink for
-// handoff to Cake / Monerujo / Edge.
+// A resolved Monero address surfaces a QR + copy + monero: URI
+// deeplink for handoff to Cake / Monerujo / Edge. The address may
+// come from the kind 0 or from the author's NIP-78 kind-30078 blob —
+// the latter is where desktop Nosmero keeps it, so this view has to
+// ask monero-resolver.js rather than read the profile alone.
 // ============================================================
 
 import { State } from './state.js';
 import { signAndPublish, fetchOne, fetchEvents, hexToNpub, npubToHex } from './nostr.js';
 import { getReadRelaysWithDefaults, DEFAULT_RELAYS, SEARCH_RELAYS } from './relays.js';
 import { renderPost, registerEvents } from './feed.js';
-import { escapeHtml, toast, timeAgo, decodeNip19, moneroAddressFromKind0 } from './utils.js';
+import { escapeHtml, toast, timeAgo, decodeNip19 } from './utils.js';
+import { moneroAddressFromKind0 } from './monero-tips.js';
+import { tipDisplayState, TIP_STATE_ADDRESS, TIP_STATE_NONE } from './tip-status.js';
+import { tipStatusOf, ensureTipAddresses, subscribeTipUpdates } from './monero-resolver.js';
 import { openOverlay, closeOverlay } from './app.js';
 
 let _userProfileTarget = null;
+
+// What each of the two profile surfaces is currently showing, so a NIP-78
+// address arriving can repaint just its tip block — repainting the whole view
+// would re-run renderUserPosts() and throw away a loaded post list.
+let _ownShowing  = null;    // { pubkey, profile }
+let _overlayShowing = null; // { pubkey, profile }
 
 // ----- Own profile tab -------------------------------------------
 
@@ -60,7 +72,8 @@ function paint(view, profile, pubkey, own) {
     view.innerHTML = renderProfileHeader(profile, pubkey, { own });
     renderUserPosts(view.querySelector('#profileRecentPosts'), pubkey);
     wireProfileActions(view, pubkey, profile, own);
-    renderMoneroQR(view, profile);
+    if (own) _ownShowing = { pubkey, profile };
+    paintTipBlock(view, profile, pubkey);
 }
 
 // ----- Open another user's profile overlay -----------------------
@@ -79,7 +92,8 @@ export async function openUserProfile(pubkey) {
     content.innerHTML = renderProfileHeader(profile, pubkey, { own: false });
     renderUserPosts(content.querySelector('#profileRecentPosts'), pubkey);
     wireProfileActions(content, pubkey, profile, false);
-    renderMoneroQR(content, profile);
+    _overlayShowing = { pubkey, profile };
+    paintTipBlock(content, profile, pubkey);
 
     // Background-refresh if stale
     const stale = !profile._createdAt || (Math.floor(Date.now() / 1000) - profile._createdAt > 3600);
@@ -90,12 +104,15 @@ export async function openUserProfile(pubkey) {
                 try {
                     const c = JSON.parse(evt.content);
                     c._createdAt = evt.created_at;
+                    const addr = moneroAddressFromKind0(evt, c);
+                    if (addr) c.monero_address = addr;
                     State.get('profileCache').set(pubkey, c);
                     if (title) title.textContent = c.display_name || c.name || 'Profile';
                     content.innerHTML = renderProfileHeader(c, pubkey, { own: false });
                     renderUserPosts(content.querySelector('#profileRecentPosts'), pubkey);
                     wireProfileActions(content, pubkey, c, false);
-                    renderMoneroQR(content, c);
+                    _overlayShowing = { pubkey, profile: c };
+                    paintTipBlock(content, c, pubkey);
                 } catch {}
             })
             .catch(() => {});
@@ -111,7 +128,6 @@ function renderProfileHeader(profile, pubkey, { own }) {
     const picture = profile.picture || '';
     const nip05   = profile.nip05 || '';
     const website = profile.website || '';
-    const moneroAddress = profile.monero_address || '';
     const npub = (() => { try { return hexToNpub(pubkey); } catch { return pubkey; } })();
     const isFollowing = State.get('followingUsers')?.has(pubkey);
 
@@ -143,30 +159,61 @@ function renderProfileHeader(profile, pubkey, { own }) {
             </div>
         </div>
 
-        ${moneroAddress
-            ? `<div class="profile-monero">
-                <div class="text-small muted">Monero address</div>
-                <div class="profile-qr" id="profileQrContainer"></div>
-                <div class="addr">${escapeHtml(moneroAddress)}</div>
-                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:8px">
-                    <button type="button" class="btn btn-secondary" data-action="profile-copy-xmr" data-addr="${escapeAttr(moneroAddress)}">Copy</button>
-                    <a class="btn btn-primary" href="monero:${escapeAttr(moneroAddress)}">Send tip ↗</a>
-                </div>
-              </div>`
-            : ''
-        }
+        <div id="profileTipBlock"></div>
 
         <div id="profileRecentPosts"></div>
     `;
 }
 
-function renderMoneroQR(parent, profile) {
-    if (!profile?.monero_address) return;
+/**
+ * Fill the tip block, which lives in its own container so a late NIP-78
+ * answer can replace it without disturbing the loaded post list above it.
+ *
+ * Three states, same honesty as the feed's tip button: an address, a
+ * "still checking" line, or — only once a lookup has actually completed and
+ * come back empty — nothing at all. Rendering the empty state while the
+ * answer is in flight is what made a desktop Nosmero user look like they had
+ * no address on this surface.
+ */
+function paintTipBlock(scope, profile, pubkey) {
+    const host = scope?.querySelector?.('#profileTipBlock');
+    if (!host) return;
+
+    const { state, address } = tipDisplayState(null, profile, tipStatusOf(pubkey));
+
+    if (state === TIP_STATE_ADDRESS) {
+        host.innerHTML = `
+            <div class="profile-monero">
+                <div class="text-small muted">Monero address</div>
+                <div class="profile-qr" id="profileQrContainer"></div>
+                <div class="addr">${escapeHtml(address)}</div>
+                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:8px">
+                    <button type="button" class="btn btn-secondary" data-action="profile-copy-xmr" data-addr="${escapeAttr(address)}">Copy</button>
+                    <a class="btn btn-primary" href="monero:${escapeAttr(address)}">Send tip ↗</a>
+                </div>
+            </div>`;
+        renderMoneroQR(host, address);
+    } else if (state === TIP_STATE_NONE) {
+        host.innerHTML = '';
+    } else {
+        host.innerHTML = `
+            <div class="profile-monero checking">
+                <div class="text-small muted">Checking for a Monero address…</div>
+            </div>`;
+    }
+
+    // The lookup is batched and deduped, so calling this every paint is free
+    // once the author has an answer.
+    ensureTipAddresses([pubkey]).catch(console.error);
+}
+
+function renderMoneroQR(parent, address) {
+    if (!address) return;
     const target = parent.querySelector('#profileQrContainer');
     if (!target || typeof QRCode === 'undefined') return;
     target.innerHTML = '';
     new QRCode(target, {
-        text: 'monero:' + profile.monero_address,
+        text: 'monero:' + address,
         width: 160,
         height: 160,
         colorDark: '#000000',
@@ -361,6 +408,19 @@ export async function publishProfileUpdate(currentProfile, updates) {
 // ----- Wire-up ----------------------------------------------------
 
 export function wireProfile() {
+    // A NIP-78 answer arriving repaints ONLY the tip block of whichever
+    // profile surface is showing that author — a full repaint would re-run
+    // renderUserPosts() and drop a post list the reader is already scrolling.
+    subscribeTipUpdates((pubkeys) => {
+        const hit = new Set(pubkeys);
+        if (_ownShowing && hit.has(_ownShowing.pubkey)) {
+            paintTipBlock(document.getElementById('profileView'), _ownShowing.profile, _ownShowing.pubkey);
+        }
+        if (_overlayShowing && hit.has(_overlayShowing.pubkey)) {
+            paintTipBlock(document.getElementById('userProfileContent'), _overlayShowing.profile, _overlayShowing.pubkey);
+        }
+    });
+
     document.addEventListener('nosmero:tab', (e) => {
         if (e.detail?.tab === 'profile') renderOwnProfileTab().catch(console.error);
     });

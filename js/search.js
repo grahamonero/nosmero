@@ -12,8 +12,10 @@
 import { fetchEvents } from './nostr.js';
 import { SEARCH_RELAYS, DEFAULT_RELAYS } from './relays.js';
 import { State } from './state.js';
-import { renderPost, registerEvents } from './feed.js';
+import { renderPost, registerEvents, authorsOf } from './feed.js';
 import { escapeHtml, toast } from './utils.js';
+import { moneroAddressFromKind0 } from './monero-tips.js';
+import { ensureTipAddresses, subscribeTipUpdates } from './monero-resolver.js';
 import { openOverlay } from './app.js';
 
 const SEARCH_LIMIT = 100;
@@ -23,6 +25,7 @@ let _searchToken = 0;
 let _debounceTimer = null;
 let _profileFetchQueue = new Set();
 let _profileFetchTimer = null;
+let _lastResults = [];      // what paintResults last drew, so it can redraw it
 
 export function openSearch(prefill = '') {
     openOverlay('searchView');
@@ -118,6 +121,7 @@ function paintResults(events) {
     const host = document.getElementById('searchResults');
     if (!host) return;
     if (events.length === 0) {
+        _lastResults = [];
         host.innerHTML = `<div class="text-center text-muted" style="padding:24px">No matching posts.</div>`;
         return;
     }
@@ -131,8 +135,21 @@ function paintResults(events) {
         if (!cache.has(ev.pubkey)) scheduleProfileFetch(ev.pubkey);
     }
 
+    _lastResults = visible;
     registerEvents(visible);
+    // One kind-30078 query for the whole result set, never one per row.
+    ensureTipAddresses(authorsOf(visible)).catch(console.error);
     host.innerHTML = visible.map((ev) => renderPost(ev, { profileCache: cache })).join('');
+}
+
+// Redraw the result set already on screen. Used when profile data or a NIP-78
+// tip address arrives after the rows were painted — the rows are rendered from
+// the shared profile cache, so a redraw is all that's needed to absorb it.
+function repaintResults() {
+    const host = document.getElementById('searchResults');
+    if (!host || !_lastResults.length) return;
+    const cache = State.get('profileCache');
+    host.innerHTML = _lastResults.map((ev) => renderPost(ev, { profileCache: cache })).join('');
 }
 
 function scheduleProfileFetch(pubkey) {
@@ -151,22 +168,26 @@ async function flushProfileFetches() {
         { relays: [...new Set([...SEARCH_RELAYS, ...DEFAULT_RELAYS])], timeoutMs: 4000 }
     );
     const cache = State.get('profileCache');
+    const needNip78 = [];
     for (const ev of events) {
         const existing = cache.get(ev.pubkey);
         if (existing && existing._createdAt >= ev.created_at) continue;
         try {
             const c = JSON.parse(ev.content);
             c._createdAt = ev.created_at;
+            // Same normalisation the feed does, so a tip address in a kind-0
+            // tag or the about text survives into the shared cache.
+            const addr = moneroAddressFromKind0(ev, c);
+            if (addr) c.monero_address = addr;
             cache.set(ev.pubkey, c);
+            if (!addr) needNip78.push(ev.pubkey);
         } catch {}
     }
-    // Re-render to absorb new profile data
-    const host = document.getElementById('searchResults');
-    if (host && host.querySelectorAll('.post').length > 0) {
-        // Find existing post nodes and update them via re-render
-        // Simplest: do nothing — re-render only if user re-searches.
-        // For mobile we accept slight staleness; better than full re-render thrash.
-    }
+    // Authors whose kind 0 carries no address may still have one in NIP-78 —
+    // desktop Nosmero puts it there by design — so sweep them in one batch.
+    if (needNip78.length) ensureTipAddresses(needNip78).catch(console.error);
+    // Redraw so the freshly-resolved names, avatars and tip buttons appear.
+    if (events.length) repaintResults();
     if (_profileFetchQueue.size > 0) {
         _profileFetchTimer = setTimeout(flushProfileFetches, 100);
     }
@@ -175,6 +196,13 @@ async function flushProfileFetches() {
 // ----- Wire-up ----------------------------------------------------
 
 export function wireSearch() {
+    // A NIP-78 address landing changes a row's footer — redraw when one of the
+    // authors on screen is in the batch that just resolved.
+    subscribeTipUpdates((pubkeys) => {
+        const onScreen = new Set(authorsOf(_lastResults));
+        if (pubkeys.some((pk) => onScreen.has(pk))) repaintResults();
+    });
+
     // 🔍 header button opens search
     document.addEventListener('click', (e) => {
         if (e.target.id === 'headerSearchBtn') openSearch();

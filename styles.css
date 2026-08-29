@@ -581,6 +581,23 @@ body.tab-compose #composeView    { display: flex !important; }
 /* .faded — visual-only de-emphasis (still clickable). */
 .post-foot .react.faded { opacity: 0.35; }
 
+/* .checking — the author's NIP-78 tip address hasn't answered yet. Sits
+   deliberately between the live orange button and the 0.35 faded one, so it
+   reads as "not yet" rather than as the settled "no address" state. */
+.post-foot .xmr-tip.checking {
+    color: var(--text-muted);
+    font-weight: 400;
+    opacity: 0.6;
+    animation: xmr-checking 1.6s ease-in-out infinite;
+}
+@keyframes xmr-checking {
+    0%, 100% { opacity: 0.45; }
+    50%      { opacity: 0.75; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .post-foot .xmr-tip.checking { animation: none; }
+}
+
 .post-repost-header {
     grid-column: 1 / -1;
     color: var(--text-muted);
@@ -848,6 +865,12 @@ body.tab-compose #composeView    { display: flex !important; }
     word-break: break-all;
     color: var(--text-muted);
     margin: var(--space-sm) 0;
+}
+
+/* The profile tip block while the NIP-78 lookup is still in flight — a held
+   place, not a claim that the user has no address. */
+.profile-monero.checking {
+    padding: var(--space-sm) var(--space-md);
 }
 
 .profile-qr {

@@ -12,15 +12,17 @@
 
 import { State, subscribe } from './state.js';
 import { fetchEvents, subscribe as nostrSubscribe, pool, signAndPublish } from './nostr.js';
-import { getReadRelaysWithDefaults, DEFAULT_RELAYS, SEARCH_RELAYS, NIP78_RELAYS } from './relays.js';
+import { getReadRelaysWithDefaults, DEFAULT_RELAYS, SEARCH_RELAYS } from './relays.js';
 import {
     parseContent,
     sanitizeHtml,
     escapeHtml,
     timeAgo,
     toast,
-    moneroAddressFromKind0,
 } from './utils.js';
+import { moneroAddressFromKind0 } from './monero-tips.js';
+import { tipDisplayState, TIP_STATE_ADDRESS, TIP_STATE_NONE } from './tip-status.js';
+import { tipStatusOf, ensureTipAddresses, subscribeTipUpdates } from './monero-resolver.js';
 import {
     FEED_INITIAL_LIMIT,
     selectPage,
@@ -398,6 +400,22 @@ function ingestEvents(events, sortFn) {
 // The paged view of the buffer. Mutes are applied before the slice, never
 // after: filtering a slice would hand back a page of 30 minus however many
 // authors the user has muted, and the shortfall would grow with every page.
+// Every author a set of rows will paint. A kind-6 wrapper paints its INNER
+// note, so the inner author is the one whose tip button is drawn — asking
+// about the reposter instead would leave that button stuck on "checking".
+export function authorsOf(events) {
+    const out = [];
+    for (const ev of events || []) {
+        if (ev?.pubkey) out.push(ev.pubkey);
+        if (ev?.kind !== 6) continue;
+        try {
+            const inner = JSON.parse(ev.content);
+            if (inner?.pubkey) out.push(inner.pubkey);
+        } catch { /* no resolvable inner event */ }
+    }
+    return out;
+}
+
 function currentSlice() {
     const muteList = State.get('muteList');
     return selectPage(_feedEvents, _page, { isMuted: (ev) => isMuted(ev, muteList) });
@@ -411,6 +429,10 @@ function currentSlice() {
 // feed row grows is compact, and compact cards ask for nothing.
 function renderSlice(events) {
     const profileCache = State.get('profileCache');
+    // One kind-30078 query for the whole page, never one per row. The resolver
+    // drops the authors it can already answer for and the ones already in
+    // flight, so calling this on every paint is free after the first.
+    ensureTipAddresses(authorsOf(events)).catch(console.error);
     return events.map((ev) => renderPost(ev, { profileCache, showParent: true })).join('');
 }
 
@@ -721,7 +743,6 @@ export function renderPost(event, opts = {}) {
     const display = profile.display_name || profile.name || shortPubkey(event.pubkey);
     const handle  = profile.name ? '@' + profile.name : '';
     const avatar  = profile.picture || '';
-    const moneroAddress = profile.monero_address || '';
 
     // The label and the card go together, never one instead of the other: the
     // label is there before the card resolves and is all that is left when the
@@ -754,14 +775,34 @@ export function renderPost(event, opts = {}) {
                     <button type="button" class="react" data-action="post-reply"  aria-label="Reply">💬<span class="count">${escapeHtml(fmtCount(eng.replies))}</span></button>
                     <button type="button" class="react" data-action="post-repost" aria-label="Repost">🔁<span class="count">${escapeHtml(fmtCount(eng.reposts))}</span></button>
                     <button type="button" class="react" data-action="post-like"   aria-label="Like">♥<span class="count">${escapeHtml(fmtCount(eng.reactions))}</span></button>
-                    ${moneroAddress
-                        ? `<a class="react xmr-tip" href="monero:${escapeAttr(moneroAddress)}" aria-label="Tip XMR" title="Tip with Monero" data-action="post-tip-xmr" data-addr="${escapeAttr(moneroAddress)}">💰<span class="xmr-label">XMR</span></a>`
-                        : `<button type="button" class="react xmr-tip faded" aria-label="No Monero address" title="This user hasn't set a Monero address" data-action="post-tip-xmr-none">💰<span class="xmr-label">XMR</span></button>`
-                    }
+                    ${renderTipButton(event, profile)}
                 </div>
             `}
         </article>
     `;
+}
+
+/**
+ * The tip affordance has three states, not two.
+ *
+ * An author's address can live in a NIP-78 kind-30078 blob rather than in
+ * their kind 0 — that is the normal case for anyone signed up on desktop
+ * Nosmero, which keeps the address out of the profile on purpose — and that
+ * blob costs a relay round trip. While it is unresolved the honest answer is
+ * "checking", not "this user hasn't set one": the faded button used to assert
+ * an answer the app did not have, and a single flaky lookup made the assertion
+ * permanent.
+ */
+function renderTipButton(event, profile) {
+    const { state, address } = tipDisplayState(event, profile, tipStatusOf(event.pubkey));
+
+    if (state === TIP_STATE_ADDRESS) {
+        return `<a class="react xmr-tip" href="monero:${escapeAttr(address)}" aria-label="Tip XMR" title="Tip with Monero" data-action="post-tip-xmr" data-addr="${escapeAttr(address)}">💰<span class="xmr-label">XMR</span></a>`;
+    }
+    if (state === TIP_STATE_NONE) {
+        return `<button type="button" class="react xmr-tip faded" aria-label="No Monero address" title="This user hasn't set a Monero address" data-action="post-tip-xmr-none">💰<span class="xmr-label">XMR</span></button>`;
+    }
+    return `<button type="button" class="react xmr-tip checking" aria-label="Checking for a Monero address" title="Checking for a Monero address…" data-action="post-tip-xmr-checking">💰<span class="xmr-label">XMR</span></button>`;
 }
 
 // The NIP-10 marker semantics behind both this label and the parent card live
@@ -861,49 +902,27 @@ async function flushProfileFetches() {
     // Repaint to absorb any newly-resolved names/avatars.
     if (events.length) paintFeed();
 
-    // Background NIP-78 sweep for monero addresses (no await — repaint later)
-    if (needNip78.length) lookupNip78Addresses(needNip78);
+    // Background NIP-78 sweep for monero addresses (no await — repaint later).
+    // One batched query for the whole flush, shared with every other surface.
+    if (needNip78.length) ensureTipAddresses(needNip78).catch(console.error);
 
     if (_pendingProfileFetches.size > 0) {
         _profileFetchTimer = setTimeout(flushProfileFetches, 100);
     }
 }
 
-// Cache to avoid re-querying NIP-78 for the same pubkey within a session
-const _nip78Tried = new Set();
-async function lookupNip78Addresses(pubkeys) {
-    const fresh = pubkeys.filter((pk) => !_nip78Tried.has(pk));
-    if (!fresh.length) return;
-    fresh.forEach((pk) => _nip78Tried.add(pk));
-
-    try {
-        const events = await fetchEvents(
-            { kinds: [30078], authors: fresh, '#d': ['nosmero:payment'] },
-            { relays: NIP78_RELAYS, timeoutMs: 2500 }
-        );
-        if (!events.length) return;
-        const cache = State.get('profileCache');
-        let updated = 0;
-        for (const ev of events) {
-            try {
-                const data = JSON.parse(ev.content);
-                if (!data?.monero_address) continue;
-                const profile = cache.get(ev.pubkey) || {};
-                if (profile.monero_address) continue;  // already set inline
-                profile.monero_address = data.monero_address;
-                cache.set(ev.pubkey, profile);
-                updated++;
-            } catch {}
-        }
-        if (updated) paintFeed();
-    } catch (e) {
-        console.warn('[feed] NIP-78 address lookup failed', e);
-    }
-}
-
 // ----- Feed picker modal wiring ----------------------------------
 
 export function wireFeed() {
+    // A NIP-78 address landing changes a row's footer, so the feed repaints on
+    // it the same way it repaints when a kind 0 hydrates. Only when one of the
+    // authors is actually on screen — the resolver is shared, and a profile
+    // overlay's lookup should not repaint the feed underneath it.
+    subscribeTipUpdates((pubkeys) => {
+        const onScreen = new Set(authorsOf(currentSlice().slice));
+        if (pubkeys.some((pk) => onScreen.has(pk))) paintFeed();
+    });
+
     document.getElementById('feedPickerBtn')?.addEventListener('click', () => {
         document.getElementById('feedPickerModal')?.showModal();
     });
@@ -963,6 +982,10 @@ export function wireFeed() {
         if (action === 'post-tip-xmr')      return; // <a href> handles nav
         if (action === 'post-tip-xmr-none') {
             toast("This user hasn't set a Monero address", 'info', 1800);
+            return;
+        }
+        if (action === 'post-tip-xmr-checking') {
+            toast('Still checking for a Monero address…', 'info', 1800);
             return;
         }
         if (action) return; // unhandled — let other handlers process

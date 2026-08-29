@@ -11,8 +11,10 @@
 import { fetchEvents, fetchOne } from './nostr.js';
 import { State } from './state.js';
 import { getReadRelaysWithDefaults } from './relays.js';
-import { renderPost, registerEvents } from './feed.js';
+import { renderPost, registerEvents, authorsOf } from './feed.js';
 import { escapeHtml } from './utils.js';
+import { moneroAddressFromKind0 } from './monero-tips.js';
+import { ensureTipAddresses, subscribeTipUpdates } from './monero-resolver.js';
 import { openOverlay } from './app.js';
 
 let _lastThreadId = null;
@@ -80,6 +82,9 @@ function paintThread() {
     if (!content || !_lastRender) return;
     const { root, replies } = _lastRender;
     const cache = State.get('profileCache');
+    // One kind-30078 query for the whole thread, not one per card. Most of
+    // these authors resolve for free from kind 0 and never reach the relay.
+    ensureTipAddresses(authorsOf([root, ...replies])).catch(console.error);
     let html = renderPost(root, { profileCache: cache });
     if (replies.length) {
         html += `<div class="reply-tree">`;
@@ -114,6 +119,11 @@ async function flushProfileFetches() {
         try {
             const c = JSON.parse(ev.content);
             c._createdAt = ev.created_at;
+            // Same normalisation the feed does — a tip address written into a
+            // kind-0 tag or the about text has to survive into the cache, or
+            // the shared renderer can't find it.
+            const addr = moneroAddressFromKind0(ev, c);
+            if (addr) c.monero_address = addr;
             const existing = cache.get(ev.pubkey);
             if (!existing || existing._createdAt < ev.created_at) {
                 cache.set(ev.pubkey, c);
@@ -137,6 +147,14 @@ function resolveRootId(event) {
 }
 
 export function wireThread() {
+    // A NIP-78 address landing turns a card's "checking" tip button into a
+    // live one — repaint, but only when the thread on screen shows that author.
+    subscribeTipUpdates((pubkeys) => {
+        if (!_lastRender) return;
+        const onScreen = new Set(authorsOf([_lastRender.root, ..._lastRender.replies]));
+        if (pubkeys.some((pk) => onScreen.has(pk))) paintThread();
+    });
+
     document.addEventListener('nosmero:open-thread', (e) => {
         const id = e.detail?.id;
         if (id) openThread(id).catch(console.error);
