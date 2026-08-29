@@ -44,28 +44,41 @@ export function tipAddressFromPost(post) {
 // Resolve a tip address for one note. `nip78Address` is the author's entry
 // from a batched kind-30078 lookup, or undefined when it wasn't fetched.
 export function tipAddressFor(post, profile, nip78Address) {
+    // A per-note subaddress still wins. It is the most specific answer there is,
+    // and it is the whole mechanism behind rotation: overriding it with the
+    // account-level address would make every note payable to the same place.
     const fromPost = tipAddressFromPost(post);
     if (fromPost) return fromPost;
 
+    // Then NIP-78, because that is where this account's address is kept — both
+    // clients save it there. A kind-0 address is another client's, or a leftover
+    // from before, and a leftover outranking the live record sends tips to an
+    // address its owner already replaced.
+    if (isMoneroAddress(nip78Address)) return nip78Address;
+
     if (isMoneroAddress(profile?.monero_address)) return profile.monero_address;
 
-    const fromAbout = findMoneroAddress(profile?.about);
-    if (fromAbout) return fromAbout;
-
-    return isMoneroAddress(nip78Address) ? nip78Address : null;
+    return findMoneroAddress(profile?.about);
 }
 
 export function hasTipAddress(post, profile, nip78Address) {
     return tipAddressFor(post, profile, nip78Address) !== null;
 }
 
-// Which of these authors still need the (costly) NIP-78 query? Anyone whose
-// address is already answerable for free is left out of the batch.
+// Which of these authors still need the (costly) NIP-78 query?
+//
+// Only a note carrying its own subaddress is answerable without asking: that tag
+// outranks NIP-78, so nothing the relay could say would change the answer for
+// that note. A kind-0 address is NOT a reason to skip an author any more — NIP-78
+// outranks it, so skipping would mean the record that is supposed to win never
+// gets read, and the precedence would do nothing for exactly the accounts it is
+// for. `profiles` is unused for that reason and kept only so the call sites keep
+// reading as "resolve these against what we know".
 export function authorsNeedingLookup(posts, profiles) {
     const pending = new Set();
     for (const post of posts) {
         if (!post?.pubkey) continue;
-        if (tipAddressFor(post, profiles?.[post.pubkey])) continue;
+        if (tipAddressFromPost(post)) continue;
         pending.add(post.pubkey);
     }
     return Array.from(pending);

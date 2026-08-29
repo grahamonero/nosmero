@@ -6,7 +6,7 @@ import * as State from './state.js';
 import * as Utils from './utils.js';
 import { fetchLatest, applyUpdates, nextCreatedAt, preserveUnmanagedTags, unreadNotice, isNewerVersion } from './replaceable.js';
 import { shouldReplaceCachedProfile } from './profile-cache-rules.js';
-import { findMoneroAddress } from './monero-tips.js';
+import { findMoneroAddress, isMoneroAddress } from './monero-tips.js';
 import * as Crypto from './crypto.js';
 import * as Relays from './relays.js';
 import * as Nip05 from './nip05.js';
@@ -3236,29 +3236,22 @@ async function getUserMoneroAddress(pubkey) {
     // For other users, check their profile cache first
     const profile = State.profileCache[pubkey];
 
-    // STEP 1: Check if we already have cached Monero address
+    // STEP 1: An answer already resolved this session. The cache holds whatever
+    // the steps below settled on, so it is not a kind-0 value in particular.
     if (profile && profile.monero_address) {
         return profile.monero_address;
     }
 
-    // STEP 2: Check profile "about" field FIRST (instant, no network call)
-    if (profile && profile.about) {
-        const xmrAddress = extractMoneroAddressFromText(profile.about);
-        if (xmrAddress) {
-            console.log('💰 Found Monero address in profile about field:', xmrAddress.slice(0, 10) + '...');
-            // Cache it
-            if (State.profileCache[pubkey]) {
-                State.profileCache[pubkey].monero_address = xmrAddress;
-            }
-            return xmrAddress;
-        }
-    }
-
-    // STEP 3: Only if not found in profile, try NIP-78 relays (network query)
+    // STEP 2: The NIP-78 record, ahead of anything in the profile. This is where
+    // Nosmero saves an address on both clients, so it is the account's current
+    // one; an address in kind 0 or in the about text is another client's, or a
+    // leftover from before, and letting a leftover win sends the tip to an
+    // address its owner already replaced. Most authors have nothing in kind 0
+    // anyway and reached this query regardless — the order only changes who is
+    // asked first, and it is cached per author for the session either way.
     try {
         const relayAddress = await loadMoneroAddressFromRelays(pubkey);
         if (relayAddress) {
-            // Update profile cache with found address
             if (State.profileCache[pubkey]) {
                 State.profileCache[pubkey].monero_address = relayAddress;
             }
@@ -3266,6 +3259,22 @@ async function getUserMoneroAddress(pubkey) {
         }
     } catch (error) {
         console.warn('Could not load Monero address from relays for user', pubkey, ':', error);
+    }
+
+    // STEP 3: Fall back to what the profile carries — the kind-0 field first,
+    // then an address written into the about text.
+    if (profile && isMoneroAddress(profile.monero_address)) {
+        return profile.monero_address;
+    }
+    if (profile && profile.about) {
+        const xmrAddress = extractMoneroAddressFromText(profile.about);
+        if (xmrAddress) {
+            console.log('💰 Found Monero address in profile about field:', xmrAddress.slice(0, 10) + '...');
+            if (State.profileCache[pubkey]) {
+                State.profileCache[pubkey].monero_address = xmrAddress;
+            }
+            return xmrAddress;
+        }
     }
 
     // No Monero address found anywhere, cache null to avoid re-checking
