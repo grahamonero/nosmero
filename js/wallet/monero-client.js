@@ -7,6 +7,7 @@
 
 import * as storage from './storage.js';
 import * as walletCrypto from './crypto.js';
+import { ensureWalletLib } from './lib-loader.js';
 
 // Wallet state
 let currentWallet = null;
@@ -155,13 +156,26 @@ function getDaemonUriForQuickOps() {
 }
 
 /**
- * Get the MoneroTS library (loaded globally)
+ * The MoneroTS engine, which must already be on the page — see requireMoneroTS().
+ * Only a synchronous helper called from inside an already-awaited entry point
+ * may use this directly (getPriorityEnum).
  */
 function getMoneroTS() {
     if (typeof MoneroTS === 'undefined') {
-        throw new Error('MoneroTS library not loaded. Include monero-wallet.iife.js first.');
+        throw new Error('Wallet engine not loaded — await requireMoneroTS() first.');
     }
     return MoneroTS;
+}
+
+/**
+ * Download the wallet engine if this page has not needed it yet, then return it.
+ * Every exported entry point that touches MoneroTS awaits this first, so the
+ * 2 MB library is fetched on first wallet use instead of on every page view
+ * (index.html stopped loading it eagerly on 2026-11-11).
+ */
+async function requireMoneroTS() {
+    await ensureWalletLib();
+    return getMoneroTS();
 }
 
 /**
@@ -231,7 +245,7 @@ export async function getRestoreHeight() {
  * @returns {Promise<{seed: string, address: string, restoreHeight: number}>}
  */
 export async function createWallet(pin) {
-    const MoneroTS = getMoneroTS();
+    const MoneroTS = await requireMoneroTS();
 
     // Require logged in user
     const currentPubkey = await getNostrPubkey();
@@ -315,7 +329,7 @@ export async function createWallet(pin) {
  * @returns {Promise<{address: string}>}
  */
 export async function restoreWallet(seed, pin, restoreHeight = 0) {
-    const MoneroTS = getMoneroTS();
+    const MoneroTS = await requireMoneroTS();
 
     // Require logged in user
     const currentPubkey = await getNostrPubkey();
@@ -615,7 +629,7 @@ export async function getFullWallet() {
         return currentWallet;
     }
 
-    const MoneroTS = getMoneroTS();
+    const MoneroTS = await requireMoneroTS();
     const currentPubkey = await getNostrPubkey();
     const walletData = await storage.loadWallet(currentPubkey);
 
@@ -1006,7 +1020,7 @@ export async function createTransaction(address, amount, priority = 'normal') {
     const validatedAmount = validateAmount(amount, 'createTransaction');
 
     const wallet = await getFullWallet();
-    const MoneroTS = getMoneroTS();
+    const MoneroTS = await requireMoneroTS();
 
     // Ensure daemon connection before creating tx (Tor mode may have lost it)
     await ensureDaemonConnection(wallet);
@@ -1115,7 +1129,7 @@ export async function createBatchTransaction(destinations, priority = 'normal') 
     });
 
     const wallet = await getFullWallet();
-    const MoneroTS = getMoneroTS();
+    const MoneroTS = await requireMoneroTS();
 
     // Ensure daemon connection before creating tx (Tor mode may have lost it)
     await ensureDaemonConnection(wallet);
@@ -1274,7 +1288,7 @@ export async function relayTransaction(recipients = null) {
     // Method 3: Direct daemon submission with full hex
     if (!relaySuccess && txFullHex) {
         try {
-            const MoneroTS = getMoneroTS();
+            const MoneroTS = await requireMoneroTS();
             const daemon = await MoneroTS.connectToDaemonRpc(currentDaemonUri || getClearnetDaemonUri());
             const result = await daemon.submitTxHex(txFullHex, false); // false = do relay
 
@@ -1396,7 +1410,7 @@ export async function send(address, amount, priority = 'normal') {
     const validatedAmount = validateAmount(amount, 'send');
 
     const wallet = await getFullWallet();
-    const MoneroTS = getMoneroTS();
+    const MoneroTS = await requireMoneroTS();
 
     const txConfig = new MoneroTS.MoneroTxConfig({
         accountIndex: 0,
@@ -1651,7 +1665,7 @@ async function saveWalletCache(wallet, pubkey) {
  */
 export async function sync(onProgress) {
     const currentPubkey = await getNostrPubkey();
-    const MoneroTS = getMoneroTS();
+    const MoneroTS = await requireMoneroTS();
     const MAX_RETRIES = 10;
     // If no progress callback fires for this long, assume WASM is frozen
     const STALL_TIMEOUT_MS = 90_000; // 90 seconds

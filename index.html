@@ -1470,9 +1470,8 @@
     <!-- Load nostr-tools from local copy -->
     <script src="/lib/nostr-tools.bundle.js"></script>
 
-    <!-- Monero wallet library (client-side WebAssembly) -->
-    <!-- SRI hash protects against supply chain attacks on the WASM bundle -->
-    <script src="/lib/monero-wallet.iife.js" integrity="sha384-gNGdgKHQok1SRL9i3qj4OuKW4FXf10WXAOiIqym1kzo7WLwIaXoRGCNOcxK5wLfe" crossorigin="anonymous"></script>
+    <!-- The Monero wallet engine (lib/monero-wallet.iife.js, 2 MB) is NOT loaded here.
+         js/wallet/lib-loader.js fetches it on first wallet use, SRI-pinned there (2026-11-11). -->
 
     <!-- IPFS Embed Modal -->
     <dialog id="ipfsEmbedModal" class="ipfs-embed-modal">
@@ -1540,9 +1539,9 @@
     </dialog>
 
     <!-- Load the modular v2 application (UI modules consolidated into /js/ui/) -->
-    <script type="module" src="/js/app.js?v=3.1.8-tips-filter"></script>
+    <script type="module" src="/js/app.js?v=3.1.9-lazy-wallet"></script>
 
     <!-- XMR Wallet Modal (replaces wallet.html) -->
-    <script type="module" src="/js/wallet-modal.js?v=1.0.2-three-column"></script>
+    <script type="module" src="/js/wallet-modal.js?v=1.0.3-lazy-wallet"></script>
 </body>
 </html>

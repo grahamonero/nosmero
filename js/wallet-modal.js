@@ -6,11 +6,14 @@
  */
 
 import * as State from './state.js';
+import { ensureWalletLib, isWalletLibLoaded } from './wallet/lib-loader.js';
 
 // Wallet module (lazy loaded)
 let Wallet = null;
 let walletLibraryLoaded = false;
 let walletLibraryLoading = false;
+let walletLibraryError = null;   // last load failure, shown with a Retry button
+let lastOpenOptions = {};        // so Retry reopens with the same tip/queue context
 
 // Modal state
 let currentView = 'loading';
@@ -137,14 +140,10 @@ async function loadWalletLibrary() {
     walletLibraryLoading = true;
 
     try {
-        // Load the IIFE bundle
-        await new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = '/lib/monero-wallet.iife.js';
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
+        // The engine (2 MB) is fetched here on first use, SRI-pinned in
+        // wallet/lib-loader.js — index.html no longer loads it on every page view.
+        walletLibraryError = null;
+        await ensureWalletLib();
 
         // Import the wallet module
         Wallet = await import('./wallet/index.js');
@@ -153,6 +152,7 @@ async function loadWalletLibrary() {
         return true;
     } catch (err) {
         console.error('[WalletModal] Failed to load wallet library:', err);
+        walletLibraryError = err;
         walletLibraryLoading = false;
         return false;
     } finally {
@@ -270,6 +270,8 @@ function showLockButton(show) {
  * @param {Object} options - Optional tip metadata
  */
 export async function openWalletModal(options = {}) {
+    lastOpenOptions = options;
+
     // Store tip metadata if provided
     if (options.tipMeta) {
         tipMeta = options.tipMeta;
@@ -289,13 +291,15 @@ export async function openWalletModal(options = {}) {
         document.body.style.overflow = 'hidden';
     }
 
-    // Show loading state
-    renderLoading();
+    // Show loading state — and say why it may take a while the first time
+    renderLoading(isWalletLibLoaded() || walletLibraryLoaded
+        ? 'Loading Tip Jar...'
+        : 'Downloading the wallet engine (about 2 MB)… over Tor this can take a minute.');
 
     // Load wallet library
     const loaded = await loadWalletLibrary();
     if (!loaded) {
-        renderError('Failed to load wallet library. Please try again.');
+        renderError(walletLibraryError?.message || 'Failed to load the wallet engine. Please try again.', { retry: true });
         return;
     }
 
@@ -375,14 +379,14 @@ async function initWalletView() {
 /**
  * Render loading state
  */
-function renderLoading() {
+function renderLoading(message = 'Loading Tip Jar...') {
     currentView = 'loading';
     setTitle('⛏️ XMR Tip Jar');
     showLockButton(false);
     getContentEl().innerHTML = `
         <div style="text-align: center; padding: 60px 20px;">
             <div style="width: 40px; height: 40px; margin: 0 auto 20px; border: 3px solid #333; border-top-color: #FF6600; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-            <p style="color: #999;">Loading Tip Jar...</p>
+            <p style="color: #999;">${message}</p>
         </div>
     `;
 }
@@ -390,15 +394,18 @@ function renderLoading() {
 /**
  * Render error state
  */
-function renderError(message) {
+function renderError(message, { retry = false } = {}) {
     currentView = 'error';
     setTitle('⛏️ XMR Tip Jar');
     showLockButton(false);
+    const retryBtn = retry
+        ? `<button onclick="retryWalletLoad()" style="background: #FF6600; border: none; color: #fff; padding: 12px 24px; border-radius: 8px; cursor: pointer; margin-right: 10px;">Try again</button>`
+        : '';
     getContentEl().innerHTML = `
         <div style="text-align: center; padding: 60px 20px;">
             <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
             <p style="color: #ff6b6b; margin-bottom: 20px;">${message}</p>
-            <button onclick="closeWalletModal()" style="background: #333; border: none; color: #fff; padding: 12px 24px; border-radius: 8px; cursor: pointer;">Close</button>
+            ${retryBtn}<button onclick="closeWalletModal()" style="background: #333; border: none; color: #fff; padding: 12px 24px; border-radius: 8px; cursor: pointer;">Close</button>
         </div>
     `;
 }
@@ -2467,4 +2474,5 @@ document.addEventListener('click', (event) => {
 // Also export openWalletModal to window for HTML onclick handlers
 window.openWalletModal = openWalletModal;
 window.closeWalletModal = closeWalletModal;
+window.retryWalletLoad = () => openWalletModal(lastOpenOptions);
 window.lockWallet = lockWallet;
