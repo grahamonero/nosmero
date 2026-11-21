@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import https from 'https';
 import http from 'http';
 import { config } from './config.js';
+import { nodeOrder, isKnownNode, normaliseNode, withUpstream, forwarderAddress } from './monero-nodes.js';
 
 const { MoneroDaemonRpc } = moneroTs;
 
@@ -124,21 +125,46 @@ function isTxNotFoundError(errorMessage) {
   );
 }
 
+// How many public nodes one round asks before pausing. The hinted node (if any) and the
+// two after it: enough to ride out one dead node without making a buyer whose payment is
+// simply still spreading wait on thirteen of them.
+const NODES_PER_ROUND = 3;
+
+// Errors that say the proof itself is malformed. No node will answer differently.
+const INVALID_PROOF_PATTERNS = ['invalid format', 'invalid address', 'wrong address'];
+
+function isInvalidProofError(errorMessage) {
+  return INVALID_PROOF_PATTERNS.some(pattern => errorMessage.toLowerCase().includes(pattern));
+}
+
 /**
  * Verify a Monero transaction proof using tx_key
+ *
+ * The check is done by the local wallet service, which fetches the transaction from a public
+ * Monero node (Nosmero runs none of its own — see monero-nodes.js). Nodes are tried in order
+ * until one can answer:
+ *   - "not found" may only mean the payment has not reached that node yet, so the next node
+ *     is asked, and after a round of them the whole round is repeated a few seconds later;
+ *   - a node that cannot be reached is set aside for a while (circuit breaker) and the next
+ *     one is asked;
+ *   - a node that finds the transaction and reports the wrong amount is believed only once a
+ *     second node says the same, so that one misbehaving node cannot deny a valid payment.
+ *
  * @param {Object} params - Verification parameters
  * @param {string} params.txid - Transaction ID
  * @param {string} params.txKey - Transaction private key
  * @param {string} params.recipientAddress - Expected recipient address
  * @param {number} params.expectedAmount - Expected amount in XMR
- * @returns {Promise<Object>} Verification result
+ * @param {string} [params.nodeHint] - The node the buyer's wallet paid through; asked first
+ *        when it is one of the configured nodes, ignored otherwise
+ * @returns {Promise<Object>} Verification result, including `node`: which node vouched for it
  */
-export async function verifyTransactionProof({ txid, txKey, recipientAddress, expectedAmount }) {
+export async function verifyTransactionProof({ txid, txKey, recipientAddress, expectedAmount, nodeHint }) {
   const requestId = crypto.randomBytes(4).toString('hex');
   const startTime = Date.now();
 
   console.log(`[Verify:${requestId}] === Starting verification ===`);
-  console.log(`[Verify:${requestId}] TXID: ${txid.substring(0, 16)}...`);
+  console.log(`[Verify:${requestId}] TXID: ${String(txid).substring(0, 16)}...`);
   console.log(`[Verify:${requestId}] Expected amount: ${expectedAmount} XMR`);
 
   // Input validation
@@ -166,37 +192,65 @@ export async function verifyTransactionProof({ txid, txKey, recipientAddress, ex
     throw new Error('Invalid expected amount: must be finite and not exceed 1 billion XMR');
   }
 
-  // Try multiple RPC nodes for reliability
-  let lastError = null;
+  const rpcUrl = config.moneroRpcNodes[0];
+  if (isKnownNode(nodeHint)) {
+    console.log(`[Verify:${requestId}] Buyer's wallet paid through ${normaliseNode(nodeHint)} - asking it first`);
+  } else if (nodeHint) {
+    console.log(`[Verify:${requestId}] Ignoring a node hint that is not one of our nodes`);
+  }
 
-  for (const rpcUrl of config.moneroRpcNodes) {
-    // Check circuit breaker before attempting
-    if (!isNodeAvailable(rpcUrl)) {
-      console.log(`[Verify:${requestId}] Skipping ${rpcUrl} - circuit breaker OPEN`);
-      continue;
+  let lastError = null;
+  const mismatchNodes = new Set();    // nodes that found the transaction and reported a wrong amount
+  let notFoundRounds = 0;
+
+  for (let round = 1; round <= RETRY_CONFIG.maxAttempts; round++) {
+    // Recomputed every round: a node that failed in the last one has been set aside.
+    const nodes = nodeOrder(nodeHint, isNodeAvailable).slice(0, NODES_PER_ROUND);
+    let notFound = 0;
+
+    for (const node of nodes) {
+      if (mismatchNodes.has(node)) continue;    // it has answered; asking again changes nothing
+      const attemptStart = Date.now();
+      try {
+        const result = await verifyWithNode(rpcUrl, node, { txid, txKey, recipientAddress, expectedAmount, requestId });
+        recordSuccess(node);
+        const totalTime = Date.now() - startTime;
+        console.log(`[Verify:${requestId}] === Verification SUCCESS via ${node} in ${totalTime}ms (round ${round}) ===`);
+        return { ...result, node };
+      } catch (error) {
+        lastError = error;
+        const took = Date.now() - attemptStart;
+
+        if (error.code === 'AMOUNT_MISMATCH') {
+          mismatchNodes.add(node);
+          console.warn(`[Verify:${requestId}] ${node}: ${error.message} (${took}ms)`);
+          if (mismatchNodes.size >= Math.min(2, nodes.length)) {
+            console.error(`[Verify:${requestId}] === Verification FAILED: ${mismatchNodes.size} node(s) agree the amount is wrong ===`);
+            throw new Error('Transaction verification failed. Please check your transaction details and try again.');
+          }
+        } else if (isInvalidProofError(error.message)) {
+          console.error(`[Verify:${requestId}] === Verification FAILED: ${error.message} ===`);
+          throw new Error('Transaction verification failed. Please check your transaction details and try again.');
+        } else if (isTxNotFoundError(error.message)) {
+          notFound++;
+          console.warn(`[Verify:${requestId}] ${node}: transaction not found (${took}ms) - it may not have reached this node yet`);
+        } else {
+          recordFailure(node); // circuit breaker: leave this node alone for a while
+          console.warn(`[Verify:${requestId}] ${node} failed after ${took}ms: ${error.message}`);
+        }
+      }
     }
 
-    try {
-      console.log(`[Verify:${requestId}] Attempting verification with RPC node: ${rpcUrl}`);
-
-      const result = await verifyWithRpcNodeRetry(rpcUrl, {
-        txid,
-        txKey,
-        recipientAddress,
-        expectedAmount,
-        requestId
-      });
-
-      const totalTime = Date.now() - startTime;
-      console.log(`[Verify:${requestId}] === Verification SUCCESS in ${totalTime}ms ===`);
-      recordSuccess(rpcUrl); // Reset circuit breaker on success
-      return result;
-
-    } catch (error) {
-      console.error(`[Verify:${requestId}] RPC node ${rpcUrl} failed:`, error.message);
-      recordFailure(rpcUrl); // Record failure for circuit breaker
-      lastError = error;
-      // Continue to next node
+    if (round < RETRY_CONFIG.maxAttempts) {
+      const everyNodeSaidNotFound = notFound > 0 && notFound === nodes.length - [...mismatchNodes].filter(n => nodes.includes(n)).length;
+      if (everyNodeSaidNotFound) notFoundRounds++;
+      const delayMs = everyNodeSaidNotFound
+        ? RETRY_CONFIG.txNotFoundDelayMs
+        : Math.min(RETRY_CONFIG.initialDelayMs * Math.pow(1.5, round - 1), RETRY_CONFIG.maxDelayMs);
+      console.log(`[Verify:${requestId}] Round ${round}/${RETRY_CONFIG.maxAttempts} did not settle it - waiting ${Math.round(delayMs)}ms`);
+      await sleep(delayMs);
+    } else if (notFound > 0) {
+      notFoundRounds++;
     }
   }
 
@@ -206,189 +260,119 @@ export async function verifyTransactionProof({ txid, txKey, recipientAddress, ex
 
   // Provide user-friendly error message
   if (lastError && isTxNotFoundError(lastError.message)) {
-    throw new Error('Transaction not yet confirmed on the network. Please wait a few seconds and try again.');
+    throw new Error(notFoundRounds >= RETRY_CONFIG.maxAttempts
+      ? 'Transaction not found after multiple attempts. It may still be propagating - please wait 30 seconds and try again.'
+      : 'Transaction not yet confirmed on the network. Please wait a few seconds and try again.');
   }
 
-  // All nodes failed - generic error message to prevent information leakage
+  // Generic error message to prevent information leakage
   throw new Error('Transaction verification failed. Please check your transaction details and try again.');
 }
 
 /**
- * Verify with retry logic - handles both connection issues and tx propagation delays
+ * Ask the wallet service to check the proof against one public node.
+ *
+ * The node is selected by pointing the loopback forwarder at it for the duration of these
+ * calls (withUpstream); the wallet service itself always talks to the forwarder.
  */
-async function verifyWithRpcNodeRetry(rpcUrl, { txid, txKey, recipientAddress, expectedAmount, requestId }) {
-  let lastError = null;
-  let txNotFoundCount = 0;
-
-  for (let attempt = 1; attempt <= RETRY_CONFIG.maxAttempts; attempt++) {
-    const attemptStart = Date.now();
-
+function verifyWithNode(rpcUrl, node, { txid, txKey, recipientAddress, expectedAmount, requestId }) {
+  return withUpstream(node, async () => {
+    // Step 0: Keep the wallet service from syncing its own (empty) wallet in the background.
+    // check_tx_key needs no synced wallet, but by default the service refreshes every 20
+    // seconds — and with a remote node that means pulling blocks through the forwarder in
+    // the middle of a verification, holding the wallet's lock while it does. Measured on
+    // 2026-11-21: verifications took 3-12 s and one timed out at 30 s with it on. The
+    // setting is lost when the service restarts, so it is re-sent every time; it costs a
+    // millisecond.
     try {
-      console.log(`[Verify:${requestId}] Attempt ${attempt}/${RETRY_CONFIG.maxAttempts}`);
+      await makeRpcCall(rpcUrl, { jsonrpc: '2.0', id: '0', method: 'auto_refresh', params: { enable: false } });
+    } catch (e) {
+      console.warn(`[Verify:${requestId}] auto_refresh off failed (non-fatal): ${e.message}`);
+    }
 
-      const result = await verifyWithRpcNode(rpcUrl, { txid, txKey, recipientAddress, expectedAmount, requestId });
+    // Step 1: Have wallet-rpc reconnect to its daemon (the forwarder) before check_tx_key.
+    // This prevents stale internal connection issues, and repairs a wallet service that was
+    // started pointing somewhere else.
+    try {
+      await makeRpcCall(rpcUrl, {
+        jsonrpc: '2.0',
+        id: '0',
+        method: 'set_daemon',
+        params: { address: forwarderAddress(), trusted: false }
+      });
+    } catch (e) {
+      console.warn(`[Verify:${requestId}] set_daemon failed (non-fatal): ${e.message}`);
+    }
 
-      const attemptTime = Date.now() - attemptStart;
-      console.log(`[Verify:${requestId}] Attempt ${attempt} succeeded in ${attemptTime}ms`);
+    // Step 2: Wait for the connection to stabilize
+    await sleep(RETRY_CONFIG.setDaemonDelayMs);
 
-      return result;
+    // Step 3: Is the wallet service itself alive? (get_height reads the wallet, not the node)
+    try {
+      await makeRpcCall(rpcUrl, { jsonrpc: '2.0', id: '0', method: 'get_height', params: {} });
+    } catch (e) {
+      throw new Error(`Wallet-RPC health check failed: ${e.message}`);
+    }
 
-    } catch (error) {
-      lastError = error;
-      const attemptTime = Date.now() - attemptStart;
-
-      // Check if this is a "transaction not found" error (propagation issue)
-      const isTxNotFound = isTxNotFoundError(error.message);
-
-      if (isTxNotFound) {
-        txNotFoundCount++;
-        console.warn(`[Verify:${requestId}] Attempt ${attempt} - TX NOT FOUND (${txNotFoundCount}x) after ${attemptTime}ms`);
-        console.log(`[Verify:${requestId}] Transaction may not have propagated yet. Waiting longer...`);
-
-        // Use longer delay for tx propagation issues
-        if (attempt < RETRY_CONFIG.maxAttempts) {
-          const propagationDelay = RETRY_CONFIG.txNotFoundDelayMs;
-          console.log(`[Verify:${requestId}] Waiting ${propagationDelay}ms for transaction propagation...`);
-          await sleep(propagationDelay);
-        }
-      } else {
-        // Regular error - use exponential backoff
-        console.warn(`[Verify:${requestId}] Attempt ${attempt} failed after ${attemptTime}ms: ${error.message}`);
-
-        if (attempt < RETRY_CONFIG.maxAttempts) {
-          const backoffMs = Math.min(
-            RETRY_CONFIG.initialDelayMs * Math.pow(1.5, attempt - 1),
-            RETRY_CONFIG.maxDelayMs
-          );
-          console.log(`[Verify:${requestId}] Waiting ${Math.round(backoffMs)}ms before retry...`);
-          await sleep(backoffMs);
-        }
+    // Step 4: The actual check_tx_key call
+    const checkStart = Date.now();
+    const result = await makeRpcCall(rpcUrl, {
+      jsonrpc: '2.0',
+      id: '0',
+      method: 'check_tx_key',
+      params: {
+        txid: txid,
+        tx_key: txKey,
+        address: recipientAddress
       }
-    }
-  }
-
-  // If all failures were "tx not found", provide specific error
-  if (txNotFoundCount === RETRY_CONFIG.maxAttempts) {
-    console.error(`[Verify:${requestId}] Transaction not found after ${RETRY_CONFIG.maxAttempts} attempts`);
-    throw new Error('Transaction not found after multiple attempts. It may still be propagating - please wait 30 seconds and try again.');
-  }
-
-  // Log detailed error internally
-  console.error(`[Verify:${requestId}] Verification failed: ${lastError?.message}`);
-  throw new Error('Transaction verification failed. Please check your transaction details and try again.');
-}
-
-/**
- * Verify transaction proof with a specific RPC node using direct JSON-RPC calls
- */
-async function verifyWithRpcNode(rpcUrl, { txid, txKey, recipientAddress, expectedAmount, requestId }) {
-  // Step 1: Force wallet-rpc to reconnect to daemon before check_tx_key
-  // This prevents stale internal connection issues
-  const setDaemonStart = Date.now();
-  try {
-    console.log(`[Verify:${requestId}] Calling set_daemon...`);
-    await makeRpcCall(rpcUrl, {
-      jsonrpc: '2.0',
-      id: '0',
-      method: 'set_daemon',
-      params: { address: 'http://127.0.0.1:18081' }
     });
-    const setDaemonTime = Date.now() - setDaemonStart;
-    console.log(`[Verify:${requestId}] set_daemon completed in ${setDaemonTime}ms`);
-  } catch (e) {
-    const setDaemonTime = Date.now() - setDaemonStart;
-    console.warn(`[Verify:${requestId}] set_daemon failed after ${setDaemonTime}ms (non-fatal): ${e.message}`);
-  }
+    console.log(`[Verify:${requestId}] check_tx_key via ${node} completed in ${Date.now() - checkStart}ms`);
 
-  // Step 2: Wait for daemon connection to stabilize
-  // This is critical - wallet-rpc needs time to fully establish the connection
-  console.log(`[Verify:${requestId}] Waiting ${RETRY_CONFIG.setDaemonDelayMs}ms for daemon connection to stabilize...`);
-  await sleep(RETRY_CONFIG.setDaemonDelayMs);
-
-  // Step 3: Health check - verify daemon is reachable via get_height
-  const healthStart = Date.now();
-  try {
-    console.log(`[Verify:${requestId}] Running health check (get_height)...`);
-    const heightResult = await makeRpcCall(rpcUrl, {
-      jsonrpc: '2.0',
-      id: '0',
-      method: 'get_height',
-      params: {}
-    });
-    const healthTime = Date.now() - healthStart;
-    console.log(`[Verify:${requestId}] Health check passed in ${healthTime}ms - wallet height: ${heightResult.height}`);
-  } catch (e) {
-    const healthTime = Date.now() - healthStart;
-    console.error(`[Verify:${requestId}] Health check FAILED after ${healthTime}ms: ${e.message}`);
-    throw new Error(`Wallet-RPC health check failed: ${e.message}`);
-  }
-
-  // Step 4: Make the actual check_tx_key call
-  const checkStart = Date.now();
-  console.log(`[Verify:${requestId}] Calling check_tx_key...`);
-
-  const requestData = {
-    jsonrpc: '2.0',
-    id: '0',
-    method: 'check_tx_key',
-    params: {
-      txid: txid,
-      tx_key: txKey,
-      address: recipientAddress
+    // Validate RPC response has expected fields
+    if (!result || typeof result !== 'object') {
+      throw new Error('Invalid RPC response format');
     }
-  };
 
-  const result = await makeRpcCall(rpcUrl, requestData);
-  const checkTime = Date.now() - checkStart;
-  console.log(`[Verify:${requestId}] check_tx_key completed in ${checkTime}ms`);
+    if (typeof result.received === 'undefined') {
+      throw new Error('Transaction key verification failed - no received field');
+    }
 
-  // Validate RPC response has expected fields
-  if (!result || typeof result !== 'object') {
-    throw new Error('Invalid RPC response: result is not an object');
-  }
+    if (typeof result.confirmations === 'undefined') {
+      throw new Error('Transaction key verification failed - no confirmations field');
+    }
 
-  if (typeof result.received === 'undefined') {
-    throw new Error('Transaction key verification failed - no received field');
-  }
+    if (typeof result.in_pool === 'undefined') {
+      throw new Error('Transaction key verification failed - no in_pool field');
+    }
 
-  if (typeof result.confirmations === 'undefined') {
-    throw new Error('Transaction key verification failed - no confirmations field');
-  }
+    // Get the amount received (in atomic units)
+    const receivedAtomic = result.received;
 
-  if (typeof result.in_pool === 'undefined') {
-    throw new Error('Transaction key verification failed - no in_pool field');
-  }
+    // Convert atomic units to XMR (1 XMR = 1e12 atomic units)
+    const receivedXmrString = (BigInt(receivedAtomic) * BigInt(1e9) / BigInt(1e12)).toString();
+    const receivedXmr = Number(receivedXmrString) / 1e9;
 
-  // Get the amount received (in atomic units)
-  const receivedAtomic = result.received;
+    // Convert expected amount to atomic units for precise comparison
+    const expectedAtomic = Math.round(expectedAmount * 1e12);
 
-  // Use string-based conversion to avoid floating point precision issues
-  // Convert atomic units to XMR (1 XMR = 1e12 atomic units)
-  // Convert to string with proper decimal places, then to number for comparison
-  const receivedXmrString = (BigInt(receivedAtomic) * BigInt(1e9) / BigInt(1e12)).toString();
-  const receivedXmr = Number(receivedXmrString) / 1e9;
+    console.log(`[Verify:${requestId}] Expected: ${expectedAmount} XMR, Received: ${receivedXmr} XMR, Confirmations: ${result.confirmations}`);
 
-  // Convert expected amount to atomic units for precise comparison
-  const expectedAtomic = Math.round(expectedAmount * 1e12);
+    // Compare at atomic unit level to avoid floating point errors
+    // Allow small tolerance for rounding (1e-12 XMR = 1 atomic unit)
+    const atomicTolerance = 1;
+    if (Math.abs(receivedAtomic - expectedAtomic) > atomicTolerance) {
+      const mismatch = new Error(`Amount mismatch: expected ${expectedAmount} XMR, received ${receivedXmr} XMR`);
+      mismatch.code = 'AMOUNT_MISMATCH';
+      throw mismatch;
+    }
 
-  console.log(`[Verify:${requestId}] Expected: ${expectedAmount} XMR, Received: ${receivedXmr} XMR, Confirmations: ${result.confirmations}`);
-
-  // Compare at atomic unit level to avoid floating point errors
-  // Allow small tolerance for rounding (1e-12 XMR = 1 atomic unit)
-  const atomicTolerance = 1;
-  if (Math.abs(receivedAtomic - expectedAtomic) > atomicTolerance) {
-    throw new Error(`Amount mismatch: expected ${expectedAmount} XMR, received ${receivedXmr} XMR`);
-  }
-
-  // Get confirmations
-  const confirmations = result.confirmations;
-
-  return {
-    verified: true,
-    receivedAmount: receivedXmr,
-    confirmations: confirmations,
-    inTxPool: result.in_pool
-  };
+    return {
+      verified: true,
+      receivedAmount: receivedXmr,
+      confirmations: result.confirmations,
+      inTxPool: result.in_pool
+    };
+  });
 }
 
 /**

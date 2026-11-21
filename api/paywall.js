@@ -400,7 +400,7 @@ export async function initiatePurchase(noteId, buyerPubkey) {
  * @param {string} params.txKey - Transaction private key for proof
  * @returns {Object} { success, decryptionKey }
  */
-export async function verifyAndUnlock({ purchaseId, noteId, buyerPubkey, txid, txKey }) {
+export async function verifyAndUnlock({ purchaseId, noteId, buyerPubkey, txid, txKey, nodeHint }) {
     // Load data
     const purchaseData = await loadPurchases();
     const paywallData = await loadPaywalls();
@@ -452,7 +452,8 @@ export async function verifyAndUnlock({ purchaseId, noteId, buyerPubkey, txid, t
             txid,
             txKey,
             recipientAddress: paywall.paymentAddress,
-            expectedAmount: paywall.priceXmr
+            expectedAmount: paywall.priceXmr,
+            nodeHint
         });
         console.log(`[Paywall] Verification successful: ${verificationResult.receivedAmount} XMR, ${verificationResult.confirmations} confirmations`);
     } catch (verifyError) {
@@ -467,6 +468,9 @@ export async function verifyAndUnlock({ purchaseId, noteId, buyerPubkey, txid, t
         txid,
         amount: verificationResult.receivedAmount,
         confirmations: verificationResult.confirmations,
+        // Which public Monero node said this payment exists. Nosmero no longer runs a node
+        // of its own, so this is the record of whose word the unlock rests on.
+        verifiedVia: verificationResult.node,
         unlockedAt: Date.now()
     };
 

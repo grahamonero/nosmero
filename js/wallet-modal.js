@@ -743,36 +743,15 @@ function updateNodeInfo() {
     let badgeColor = '#8B5CF6';
     let badgeBg = 'rgba(139, 92, 246, 0.2)';
 
-    if (daemonUri.includes('.onion')) {
-        // Tor node - show truncated onion address
-        const match = daemonUri.match(/([a-z0-9]+)\.onion/);
-        if (match) {
-            displayUri = match[1].slice(0, 10) + '...onion';
-        }
-
-        // Check if it's Nosmero's node or a public node
-        if (daemonUri.includes('d56w6j5tjhrujgahlmxqn5z3lzy5g2s2wnbz7ssru6p4onsgxuzjctyd')) {
-            badge = 'Nosmero';
-            badgeColor = '#FF6600';
-            badgeBg = 'rgba(255, 102, 0, 0.2)';
-        } else {
-            badge = 'Public Tor';
-            badgeColor = '#4ade80';
-            badgeBg = 'rgba(74, 222, 128, 0.2)';
-        }
-    } else if (daemonUri.includes('nosmero.com')) {
-        displayUri = 'nosmero.com';
-        badge = 'Private';
-        badgeColor = '#FF6600';
-        badgeBg = 'rgba(255, 102, 0, 0.2)';
-    } else {
-        // Other clearnet node
-        try {
-            const url = new URL(daemonUri);
-            displayUri = url.host;
-        } catch (e) {}
-        badge = 'Public';
-    }
+    // Nosmero runs no node of its own: the wallet uses a public one, chosen for speed when
+    // the wallet first needs the network (js/wallet/node-select.js). Show which, and say
+    // plainly what a public node's operator can see.
+    try {
+        const url = new URL(daemonUri);
+        displayUri = url.host;
+    } catch (e) {}
+    badge = 'Public';
+    nodeInfoEl.title = 'A public Monero node, picked because it answered fastest. Its operator can see your IP address and the transactions you send through it. Your keys never leave this browser.';
 
     if (nodeAddressEl) nodeAddressEl.textContent = displayUri;
     if (nodeBadgeEl) {

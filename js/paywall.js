@@ -546,7 +546,11 @@ export async function completeUnlock(noteId, paywall, onProgress = () => {}) {
             note_id: noteId,
             buyer_pubkey: buyerPubkey,
             txid: txHash,
-            tx_key: txKey
+            tx_key: txKey,
+            // The node the payment was sent through has it immediately; the rest of the
+            // network hears of it seconds later. The server looks here first — and only if
+            // this is a node it already knows (it never contacts an address it is handed).
+            node: MoneroClient.getCurrentDaemonUri() || undefined
         })
     });
 

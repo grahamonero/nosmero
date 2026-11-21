@@ -28,8 +28,38 @@ export const config = {
   // Monero Wallet RPC for tx verification
   // check_tx_key requires wallet RPC, not daemon RPC
   moneroRpcNodes: [
-    'http://127.0.0.1:18083',  // Local wallet RPC (empty wallet, verification only)
+    process.env.MONERO_WALLET_RPC_URL || 'http://127.0.0.1:18083',  // Local wallet RPC (empty wallet, verification only)
   ],
+
+  // The public Monero nodes that wallet service fetches transactions from. Nosmero runs no
+  // node of its own; see monero-nodes.js for how they are reached and what they are trusted
+  // for. This is the same list the browser wallet chooses from (js/wallet/node-select.js),
+  // so that the node a buyer paid through is one the server can ask first —
+  // smoke-monero-nodes.mjs fails if the two lists drift apart. Every entry was checked
+  // against our own node's answers before the node was retired
+  // (/root/nosmero-infra-tests/monero-nodes/verify-differential.mjs).
+  // (MONERO_PUBLIC_NODES_FOR_TEST exists for the test harness only — it lets a test point an
+  // isolated copy of the API at nodes with deliberately bad certificates. Never set it on the
+  // live API: the browser wallet's list would no longer match the server's.)
+  moneroPublicNodes: process.env.MONERO_PUBLIC_NODES_FOR_TEST ? process.env.MONERO_PUBLIC_NODES_FOR_TEST.split(',') : [
+    'https://monero.openinternet.io',
+    'https://xmr.support:18089',
+    'https://xmr-node.cakewallet.com:18081',
+    'https://xmr.unshakled.net',
+    'https://xmr1.doggett.tech:18089',
+    'https://monero.definitelynotafed.com',
+    'https://node.xmr.surf',
+    'https://xmr.jayjonkman.nl:18089',
+    'https://monero.konku.rs:18089',
+    'https://rpc.monerosafe.com',
+    'https://node.mon3ro.com',
+    'https://xmr.ducks.party',
+    'https://connect.xmr-node.org',
+  ],
+
+  // Loopback port of the forwarder the wallet service uses as its daemon (monero-nodes.js).
+  // The wallet service's unit file must name the same port in --daemon-address.
+  moneroForwarderPort: parseInt(process.env.MONERO_FORWARDER_PORT || '18084', 10),
 
   // Verification settings
   verification: {

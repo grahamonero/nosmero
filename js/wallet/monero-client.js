@@ -8,6 +8,7 @@
 import * as storage from './storage.js';
 import * as walletCrypto from './crypto.js';
 import { ensureWalletLib } from './lib-loader.js';
+import * as NodeSelect from './node-select.js';
 
 // Wallet state
 let currentWallet = null;
@@ -122,17 +123,38 @@ function isTorAccess() {
     return window.location.hostname.endsWith('.onion');
 }
 
-// Tor daemon - same-origin proxy to avoid CORS issues
-// External onion nodes don't have CORS headers, so we proxy through our own nginx
-// NOTE: monero-ts ignores path in URI and hits /json_rpc, /get_blocks.bin etc directly on host
-// So we return just the origin and nginx proxies /json_rpc etc to monerod
-function getTorDaemonUri() {
-    return window.location.origin;
+/**
+ * The Monero node this session uses.
+ *
+ * Nosmero runs no node of its own. The wallet talks to a public node, picked for speed the
+ * first time the wallet needs the network in a page session (node-select.js has the list,
+ * the rules, and what a public node can and cannot see). The same on clearnet and over Tor:
+ * the onion site used to double as the node endpoint, and nothing is behind that any more.
+ *
+ * NOTE: monero-ts ignores any path in the URI and calls /json_rpc, /get_blocks.bin etc. on
+ * the host directly, so a node must be given as a bare origin.
+ *
+ * @returns {Promise<string>}
+ * @throws {Error} when no public node can be reached — the message is fit to show the user
+ */
+async function resolveDaemonUri() {
+    const uri = await NodeSelect.getNode();
+    currentDaemonUri = uri;
+    return uri;
 }
 
-// Clearnet daemon - HTTPS proxy to local monerod with CORS support
-function getClearnetDaemonUri() {
-    return 'https://nosmero.com:18089';
+/**
+ * The node in use let the wallet down. Move this session to the next fastest one.
+ *
+ * @param {string} reason  for the console
+ * @returns {Promise<string|null>} the node to use now, or null when none is left
+ */
+async function failoverDaemonUri(reason) {
+    const dropped = currentDaemonUri;
+    const next = await NodeSelect.nextNode(dropped);
+    console.warn(`[MoneroClient] Node ${dropped} dropped (${reason}); now using ${next || 'none — no public node left'}`);
+    currentDaemonUri = next;
+    return next;
 }
 
 /**
@@ -141,18 +163,6 @@ function getClearnetDaemonUri() {
  */
 export function getCurrentDaemonUri() {
     return currentDaemonUri;
-}
-
-/**
- * Get a daemon URI for quick operations (like getting blockchain height)
- * Uses same-origin proxy for both Tor and clearnet to avoid CORS issues
- * @returns {string}
- */
-function getDaemonUriForQuickOps() {
-    if (isTorAccess()) {
-        return getTorDaemonUri();
-    }
-    return getClearnetDaemonUri();
 }
 
 /**
@@ -282,7 +292,7 @@ export async function createWallet(pin) {
         // Get current blockchain height for restore height
         let restoreHeight = 0;
         try {
-            const daemon = await MoneroTS.connectToDaemonRpc(getDaemonUriForQuickOps());
+            const daemon = await MoneroTS.connectToDaemonRpc(await resolveDaemonUri());
             restoreHeight = await daemon.getHeight();
         } catch (e) {
             console.warn('[MoneroClient] Could not get blockchain height:', e.message);
@@ -637,27 +647,10 @@ export async function getFullWallet() {
     walletCreationInProgress = true;
 
     try {
-        // Create full wallet from keys
-        let serverUri = null;
-        const torMode = isTorAccess();
-
-        if (torMode) {
-            // TOR MODE: Use same-origin proxy (the onion site itself)
-            // Same-origin requests work fine from Web Workers - no CORS needed
-            serverUri = getTorDaemonUri();
-            console.log('[MoneroClient] Tor mode - using same-origin proxy:', serverUri);
-        } else {
-            // CLEARNET MODE: Use Nosmero's private daemon via HTTPS proxy
-            serverUri = getClearnetDaemonUri();
-            console.log('[MoneroClient] Clearnet mode - using proxy:', serverUri);
-        }
-
-        if (!serverUri) {
-            throw new Error('Could not connect to any Monero daemon');
-        }
-
-        // Store the current daemon URI for UI display
-        currentDaemonUri = serverUri;
+        // Create full wallet from keys, against the public node this session latched onto.
+        // resolveDaemonUri() also records it for the UI, and throws a user-facing message
+        // when no public node can be reached.
+        let serverUri = await resolveDaemonUri();
         console.log('[MoneroClient] Creating wallet with server:', serverUri);
 
         // Check for cached wallet data (enables delta sync)
@@ -732,28 +725,24 @@ export async function getFullWallet() {
         // isConnectedToDaemon() is just a state check - doesn't probe the daemon
         // getHeight() returns wallet's internal height, NOT daemon height
         // getDaemonHeight() actually calls the daemon's get_info RPC
+        // A node that answered the status probe a moment ago can still refuse the wallet, so
+        // this moves to the next one rather than retrying the same address. Three tries: more
+        // would only delay telling the user something is wrong on their side.
         let isConnected = false;
-        try {
-            const daemonHeight = await currentWallet.getDaemonHeight();
-            console.log('[MoneroClient] Daemon probe success, daemon height:', daemonHeight);
-            isConnected = true;
-        } catch (e) {
-            console.log('[MoneroClient] Initial daemon probe failed:', e.message);
-
-            // Try explicit setDaemonConnection and probe again
-            console.log('[MoneroClient] Trying setDaemonConnection...');
+        for (let attempt = 0; attempt < 3 && !isConnected && serverUri; attempt++) {
             try {
-                await currentWallet.setDaemonConnection(serverUri);
-                const daemonHeight = await currentWallet.getDaemonHeight();
-                console.log('[MoneroClient] After setDaemonConnection, daemon height:', daemonHeight);
+                if (attempt > 0) await currentWallet.setDaemonConnection(serverUri);
+                const daemonHeight = await withTimeout(currentWallet.getDaemonHeight(), 15_000, 'getDaemonHeight');
+                console.log('[MoneroClient] Daemon probe success on', serverUri, '- daemon height:', daemonHeight);
                 isConnected = true;
-            } catch (e2) {
-                console.warn('[MoneroClient] setDaemonConnection probe failed:', e2.message);
+            } catch (e) {
+                console.log('[MoneroClient] Daemon probe failed on', serverUri, '-', e.message);
+                serverUri = await failoverDaemonUri('would not answer the wallet');
             }
         }
 
         if (!isConnected) {
-            console.error('[MoneroClient] Failed to connect to daemon:', serverUri);
+            console.error('[MoneroClient] Failed to connect to any public Monero node');
         }
 
         return currentWallet;
@@ -780,7 +769,7 @@ async function ensureDaemonConnection(wallet) {
         await wallet.getDaemonHeight();
     } catch (e) {
         console.log('[MoneroClient] Daemon connection lost, reconnecting...');
-        const serverUri = currentDaemonUri || getTorDaemonUri();
+        const serverUri = currentDaemonUri || await resolveDaemonUri();
         await wallet.setDaemonConnection(serverUri);
 
         // Verify reconnection
@@ -1238,7 +1227,7 @@ export async function relayTransaction(recipients = null) {
     const isConnected = await wallet.isConnectedToDaemon();
 
     if (!isConnected) {
-        const serverUri = currentDaemonUri || getClearnetDaemonUri();
+        const serverUri = currentDaemonUri || await resolveDaemonUri();
         await wallet.setDaemonConnection(serverUri);
 
         // Verify connection after reconnect
@@ -1289,7 +1278,7 @@ export async function relayTransaction(recipients = null) {
     if (!relaySuccess && txFullHex) {
         try {
             const MoneroTS = await requireMoneroTS();
-            const daemon = await MoneroTS.connectToDaemonRpc(currentDaemonUri || getClearnetDaemonUri());
+            const daemon = await MoneroTS.connectToDaemonRpc(currentDaemonUri || await resolveDaemonUri());
             const result = await daemon.submitTxHex(txFullHex, false); // false = do relay
 
             // Check submission result - handle both object methods and plain properties
@@ -1316,7 +1305,7 @@ export async function relayTransaction(recipients = null) {
     // Method 4: HTTP POST to daemon's /sendrawtransaction endpoint
     if (!relaySuccess && txFullHex) {
         try {
-            const daemonUri = currentDaemonUri || getClearnetDaemonUri();
+            const daemonUri = currentDaemonUri || await resolveDaemonUri();
             const response = await fetch(`${daemonUri}/sendrawtransaction`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1867,7 +1856,23 @@ export async function sync(onProgress) {
             continue;
         }
 
-        // No progress made - throw the real error
+        // No progress at all. A failure that DID make progress (above) is the normal way a
+        // long sync is cut into pieces on a memory-limited device and says nothing about the
+        // node. One that made none is, with public nodes, more often the node than the
+        // wallet: some answer every status request and still cannot serve a sync. So try the
+        // next node before giving up, and only blame the node in this case.
+        const nextUri = await failoverDaemonUri(syncError.message || 'no sync progress');
+        if (nextUri) {
+            try {
+                await withTimeout(wallet.close(), 5_000, 'wallet.close');
+            } catch (e) {
+                console.warn('[MoneroClient] Wallet close timed out, abandoning worker');
+            }
+            currentWallet = null;
+            continue;   // reopens from the saved cache against the new node
+        }
+
+        // No node left to try - throw the real error
         throw new Error(`Sync failed: ${syncError.message || syncError}`);
     }
 

@@ -3,6 +3,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { verifyTransactionProof, generateProofHash } from './verify.js';
+import { startForwarder, probeNodes } from './monero-nodes.js';
 import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
@@ -88,15 +89,11 @@ async function _probeWithTimeout(promise, ms = 2500) {
   ]);
 }
 
-async function _probeMonerod() {
+// Nosmero runs no Monero node of its own; "healthy" here means at least one of the public
+// nodes payments are checked through is up and synchronised (monero-nodes.js).
+async function _probeMoneroNodes() {
   try {
-    const resp = await _probeWithTimeout(fetch('http://127.0.0.1:18081/get_height', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: '0', method: 'get_height' })
-    }));
-    const json = await resp.json();
-    return json && json.status === 'OK' && typeof json.height === 'number' ? 'ok' : 'fail';
+    return await _probeWithTimeout(probeNodes());
   } catch { return 'fail'; }
 }
 
@@ -132,13 +129,13 @@ app.get('/api/health', async (req, res) => {
   if (_healthCache.result && Date.now() - _healthCache.ts < HEALTH_CACHE_TTL_MS) {
     return res.json(_healthCache.result);
   }
-  const [monerod, strfry, relatr, kubo] = await Promise.all([
-    _probeMonerod(), _probeStrfry(), _probeRelatr(), _probeKubo()
+  const [monero_nodes, strfry, relatr, kubo] = await Promise.all([
+    _probeMoneroNodes(), _probeStrfry(), _probeRelatr(), _probeKubo()
   ]);
-  const allOk = monerod === 'ok' && strfry === 'ok' && relatr === 'ok' && kubo === 'ok';
+  const allOk = monero_nodes === 'ok' && strfry === 'ok' && relatr === 'ok' && kubo === 'ok';
   const result = {
     status: allOk ? 'ok' : 'degraded',
-    monerod, strfry, relatr, kubo,
+    monero_nodes, strfry, relatr, kubo,
     timestamp: new Date().toISOString(),
     environment: config.nodeEnv
   };
@@ -435,6 +432,7 @@ app.post('/api/verify-and-publish', requireNip98(), async (req, res) => {
       tx_key: txKey,
       recipient_address: recipientAddress,
       amount,
+      node: nodeHint,
       recipient_pubkey: recipientPubkey,
       note_id: noteId,
       message,
@@ -485,7 +483,8 @@ app.post('/api/verify-and-publish', requireNip98(), async (req, res) => {
       txid,
       txKey,
       recipientAddress,
-      expectedAmount
+      expectedAmount,
+      nodeHint
     });
 
     if (!verificationResult.verified) {
@@ -701,225 +700,6 @@ app.get('/api/trending', async (req, res) => {
   } catch (error) {
     console.error('[Trending] Error getting trending:', error);
     res.status(500).json({ success: false, error: 'Failed to get trending', trending: [] });
-  }
-});
-
-// ==================== MONERO RPC PROXY ====================
-
-// Monero daemon configuration
-const MONEROD_RPC_URL = 'http://127.0.0.1:18081/json_rpc';
-const MONEROD_OTHER_URL = 'http://127.0.0.1:18081';
-
-// Allowlist of safe RPC methods for wallet sync
-const ALLOWED_RPC_METHODS = [
-  // Daemon info
-  'get_info',
-  'get_height',
-  'get_block_count',
-  'get_last_block_header',
-  'get_block_header_by_height',
-  'get_block_header_by_hash',
-  'get_block_headers_range',
-
-  // Block data for wallet sync
-  'get_block',
-  'get_blocks_by_height.bin',
-
-  // Output data for wallet sync
-  'get_outs',
-  'get_output_histogram',
-  'get_output_distribution',
-  'get_output_distribution.bin',
-
-  // Transaction submission
-  'send_raw_transaction',
-
-  // Transaction pool
-  'get_transaction_pool',
-  'get_transaction_pool_hashes',
-
-  // Fee estimation
-  'get_fee_estimate',
-
-  // Version
-  'get_version',
-
-  // Fork info (needed for createTx to determine earliest fork height)
-  'hard_fork_info'
-];
-
-// Non-JSON-RPC endpoints (binary/other)
-const ALLOWED_OTHER_ENDPOINTS = [
-  '/get_blocks.bin',
-  '/get_blocks_by_height.bin',
-  '/get_hashes.bin',
-  '/get_o_indexes.bin',
-  '/get_outs.bin',
-  '/get_transactions',
-  '/get_alt_blocks_hashes',
-  '/is_key_image_spent',
-  '/sendrawtransaction',
-  '/get_output_distribution.bin'
-];
-
-// Rate limiter for RPC proxy
-// Increased from 100 to 500 for wallet sync performance (sync makes many RPC calls)
-const moneroRpcLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 500, // 500 requests per minute per IP
-  message: { success: false, error: 'Rate limited - too many RPC requests' }
-});
-
-// Debug logging for Monero RPC (development only)
-if (config.nodeEnv === 'development') {
-  app.use('/api/monero', (req, res, next) => {
-    console.log(`[MoneroRPC] ${req.method} ${req.originalUrl}`);
-    next();
-  });
-}
-
-// JSON-RPC proxy endpoint (simplified format for manual testing)
-app.post('/api/monero/rpc', moneroRpcLimiter, async (req, res) => {
-  try {
-    const { method, params } = req.body;
-
-    // Validate method is in allowlist
-    if (!method || !ALLOWED_RPC_METHODS.includes(method)) {
-      console.log(`[MoneroRPC] Blocked method: ${method}`);
-      return res.status(403).json({
-        success: false,
-        error: `Method '${method}' not allowed`
-      });
-    }
-
-    // Forward to monerod
-    const response = await fetch(MONEROD_RPC_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: '0',
-        method: method,
-        params: params || {}
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Monerod returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    res.json(data);
-
-  } catch (error) {
-    console.error('[MoneroRPC] Error:', error.message);
-    res.status(502).json({
-      success: false,
-      error: 'Monero node unavailable'
-    });
-  }
-});
-
-// Transparent JSON-RPC proxy for monero-ts library
-// Passes through standard JSON-RPC format as-is
-app.post('/api/monero/json_rpc', moneroRpcLimiter, async (req, res) => {
-  try {
-    const body = req.body;
-
-    // Extract method from standard JSON-RPC format
-    const method = body.method;
-
-    // Validate method is in allowlist
-    if (!method || !ALLOWED_RPC_METHODS.includes(method)) {
-      console.log(`[MoneroRPC] Blocked method: ${method}`);
-      return res.status(403).json({
-        jsonrpc: '2.0',
-        id: body.id || '0',
-        error: {
-          code: -32601,
-          message: `Method '${method}' not allowed`
-        }
-      });
-    }
-
-    // Forward request as-is to monerod
-    const response = await fetch(MONEROD_RPC_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Monerod returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    res.json(data);
-
-  } catch (error) {
-    console.error('[MoneroRPC] Error:', error.message);
-    res.status(502).json({
-      jsonrpc: '2.0',
-      id: req.body?.id || '0',
-      error: {
-        code: -32603,
-        message: 'Monero node unavailable'
-      }
-    });
-  }
-});
-
-// Binary/other endpoints proxy (handles non-JSON-RPC endpoints like /get_transactions)
-// monero-ts makes requests to base_uri + endpoint, so we need to handle /api/monero/* directly
-// Use wildcard to capture endpoints with dots like get_blocks.bin
-app.all('/api/monero/*', moneroRpcLimiter, async (req, res, next) => {
-  const endpointPath = req.params[0];
-
-  // Skip if this is the json_rpc endpoint (handled above) or rpc endpoint
-  if (endpointPath === 'json_rpc' || endpointPath === 'rpc') {
-    return next();
-  }
-
-  try {
-    const endpoint = '/' + endpointPath;
-
-    // Validate endpoint is in allowlist
-    if (!ALLOWED_OTHER_ENDPOINTS.includes(endpoint)) {
-      console.log(`[MoneroRPC] Blocked endpoint: ${endpoint}`);
-      return res.status(403).json({
-        success: false,
-        error: `Endpoint '${endpoint}' not allowed`
-      });
-    }
-
-    console.log(`[MoneroRPC] Proxying binary endpoint: ${endpoint}`);
-
-    // Forward to monerod (use the other URL for non-JSON-RPC)
-    const response = await fetch(MONEROD_OTHER_URL + endpoint, {
-      method: req.method,
-      headers: {
-        'Content-Type': req.headers['content-type'] || 'application/octet-stream'
-      },
-      body: req.method !== 'GET' ? JSON.stringify(req.body) : undefined
-    });
-
-    // Forward response
-    res.status(response.status);
-    for (const [key, value] of response.headers.entries()) {
-      if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) {
-        res.setHeader(key, value);
-      }
-    }
-
-    const buffer = await response.arrayBuffer();
-    res.send(Buffer.from(buffer));
-
-  } catch (error) {
-    console.error('[MoneroRPC] Binary endpoint error:', error.message);
-    res.status(502).json({
-      success: false,
-      error: 'Monero node unavailable'
-    });
   }
 });
 
@@ -1165,7 +945,10 @@ app.post('/api/paywall/verify', requireNip98(), paywallLimiter, async (req, res)
       note_id: noteId,
       buyer_pubkey: buyerPubkey,
       txid,
-      tx_key: txKey
+      tx_key: txKey,
+      // Optional: the node the buyer's wallet sent the payment through. Only ever used to
+      // decide which of OUR configured nodes to ask first (verify.js).
+      node: nodeHint
     } = req.body;
 
     // Validate required fields
@@ -1196,7 +979,8 @@ app.post('/api/paywall/verify', requireNip98(), paywallLimiter, async (req, res)
       noteId,
       buyerPubkey,
       txid,
-      txKey
+      txKey,
+      nodeHint
     });
 
     res.json({
@@ -1384,6 +1168,13 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
+// The wallet service reaches public Monero nodes through this loopback forwarder
+// (monero-nodes.js). If it cannot start, payment verification cannot work — say so loudly,
+// but keep serving everything else.
+startForwarder().catch((e) => {
+  console.error(`[MoneroNodes] FORWARDER DID NOT START on port ${config.moneroForwarderPort}: ${e.message} — paywall and tip verification will fail until this is fixed`);
+});
+
 const server = app.listen(config.port, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════╗
@@ -1403,8 +1194,6 @@ Endpoints:
   GET  /api/relatr/search?q=<query>     - Search profiles
   GET  /api/trending                    - Get trending searches
   POST /api/trending                    - Log a search term
-  POST /api/monero/rpc                  - Monero RPC proxy (wallet sync)
-  ALL  /api/monero/bin/*                - Monero binary endpoints proxy
 
 Paywall Endpoints:
   POST /api/paywall/create              - Create paywalled content
