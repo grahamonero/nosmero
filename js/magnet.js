@@ -36,23 +36,15 @@
 // carries `data-magnet` and a delegated click handler instead. That also keeps
 // it compatible with mobile's strict `script-src 'self'` (no inline handlers).
 
-// No static imports on purpose. utils.js imports this module, so importing it
-// back would be circular; more importantly this keeps the parsing pure and
-// DOM-free so smoke-magnet.mjs can exercise it under Node.
-//
-// We also cannot reuse utils.escapeHtml here: it works by assigning
-// textContent and reading innerHTML back, which escapes & < > but leaves
-// QUOTES INTACT. Magnets are stashed before the note body is escaped, so an
-// unescaped `"` in a URI would close the data-magnet attribute and inject
-// markup. The local version below escapes quotes too.
-function esc(value) {
-    return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+// The only import is html-safe.js, which is itself pure and import-free. utils.js imports
+// this module, so importing utils back would be circular; and staying DOM-free is what
+// lets smoke-magnet.mjs exercise the parsing under Node.
+import { escapeHtml } from './html-safe.js';
+
+// Magnets are stashed before the note body is escaped, so an unescaped `"` in a URI
+// would close the data-magnet attribute and inject markup: everything printed here goes
+// through the shared escapeHtml(), which covers quotes as well as & < >.
+const esc = escapeHtml;
 
 // Magnet URIs run to the first whitespace or `<`. Quotes and angle brackets
 // are excluded outright: a well-formed magnet percent-encodes them, and
@@ -222,7 +214,7 @@ export function initMagnetHandlers() {
             ev.preventDefault();
             ev.stopPropagation();
             const uri = copyBtn.dataset.magnet;
-            if (!uri) return;
+            if (!uri || !/^magnet:\?/i.test(uri)) return;
             try {
                 await navigator.clipboard.writeText(uri);
                 notify('Magnet link copied', 'success');
@@ -238,7 +230,9 @@ export function initMagnetHandlers() {
             ev.preventDefault();
             ev.stopPropagation();
             const uri = openBtn.dataset.magnet;
-            if (!uri) return;
+            // Any element in a note can carry data-action="open-magnet", and this value is
+            // navigated to: a magnet link or nothing (never javascript:, never a web page).
+            if (!uri || !/^magnet:\?/i.test(uri)) return;
             // Hands off to the OS-registered torrent client. If none is
             // registered the browser simply does nothing visible, so say so
             // rather than leaving the tap looking broken.

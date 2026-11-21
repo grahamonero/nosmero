@@ -7,6 +7,7 @@ import {
     rgbaToThumbHash,
     thumbHashToDataURL
 } from '../lib/thumbhash.js';
+import { escapeHtml } from './html-safe.js';
 
 // Cache for computed thumbhashes (URL -> base64 thumbhash)
 const CACHE_KEY = 'nosmero_thumbhash_cache';
@@ -148,10 +149,7 @@ function sanitizeURL(url) {
  */
 function escapeHTML(str) {
     if (typeof str !== 'string') return '';
-
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    return escapeHtml(str);
 }
 
 /**
@@ -320,8 +318,8 @@ export function createProgressiveImage(src, options = {}) {
     }
 
     // Sanitize attributes before setting
-    if (options.alt) {
-        img.alt = escapeHTML(options.alt);
+    if (typeof options.alt === 'string') {
+        img.alt = options.alt;   // a DOM property takes the text as it is
     }
     if (options.className) {
         img.className = sanitizeClassName(options.className);
@@ -399,26 +397,19 @@ export function progressiveImageHTML(src, options = {}) {
         return '';
     }
 
-    const escapedSrc = escapeHTML(sanitizedSrc);
-    const escapedAlt = escapeHTML(options.alt || '');
-
     let style = sanitizeStyle(options.style || '');
-    let initialSrc = escapedSrc;
-
     if (placeholder) {
-        initialSrc = placeholder;
         style += '; filter: blur(4px); transition: filter 0.3s ease-out';
     }
 
     const className = sanitizeClassName(options.className || '');
-    const dataOriginal = `data-thumbhash-src="${escapedSrc}"`;
 
     // Generate unique ID for event handler attachment
     const imgId = 'thumbhash-' + Math.random().toString(36).substr(2, 9);
 
     // Note: This still uses onload but without user-controlled input
     // For production, migrate to createProgressiveImage() which uses addEventListener
-    return `<img id="${imgId}" class="${className}" src="${initialSrc}" alt="${escapedAlt}" style="${style}" ${dataOriginal} onload="window.ThumbHashLoader?.onImageLoad(this)">`;
+    return `<img id="${imgId}" class="${escapeHtml(className)}" src="${escapeHtml(placeholder || sanitizedSrc)}" alt="${escapeHtml(options.alt || '')}" style="${escapeHtml(style)}" data-thumbhash-src="${escapeHtml(sanitizedSrc)}" onload="window.ThumbHashLoader?.onImageLoad(this)">`;
 }
 
 /**

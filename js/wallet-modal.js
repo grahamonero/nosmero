@@ -7,6 +7,7 @@
 
 import * as State from './state.js';
 import { ensureWalletLib, isWalletLibLoaded } from './wallet/lib-loader.js';
+import { escapeHtml } from './html-safe.js';
 
 // Wallet module (lazy loaded)
 let Wallet = null;
@@ -198,7 +199,7 @@ function formatXMRWithMinDecimals(atomicUnits, minDecimals = 5) {
  */
 export function formatUSD(usd) {
     if (usd === null || usd === undefined) return null;
-    return '$' + usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return '$' + Number(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**
@@ -404,7 +405,7 @@ function renderError(message, { retry = false } = {}) {
     getContentEl().innerHTML = `
         <div style="text-align: center; padding: 60px 20px;">
             <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
-            <p style="color: #ff6b6b; margin-bottom: 20px;">${message}</p>
+            <p style="color: #ff6b6b; margin-bottom: 20px;">${escapeHtml(message)}</p>
             ${retryBtn}<button onclick="closeWalletModal()" style="background: #333; border: none; color: #fff; padding: 12px 24px; border-radius: 8px; cursor: pointer;">Close</button>
         </div>
     `;
@@ -613,7 +614,7 @@ async function renderDashboard() {
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                         <input type="checkbox" id="walletRotateProfileToggle" ${rotateProfileEnabled ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; accent-color: #FF6600;">
                         <span style="color: #ccc; font-size: 13px;">Rotate profile address on unlock</span>
-                        <button type="button" onclick="event.preventDefault(); event.stopPropagation(); window.showPrivacyHelp('Rotate Profile Address', 'Your profile&#39;s tip address is rotated to a new subaddress each time you unlock your Tip Jar. This makes it harder to track your total tip income over time.')" style="width: 16px; height: 16px; border-radius: 50%; background: #444; border: none; color: #888; font-size: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 2px;" onmouseover="this.style.background='#555'" onmouseout="this.style.background='#444'">?</button>
+                        <button type="button" onclick="event.preventDefault(); event.stopPropagation(); window.showPrivacyHelp('Rotate Profile Address', 'Your profile’s tip address is rotated to a new subaddress each time you unlock your Tip Jar. This makes it harder to track your total tip income over time.')" style="width: 16px; height: 16px; border-radius: 50%; background: #444; border: none; color: #888; font-size: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 2px;" onmouseover="this.style.background='#555'" onmouseout="this.style.background='#444'">?</button>
                     </label>
                 </div>
             </div>
@@ -856,7 +857,7 @@ async function updateTransactions() {
                 }
 
                 const shortTxid = tx.txid ? `${escapeHtml(tx.txid.slice(0, 6))}...` : '';
-                const escapedTxid = escapeAttribute(tx.txid || '');
+                const escapedTxid = escapeHtml(tx.txid || '');
 
                 // Check if this incoming tx matches a note
                 let noteLink = '';
@@ -866,7 +867,7 @@ async function updateTransactions() {
                         if (noteInfo) {
                             const notePreview = escapeHtml(noteInfo.noteContent);
                             noteLink = `
-                                <div data-action="navigate-to-note" data-note-id="${escapeAttribute(noteInfo.noteId)}"
+                                <div data-action="navigate-to-note" data-note-id="${escapeHtml(noteInfo.noteId)}"
                                      style="margin-top: 6px; padding: 6px 8px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
                                     <span style="font-size: 12px;">📝</span>
                                     <span style="font-size: 11px; color: #a78bfa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Tip for: ${notePreview}</span>
@@ -940,11 +941,11 @@ export async function showSendView() {
         <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; border: 1px solid var(--border-color);">
             <div style="margin-bottom: 16px;">
                 <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Recipient Address</label>
-                <input type="text" id="walletSendAddress" value="${prefillAddress}" placeholder="4... or 8..." style="width: 100%; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; font-family: monospace;">
+                <input type="text" id="walletSendAddress" value="${escapeHtml(prefillAddress)}" placeholder="4... or 8..." style="width: 100%; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 14px; font-family: monospace;">
             </div>
             <div style="margin-bottom: 16px;">
                 <label style="display: block; margin-bottom: 8px; color: #999; font-size: 14px;">Amount (XMR)</label>
-                <input type="text" id="walletSendAmount" value="${prefillAmount}" placeholder="0.001" oninput="window.WalletModal.updateSendAmountUSD()" style="width: 100%; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px;">
+                <input type="text" id="walletSendAmount" value="${escapeHtml(prefillAmount)}" placeholder="0.001" oninput="window.WalletModal.updateSendAmountUSD()" style="width: 100%; padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 16px;">
                 <div id="walletSendAmountUSD" style="color: #888; font-size: 13px; margin-top: 6px; display: ${prefillAmount ? 'block' : 'none'};">≈ $0.00 USD</div>
                 <div style="margin-top: 10px;">
                     <button onclick="window.WalletModal.setMaxAmount()" style="width: 100%; padding: 12px; background: #FF6600; border: none; border-radius: 6px; color: #000; cursor: pointer; font-weight: 600;">MAX (<span id="walletMaxAmount">...</span> XMR)</button>
@@ -1156,7 +1157,7 @@ async function showBatchConfirmView(txDetails) {
                     <div style="padding: 8px; background: #0a0a0a; border-radius: 6px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
                         <span style="color: #FF6600; font-size: 13px;">${escapeHtml(item.authorName)}</span>
                         <div style="text-align: right;">
-                            <span style="color: #fff; font-size: 13px;">${item.amount || '0.00018'} XMR</span>
+                            <span style="color: #fff; font-size: 13px;">${escapeHtml(item.amount || '0.00018')} XMR</span>
                             ${itemUSD ? `<div style="color: #888; font-size: 10px;">≈ ${itemUSD}</div>` : ''}
                         </div>
                     </div>
@@ -1366,7 +1367,7 @@ function showBatchSuccessView(txHash, tipCount, disclosureMode) {
         ? 'Verified disclosures published'
         : 'Sent anonymously (no disclosure)';
 
-    const escapedTxHash = escapeAttribute(txHash);
+    const escapedTxHash = escapeHtml(txHash);
 
     getContentEl().innerHTML = `
         <div style="text-align: center; padding: 40px 20px;">
@@ -1382,32 +1383,6 @@ function showBatchSuccessView(txHash, tipCount, disclosureMode) {
             <button data-action="back-to-dashboard" style="width: 100%; padding: 16px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 12px; color: #fff; cursor: pointer; font-size: 15px; font-weight: 600;">Done</button>
         </div>
     `;
-}
-
-/**
- * Helper to escape HTML entities for safe insertion into HTML content
- */
-function escapeHtml(text) {
-    if (text === null || text === undefined) return '';
-    const str = String(text);
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
-/**
- * Helper to escape text for safe use in HTML attributes (including onclick)
- * Escapes single quotes, double quotes, and backslashes
- */
-function escapeAttribute(text) {
-    if (text === null || text === undefined) return '';
-    const str = String(text);
-    return str
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'")
-        .replace(/"/g, '&quot;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
 }
 
 /**
@@ -1719,7 +1694,7 @@ export async function showReceiveView() {
             <p style="color: #999; margin-bottom: 20px;">Share this address to receive Monero</p>
             <div id="walletReceiveQR" style="background: #fff; padding: 16px; border-radius: 12px; display: inline-block; margin-bottom: 20px;"></div>
             <div style="background: #0a0a0a; padding: 14px; border-radius: 8px; margin-bottom: 16px;">
-                <div style="font-family: monospace; font-size: 10px; color: #ccc; word-break: break-all; line-height: 1.6;">${address}</div>
+                <div style="font-family: monospace; font-size: 10px; color: #ccc; word-break: break-all; line-height: 1.6;">${escapeHtml(address)}</div>
             </div>
             <button onclick="window.WalletModal.copyAddress()" style="width: 100%; padding: 16px; background: linear-gradient(135deg, #8B5CF6, #6b21a8); border: none; border-radius: 12px; color: #fff; cursor: pointer; font-size: 15px; font-weight: 600;">
                 📋 Copy Address
@@ -1778,12 +1753,12 @@ export async function showSeedView() {
                 ${words.map((word, i) => `
                     <div style="background: #0a0a0a; padding: 6px 8px; border-radius: 6px; font-family: monospace; font-size: 11px;">
                         <span style="color: #666;">${i + 1}.</span>
-                        <span style="color: #fff;">${word}</span>
+                        <span style="color: #fff;">${escapeHtml(word)}</span>
                     </div>
                 `).join('')}
             </div>
             <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-                <p style="color: #FF6600; font-size: 13px; margin: 0; font-weight: 600;">📍 Restore Height: <span style="font-family: monospace;">${restoreHeight || 'Unknown'}</span></p>
+                <p style="color: #FF6600; font-size: 13px; margin: 0; font-weight: 600;">📍 Restore Height: <span style="font-family: monospace;">${escapeHtml(restoreHeight || 'Unknown')}</span></p>
             </div>
             <button onclick="window.WalletModal.copySeed()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #333; border-radius: 8px; color: #999; cursor: pointer; font-size: 14px; margin-bottom: 12px;">📋 Copy Seed + Height</button>
             <button onclick="window.WalletModal.backToDashboard()" style="width: 100%; padding: 14px; background: #333; border: none; border-radius: 12px; color: #fff; cursor: pointer; font-size: 14px;">← Back</button>
@@ -2090,12 +2065,12 @@ function showBackupSeedView(seed, restoreHeight) {
                 ${words.map((word, i) => `
                     <div style="background: #0a0a0a; padding: 6px 8px; border-radius: 6px; font-family: monospace; font-size: 11px;">
                         <span style="color: #666;">${i + 1}.</span>
-                        <span style="color: #fff;">${word}</span>
+                        <span style="color: #fff;">${escapeHtml(word)}</span>
                     </div>
                 `).join('')}
             </div>
             <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-                <p style="color: #FF6600; font-size: 13px; margin: 0; font-weight: 600;">📍 Restore Height: <span style="font-family: monospace;">${restoreHeight}</span></p>
+                <p style="color: #FF6600; font-size: 13px; margin: 0; font-weight: 600;">📍 Restore Height: <span style="font-family: monospace;">${escapeHtml(restoreHeight)}</span></p>
                 <p style="color: #cc8844; font-size: 11px; margin: 6px 0 0 0;">Save this number for faster recovery.</p>
             </div>
             <button onclick="window.WalletModal.copyBackupSeed()" style="width: 100%; padding: 14px; background: transparent; border: 1px solid #333; border-radius: 8px; color: #999; cursor: pointer; font-size: 14px; margin-bottom: 16px;">📋 Copy Seed + Height</button>
@@ -2298,7 +2273,7 @@ export async function showTxDetail(txid) {
                 <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #333;">
                     <div style="color: #888; font-size: 12px; margin-bottom: 8px;">Recipients (${escapeHtml(recipients.length)})</div>
                     ${recipients.map(r => {
-                        const escapedNoteId = escapeAttribute(r.noteId);
+                        const escapedNoteId = escapeHtml(r.noteId);
                         return `
                         <div style="background: #0a0a0a; padding: 10px; border-radius: 6px; margin-bottom: 6px;">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -2319,7 +2294,7 @@ export async function showTxDetail(txid) {
         // Build txKey HTML if available
         let txKeyHtml = '';
         if (txKey && !isIncoming) {
-            const escapedTxKey = escapeAttribute(txKey);
+            const escapedTxKey = escapeHtml(txKey);
             txKeyHtml = `
                 <div style="margin-top: 16px;">
                     <div style="color: #666; font-size: 12px; margin-bottom: 8px;">TX Secret Key (for verification)</div>
@@ -2330,7 +2305,7 @@ export async function showTxDetail(txid) {
             `;
         }
 
-        const escapedHash = escapeAttribute(hash);
+        const escapedHash = escapeHtml(hash);
 
         getContentEl().innerHTML = `
             <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 16px; padding: 20px; border: 1px solid var(--border-color);">
@@ -2373,7 +2348,7 @@ export async function showTxDetail(txid) {
         console.error('[WalletModal] Failed to load tx details:', err);
         getContentEl().innerHTML = `
             <div style="text-align: center; padding: 40px;">
-                <p style="color: #ff6b6b;">Error: ${err.message}</p>
+                <p style="color: #ff6b6b;">Error: ${escapeHtml(err.message)}</p>
                 <button onclick="window.WalletModal.backToDashboard()" style="background: #333; border: none; color: #fff; padding: 12px 24px; border-radius: 8px; cursor: pointer; margin-top: 20px;">← Back</button>
             </div>
         `;

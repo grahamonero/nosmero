@@ -325,12 +325,12 @@ export function renderUnknownKindCard(event, preferredBech32 = null) {
     const dataAttr = bech32 ? ` data-bech32="${Utils.escapeHtml(bech32)}"` : '';
 
     return `
-        <div class="nip89-unknown-card" data-kind="${event.kind}"${dataAttr}
+        <div class="nip89-unknown-card" data-kind="${Utils.escapeHtml(event.kind)}"${dataAttr}
              style="border: 1px solid var(--border-color, #333); border-radius: 8px; padding: 12px; margin: 8px 0; background: rgba(255,255,255,0.02);">
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
                 <span style="font-size: 18px;">🧩</span>
                 <span style="color: var(--text-primary, #eee); font-weight: 500;">${Utils.escapeHtml(kindLabel)}</span>
-                <span style="color: #888; font-size: 12px;">kind ${event.kind}</span>
+                <span style="color: #888; font-size: 12px;">kind ${Utils.escapeHtml(event.kind)}</span>
             </div>
             <div style="color: #999; font-size: 13px; margin-bottom: 8px;">
                 Nosmero doesn't natively render this event type yet.
@@ -367,7 +367,7 @@ export async function hydrateUnknownKindCards(container) {
             const url = buildDeepLink(h, bech32);
             if (!url) return '';
             const label = h.name || `${h.pubkey.slice(0, 8)}…`;
-            return `<a href="${Utils.escapeHtml(url)}" target="_blank" rel="noopener noreferrer"
+            return `<a href="${Utils.urlAttr(url)}" target="_blank" rel="noopener noreferrer"
                        style="display: inline-block; padding: 4px 10px; margin: 2px 4px 2px 0;
                               border: 1px solid var(--accent, #FF6600); border-radius: 4px;
                               color: var(--accent, #FF6600); text-decoration: none; font-size: 12px;">

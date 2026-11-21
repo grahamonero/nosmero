@@ -11,7 +11,13 @@ export function escapeRegex(str) {
 
 // Tags, then character entities, then runs of plain text, then a stray '&'.
 // Order matters: the alternation is tried left to right.
-const TOKEN = /<[^>]*>|&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);|[^<&]+|&/g;
+//
+// A tag ends at the first '>' that is OUTSIDE a quoted attribute value. Browsers only
+// began escaping '>' inside attribute values when they serialise HTML in 2025; on anything
+// older, <img alt="a > b"> comes back from DOMPurify with the raw '>' in place. Stopping
+// at that one would treat the rest of the attribute as note text, drop a <mark> into it,
+// and let whatever followed in the alt text become live markup.
+const TOKEN = /<(?:"[^"]*"|'[^']*'|[^>"'])*>|&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);|[^<&]+|&/g;
 
 // Wrap search hits in <mark>, touching text only.
 //
@@ -21,9 +27,9 @@ const TOKEN = /<[^>]*>|&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);|[^<&]+|
 // '>' and the rest of the URL spilled into the note as visible text.
 //
 // parseContent() hands back DOMPurify output on a tag allowlist with no
-// script/style and with '>' escaped inside attribute values, so splitting on
-// tags is reliable here. Entities are held out as their own token too, or a
-// query like "amp" would cut "&amp;" in half.
+// script/style, every attribute value quoted and every '"' inside one written
+// as &quot;, so splitting on quote-aware tags is reliable here. Entities are
+// held out as their own token too, or a query like "amp" would cut "&amp;" in half.
 export function highlightSearchTerm(html, query) {
     if (!html || !query) return html;
     const term = new RegExp(escapeRegex(query), 'gi');

@@ -1018,7 +1018,7 @@ async function sendWalletTip(postId, authorName, moneroAddress, amount, recipien
                     section.innerHTML = `
                         <div style="text-align: center; padding: 20px;">
                             <div style="color: #10B981; font-weight: 600; font-size: 18px; margin-bottom: 8px;">✓ Tip Sent!</div>
-                            <div style="color: var(--text-muted); font-size: 12px; word-break: break-all;">${result.txHash.slice(0, 16)}...</div>
+                            <div style="color: var(--text-muted); font-size: 12px; word-break: break-all;">${escapeHtml(result.txHash.slice(0, 16))}...</div>
                         </div>
                     `;
 
@@ -1438,7 +1438,7 @@ async function sendQueueBatch(queue, disclosures) {
         section.innerHTML = `
             <div style="text-align: center; padding: 20px;">
                 <div style="color: #10B981; font-weight: 600; font-size: 18px; margin-bottom: 8px;">✓ All Tips Sent!</div>
-                <div style="color: var(--text-muted); font-size: 12px; word-break: break-all;">${result.txHash.slice(0, 20)}...</div>
+                <div style="color: var(--text-muted); font-size: 12px; word-break: break-all;">${escapeHtml(result.txHash.slice(0, 20))}...</div>
                 <div style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">${queue.length} tips in one transaction</div>
             </div>
         `;
@@ -1786,7 +1786,7 @@ export function openLightningZapModal(postId, authorName, lightningAddress) {
             </label>
             <input type="number"
                    id="lightningZapAmount"
-                   value="${defaultAmount}"
+                   value="${escapeHtml(defaultAmount)}"
                    step="1"
                    min="1"
                    style="width: 100%; padding: 10px; border: 2px solid #FFDF00; border-radius: 8px; font-size: 16px; text-align: center; background: var(--bg-tertiary); color: var(--text-primary);">

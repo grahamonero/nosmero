@@ -166,7 +166,7 @@ export function renderPdfReaderShell({ url, filename }) {
                     <button class="pdf-reader-btn" data-action="pdf-next-page" title="Next page">›</button>
                     <button class="pdf-reader-btn" data-action="pdf-zoom-out" title="Zoom out">−</button>
                     <button class="pdf-reader-btn" data-action="pdf-zoom-in" title="Zoom in">+</button>
-                    <a class="pdf-reader-btn" href="${escapeAttr(url)}" download target="_blank" rel="noopener" title="Download">↓</a>
+                    <a class="pdf-reader-btn" href="${Utils.urlAttr(url)}" download target="_blank" rel="noopener" title="Download">↓</a>
                 </div>
             </div>
             <div class="pdf-reader-pages" data-pdf-pages></div>
@@ -215,7 +215,7 @@ export async function mountPdfReader(container) {
         pagesDiv.innerHTML = `<div class="pdf-reader-error">
             Could not load this PDF.<br>
             <span style="font-size:12px;opacity:0.8;">${escapeAttr(e?.message || e)}</span><br><br>
-            <a href="${escapeAttr(url)}" target="_blank" rel="noopener" style="color: var(--accent-color, #f60);">Open the file directly</a>
+            <a href="${Utils.urlAttr(url)}" target="_blank" rel="noopener" style="color: var(--accent-color, #f60);">Open the file directly</a>
         </div>`;
         return;
     }
@@ -504,7 +504,8 @@ export function wirePdfCardHandlers(container) {
         ev.preventDefault();
         ev.stopPropagation();
         ev.stopImmediatePropagation();
-        const url = trigger.dataset.pdfUrl;
+        // Any element in a note can carry data-action="open-pdf": only real web addresses
+        const url = Utils.httpUrl(trigger.dataset.pdfUrl);
         const filename = trigger.dataset.pdfFilename;
         if (!url) return;
         if (typeof window.openPdfReader === 'function') {
@@ -556,7 +557,8 @@ export function initPdfReader() {
         ev.preventDefault();
         ev.stopPropagation();
         ev.stopImmediatePropagation();
-        const url = trigger.dataset.pdfUrl;
+        // Any element in a note can carry data-action="open-pdf": only real web addresses
+        const url = Utils.httpUrl(trigger.dataset.pdfUrl);
         const filename = trigger.dataset.pdfFilename;
         if (!url) return;
         if (typeof window.openPdfReader === 'function') {

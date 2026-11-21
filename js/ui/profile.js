@@ -5,6 +5,7 @@ import { showWarningToast, showSuccessToast, showErrorToast } from './toasts.js'
 import { isNewerVersion } from '../replaceable.js';
 import { showSkeletonLoader } from './skeleton.js';
 import * as PaywallUI from '../paywall-ui.js';
+import { escapeHtml, initialOfEscaped, imageUrlAttr, jsArg, isHex64 } from '../html-safe.js';
 
 // Track where user came from for back navigation
 let previousPage = 'home';
@@ -580,6 +581,11 @@ export async function loadMoreProfilePosts() {
 }
 
 export async function viewUserProfilePage(pubkey) {
+    // Reached from links (#profile:…) as well as clicks, so the key is checked, not trusted
+    if (!isHex64(pubkey)) {
+        console.warn('viewUserProfilePage: ignoring an invalid public key');
+        return;
+    }
     try {
         // Check if right panel is available and visible (desktop three-column layout)
         if (window.RightPanel?.isVisible()) {
@@ -699,14 +705,14 @@ export async function viewUserProfilePage(pubkey) {
                 <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid var(--border-primary); border-radius: 16px; padding: 24px; margin-bottom: 24px;">
                     <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 16px;">
                         ${userProfile.picture ?
-                            `<img src="${profileAvatarPlaceholder || userProfile.picture}" data-thumbhash-src="${userProfile.picture}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;${profileAvatarPlaceholder ? ' filter: blur(4px); transition: filter 0.3s;' : ''}"
+                            `<img src="${imageUrlAttr(profileAvatarPlaceholder || userProfile.picture)}" data-thumbhash-src="${imageUrlAttr(userProfile.picture)}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;${profileAvatarPlaceholder ? ' filter: blur(4px); transition: filter 0.3s;' : ''}"
                                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)">
-                             <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${safeName.charAt(0).toUpperCase()}</div>` :
-                            `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${safeName.charAt(0).toUpperCase()}</div>`
+                             <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${initialOfEscaped(safeName)}</div>` :
+                            `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px;">${initialOfEscaped(safeName)}</div>`
                         }
                         <div style="flex: 1; min-width: 0; word-wrap: break-word; overflow-wrap: break-word;">
-                            <h1 class="profile-name" data-pubkey="${pubkey}" style="color: var(--text-primary); font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${safeName}</h1>
-                            <p style="margin: 0 0 8px 0; color: var(--text-muted); font-family: monospace; font-size: 14px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
+                            <h1 class="profile-name" data-pubkey="${escapeHtml(pubkey)}" style="color: var(--text-primary); font-size: 24px; margin: 0 0 8px 0; word-wrap: break-word;">${safeName}</h1>
+                            <p style="margin: 0 0 8px 0; color: var(--text-muted); font-family: monospace; font-size: 14px; word-break: break-all;">${escapeHtml(pubkey.substring(0, 8))}...${escapeHtml(pubkey.substring(56))}</p>
                             ${safeNip05 ? `<div style="color: #10B981; font-size: 14px; margin-bottom: 8px; word-wrap: break-word;">✅ ${safeNip05}</div>` : ''}
                             ${safeAbout ? `<div style="color: var(--text-secondary); font-size: 14px; line-height: 1.4; margin-bottom: 8px; word-wrap: break-word;">${safeAbout}</div>` : ''}
                             ${safeWebsiteHref ? `<div style="margin-bottom: 8px; word-wrap: break-word;"><a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 14px; word-break: break-all;">🔗 ${safeWebsiteDisplay}</a></div>` : ''}
@@ -715,27 +721,27 @@ export async function viewUserProfilePage(pubkey) {
                         </div>
                     </div>
                     <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                        <div id="followingCount_${pubkey}" onclick="showFollowingList('${pubkey}')" style="cursor: pointer; text-align: center; color: var(--text-primary); padding: 8px; background: var(--card-bg); border-radius: 8px; min-width: 80px;">
+                        <div id="followingCount_${escapeHtml(pubkey)}" onclick="showFollowingList('${jsArg(pubkey)}')" style="cursor: pointer; text-align: center; color: var(--text-primary); padding: 8px; background: var(--card-bg); border-radius: 8px; min-width: 80px;">
                             <div style="font-size: 18px; font-weight: bold;">-</div>
                             <div style="font-size: 12px; opacity: 0.8;">Following</div>
                         </div>
-                        <div id="followersCount_${pubkey}" onclick="showFollowersList('${pubkey}')" style="cursor: pointer; text-align: center; color: var(--text-primary); padding: 8px; background: var(--card-bg); border-radius: 8px; min-width: 80px;">
+                        <div id="followersCount_${escapeHtml(pubkey)}" onclick="showFollowersList('${jsArg(pubkey)}')" style="cursor: pointer; text-align: center; color: var(--text-primary); padding: 8px; background: var(--card-bg); border-radius: 8px; min-width: 80px;">
                             <div style="font-size: 18px; font-weight: bold;">-</div>
                             <div style="font-size: 12px; opacity: 0.8;">Followers</div>
                         </div>
                     </div>
                     <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
                         <button onclick="goBackFromProfile()" style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; border-radius: 8px; color: #FF6600; padding: 8px 16px; cursor: pointer; font-size: 14px;">← Back</button>
-                        <button id="followBtn_${pubkey}" onclick="toggleFollow('${pubkey}')" style="background: #6B73FF; border: none; border-radius: 8px; color: #fff; padding: 8px 16px; cursor: pointer; font-size: 14px; font-weight: bold;">
+                        <button id="followBtn_${escapeHtml(pubkey)}" onclick="toggleFollow('${jsArg(pubkey)}')" style="background: #6B73FF; border: none; border-radius: 8px; color: #fff; padding: 8px 16px; cursor: pointer; font-size: 14px; font-weight: bold;">
                             Following...
                         </button>
-                        <button onclick="copyUserNpub('${pubkey}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 8px 16px; cursor: pointer; font-size: 14px;">📋 Copy npub</button>
+                        <button onclick="copyUserNpub('${jsArg(pubkey)}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 8px 16px; cursor: pointer; font-size: 14px;">📋 Copy npub</button>
                     </div>
                 </div>
                 <div class="profile-tabs" style="border-top: 1px solid var(--border-color); margin-top: 16px; display: flex; gap: 0;">
-                    <button class="profile-tab active" data-profile-tab="notes" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid var(--accent-color, #f60); color: var(--text-primary); font-size: 14px; cursor: pointer;">Notes</button>
-                    <button class="profile-tab" data-profile-tab="articles" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary, #888); font-size: 14px; cursor: pointer;">Articles</button>
-                    <button class="profile-tab" data-profile-tab="highlights" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary, #888); font-size: 14px; cursor: pointer;">Highlights</button>
+                    <button class="profile-tab active" data-profile-tab="notes" data-profile-pubkey="${escapeHtml(pubkey)}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid var(--accent-color, #f60); color: var(--text-primary); font-size: 14px; cursor: pointer;">Notes</button>
+                    <button class="profile-tab" data-profile-tab="articles" data-profile-pubkey="${escapeHtml(pubkey)}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary, #888); font-size: 14px; cursor: pointer;">Articles</button>
+                    <button class="profile-tab" data-profile-tab="highlights" data-profile-pubkey="${escapeHtml(pubkey)}" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary, #888); font-size: 14px; cursor: pointer;">Highlights</button>
                 </div>
                 <div id="userPostsContainer" style="word-break: break-word; overflow-wrap: break-word; max-width: 100%;">
                     <div style="text-align: center; color: #666; padding: 40px;">
@@ -801,21 +807,24 @@ async function loadAndDisplayMoneroAddress(pubkey, userProfile) {
         }
 
         if (moneroAddress && moneroAddress.trim()) {
+            // Same format check as the right-panel profile: a primary address or a subaddress
+            if (!/^[48][1-9A-HJ-NP-Za-km-z]{94}$/.test(moneroAddress)) {
+                console.warn('Invalid Monero address format in profile');
+                return;
+            }
             // Display the Monero address with copy button
             const shortAddress = `${moneroAddress.substring(0, 8)}...${moneroAddress.substring(moneroAddress.length - 8)}`;
-            // Escape for use in onclick attribute to prevent injection
-            const safeMoneroAddress = moneroAddress.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             addressContainer.innerHTML = `
                 <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid #FF6600; border-radius: 8px; padding: 12px; margin-top: 8px;">
                     <div style="color: #FF6600; font-size: 12px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
                         <span><span style="margin-right: 6px;">💰</span>MONERO ADDRESS</span>
-                        <button onclick="navigator.clipboard.writeText('${safeMoneroAddress}'); window.NostrUtils.showNotification('Monero address copied!', 'success')"
+                        <button onclick="navigator.clipboard.writeText('${jsArg(moneroAddress)}'); window.NostrUtils.showNotification('Monero address copied!', 'success')"
                                 style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 10px;">
                             Copy
                         </button>
                     </div>
                     <div style="color: var(--text-primary); font-family: monospace; font-size: 14px; word-break: break-all; line-height: 1.4;">
-                        ${shortAddress}
+                        ${escapeHtml(shortAddress)}
                     </div>
                 </div>
             `;

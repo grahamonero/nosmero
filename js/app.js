@@ -226,6 +226,11 @@ async function handleHashRouting() {
 
     if (hash.startsWith('#note:')) {
         const noteId = hash.substring(6); // Remove '#note:' prefix
+        // The fragment is whatever the link's author typed: a note id or nothing
+        if (!Utils.isEventRef(noteId)) {
+            console.warn('Ignoring #note: link with an invalid note id');
+            return;
+        }
         console.log('📍 Opening shared note:', noteId);
 
         // Wait for app to be fully initialized (user logged in, relays connected)
@@ -244,6 +249,10 @@ async function handleHashRouting() {
         }, 10000);
     } else if (hash.startsWith('#profile:')) {
         const pubkey = hash.substring(9); // Remove '#profile:' prefix
+        if (!Utils.isHex64(pubkey)) {
+            console.warn('Ignoring #profile: link with an invalid public key');
+            return;
+        }
         console.log('📍 Opening profile:', pubkey);
 
         // Wait for app to be fully initialized
@@ -852,7 +861,7 @@ async function loadIpfsMediaPage() {
     } catch (e) {
         console.error('[IPFS] Could not render IPFS Media page:', e);
         const panel = document.getElementById('ipfsMediaPanel');
-        if (panel) panel.innerHTML = `<div style="color: #f87171;">Could not load: ${e.message || 'unknown error'}</div>`;
+        if (panel) panel.innerHTML = `<div style="color: #f87171;">Could not load: ${Utils.escapeHtml(e.message || 'unknown error')}</div>`;
     }
 }
 
@@ -958,7 +967,7 @@ async function loadBookmarksPage() {
         Articles.wireArticleHandlers(list);
     } catch (e) {
         console.error('Bookmarks load failed:', e);
-        list.innerHTML = `<div style="color: #f87171;">Could not load bookmarks: ${e?.message || e}</div>`;
+        list.innerHTML = `<div style="color: #f87171;">Could not load bookmarks: ${Utils.escapeHtml(e?.message || e)}</div>`;
     }
 }
 
@@ -983,7 +992,7 @@ async function loadHomeFeed() {
         console.error('Failed to load home feed:', error);
         feed.innerHTML = `
             <div class="error" style="color: #ff6666; text-align: center; padding: 40px;">
-                Failed to load feed: ${error.message}
+                Failed to load feed: ${Utils.escapeHtml(error.message)}
             </div>
         `;
     }
@@ -1303,22 +1312,22 @@ function displayProfileHeader(profile) {
     
     profileHeader.innerHTML = `
         <div style="display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
-            ${profile.picture ? 
-                `<img src="${profile.picture}" style="width: 80px; height: 80px; border-radius: 50%; border: 3px solid #FF6600;" 
+            ${Utils.imageUrl(profile.picture) ? 
+                `<img src="${Utils.imageUrlAttr(profile.picture)}" style="width: 80px; height: 80px; border-radius: 50%; border: 3px solid #FF6600;" 
                      onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                 <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px; border: 3px solid #FF6600;">${displayName.charAt(0).toUpperCase()}</div>` : 
-                `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px; border: 3px solid #FF6600;">${displayName.charAt(0).toUpperCase()}</div>`
+                 <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px; border: 3px solid #FF6600;">${Utils.escapeHtml(displayName.charAt(0).toUpperCase())}</div>` : 
+                `<div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 24px; border: 3px solid #FF6600;">${Utils.escapeHtml(displayName.charAt(0).toUpperCase())}</div>`
             }
             
             <div style="flex-grow: 1; min-width: 0;">
-                <h1 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 24px; font-weight: bold;">${displayName}</h1>
-                <p style="margin: 0 0 8px 0; color: var(--text-muted); font-family: monospace; font-size: 14px; word-break: break-all;">${shortPubkey}</p>
+                <h1 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 24px; font-weight: bold;">${Utils.escapeHtml(displayName)}</h1>
+                <p style="margin: 0 0 8px 0; color: var(--text-muted); font-family: monospace; font-size: 14px; word-break: break-all;">${Utils.escapeHtml(shortPubkey)}</p>
 
                 <div id="nip05Display" style="margin: 0 0 8px 0;"></div>
 
                 ${profile.about ? `<p style="margin: 8px 0 0 0; color: var(--text-secondary); line-height: 1.5;">${Utils.escapeHtml(profile.about)}</p>` : ''}
 
-                ${profile.website ? `<p style="margin: 8px 0 0 0;"><a href="${profile.website}" target="_blank" style="color: #FF6600; text-decoration: none;">🔗 ${profile.website}</a></p>` : ''}
+                ${Utils.httpUrl(profile.website) ? `<p style="margin: 8px 0 0 0;"><a href="${Utils.urlAttr(profile.website)}" target="_blank" style="color: #FF6600; text-decoration: none;">🔗 ${Utils.escapeHtml(profile.website)}</a></p>` : ''}
 
                 <div id="profileMoneroAddress" style="margin: 12px 0 0 0;"></div>
                 <div id="profileLightningAddress" style="margin: 8px 0 0 0;"></div>
@@ -1342,7 +1351,7 @@ function displayProfileHeader(profile) {
                         <button onclick="showEditProfileModal()" style="background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; color: #000; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px;">
                             ✏️ Edit Profile
                         </button>
-                        <button onclick="copyUserNpub('${State.publicKey}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 10px 20px; cursor: pointer; font-weight: bold; font-size: 14px;">
+                        <button onclick="copyUserNpub('${Utils.jsArg(State.publicKey)}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 8px; color: #8B5CF6; padding: 10px 20px; cursor: pointer; font-weight: bold; font-size: 14px;">
                             📋 Copy npub
                         </button>
                     </div>
@@ -1379,7 +1388,7 @@ async function displayNip05Verification(profile) {
     // Show loading state initially
     nip05Container.innerHTML = `
         <p style="color: #888; font-size: 14px;">
-            <span style="margin-right: 6px;">⏳</span>Verifying ${profile.nip05}...
+            <span style="margin-right: 6px;">⏳</span>Verifying ${Utils.escapeHtml(profile.nip05)}...
         </p>
     `;
     
@@ -1391,14 +1400,14 @@ async function displayNip05Verification(profile) {
             // Verified NIP-05
             nip05Container.innerHTML = `
                 <p style="color: #10B981; font-size: 14px;">
-                    <span style="margin-right: 6px;">✅</span>${profile.nip05} (Verified)
+                    <span style="margin-right: 6px;">✅</span>${Utils.escapeHtml(profile.nip05)} (Verified)
                 </p>
             `;
         } else {
             // Failed verification
             nip05Container.innerHTML = `
                 <p style="color: #F56565; font-size: 14px;">
-                    <span style="margin-right: 6px;">❌</span>${profile.nip05} (Not verified)
+                    <span style="margin-right: 6px;">❌</span>${Utils.escapeHtml(profile.nip05)} (Not verified)
                 </p>
             `;
         }
@@ -1407,7 +1416,7 @@ async function displayNip05Verification(profile) {
         console.error('NIP-05 verification error:', error);
         nip05Container.innerHTML = `
             <p style="color: #888; font-size: 14px;">
-                <span style="margin-right: 6px;">⚠️</span>${profile.nip05} (Verification failed)
+                <span style="margin-right: 6px;">⚠️</span>${Utils.escapeHtml(profile.nip05)} (Verification failed)
             </p>
         `;
     }
@@ -1423,13 +1432,11 @@ async function displayLightningAddressInProfile(profile) {
     
     if (lightningAddress) {
         // Display the Lightning address with copy functionality
-        // JavaScript string escaping for onclick
-        const jsEscapedLightning = lightningAddress.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         addressContainer.innerHTML = `
             <div style="color: #FFDF00; font-size: 14px; display: flex; align-items: center; gap: 8px;">
                 <span style="margin-right: 6px;">⚡</span>
                 <span>Lightning: ${Utils.escapeHtml(lightningAddress)}</span>
-                <button onclick="navigator.clipboard.writeText('${jsEscapedLightning}'); Utils.showNotification('Lightning address copied!', 'success')"
+                <button onclick="navigator.clipboard.writeText('${Utils.jsArg(lightningAddress)}'); Utils.showNotification('Lightning address copied!', 'success')"
                         style="background: none; border: 1px solid #FFDF00; color: #FFDF00; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 10px;">
                     Copy
                 </button>
@@ -1479,13 +1486,11 @@ async function displayMoneroAddressInProfile(profile) {
 
             // Display the Monero address with copy button
             const shortAddress = `${moneroAddress.substring(0, 8)}...${moneroAddress.substring(moneroAddress.length - 8)}`;
-            // JavaScript string escaping for onclick
-            const jsEscapedAddress = moneroAddress.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             addressContainer.innerHTML = `
                 <div style="background: rgba(255, 102, 0, 0.1); border: 1px solid #FF6600; border-radius: 8px; padding: 12px; margin-top: 8px;">
                     <div style="color: #FF6600; font-size: 12px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
                         <span><span style="margin-right: 6px;">💰</span>MONERO ADDRESS</span>
-                        <button onclick="navigator.clipboard.writeText('${jsEscapedAddress}'); Utils.showNotification('Monero address copied!', 'success')"
+                        <button onclick="navigator.clipboard.writeText('${Utils.jsArg(moneroAddress)}'); Utils.showNotification('Monero address copied!', 'success')"
                                 style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 10px;">
                             Copy
                         </button>
@@ -1657,7 +1662,7 @@ async function loadUserPosts() {
                 profileContent.innerHTML = `
                     <div style="text-align: center; color: #666; padding: 40px;">
                         <p>Error loading posts</p>
-                        <p style="font-size: 14px; margin-top: 10px;">${error.message}</p>
+                        <p style="font-size: 14px; margin-top: 10px;">${Utils.escapeHtml(error.message)}</p>
                     </div>
                 `;
             }
@@ -1798,36 +1803,36 @@ function displayUserPosts(posts) {
                     return `
                         <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 16px;">
                             <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px;">
-                                ${userProfile.picture ? 
-                                    `<img src="${userProfile.picture}" style="width: 40px; height: 40px; border-radius: 50%;" 
+                                ${Utils.imageUrl(userProfile.picture) ? 
+                                    `<img src="${Utils.imageUrlAttr(userProfile.picture)}" style="width: 40px; height: 40px; border-radius: 50%;" 
                                          onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                                     <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>` : 
-                                    `<div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">${(userProfile.name || 'A').charAt(0).toUpperCase()}</div>`
+                                     <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold;">${Utils.escapeHtml((userProfile.name || 'A').charAt(0).toUpperCase())}</div>` : 
+                                    `<div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">${Utils.escapeHtml((userProfile.name || 'A').charAt(0).toUpperCase())}</div>`
                                 }
                                 
                                 <div style="flex-grow: 1;">
                                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                        <span style="color: #fff; font-weight: bold;">${userProfile.name || 'Anonymous'}</span>
+                                        <span style="color: #fff; font-weight: bold;">${Utils.escapeHtml(userProfile.name || 'Anonymous')}</span>
                                         <span style="color: #666; font-size: 14px;">${time}</span>
                                     </div>
                                 </div>
                             </div>
 
-                            <div onclick="openThreadView('${post.id}')" style="color: #fff; line-height: 1.6; white-space: pre-wrap; margin-bottom: 12px; cursor: pointer;">
+                            <div onclick="openThreadView('${Utils.jsArg(post.id)}')" style="color: #fff; line-height: 1.6; white-space: pre-wrap; margin-bottom: 12px; cursor: pointer;">
                                 ${Utils.escapeHtml(content)}
                             </div>
                         
                             <div style="display: flex; gap: 20px; padding-top: 12px; border-top: 1px solid #333; font-size: 14px;">
-                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="NostrPosts.replyToPost('${post.id}')">
+                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="NostrPosts.replyToPost('${Utils.jsArg(post.id)}')">
                                     💬 Reply
                                 </span>
-                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="NostrPosts.repostNote('${post.id}')">
+                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="NostrPosts.repostNote('${Utils.jsArg(post.id)}')">
                                     🔄 Repost
                                 </span>
-                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="NostrPosts.likePost('${post.id}')">
+                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="NostrPosts.likePost('${Utils.jsArg(post.id)}')">
                                     ❤️ Like
                                 </span>
-                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="sharePost('${post.id}')">
+                                <span style="color: #888; cursor: pointer;" onmouseover="this.style.color='#FF6600'" onmouseout="this.style.color='#888'" onclick="sharePost('${Utils.jsArg(post.id)}')">
                                     📤 Share
                                 </span>
                             </div>
@@ -1943,7 +1948,7 @@ async function loadMoreOwnPosts() {
                 const userProfile = State.profileCache[State.publicKey] || { name: 'Anonymous', picture: null };
                 const time = formatTime(post.created_at);
                 const content = post.content.length > 500 ?
-                    post.content.substring(0, 500) + '... <span style="color: #FF6600; cursor: pointer;">Read more</span>' :
+                    Utils.escapeHtml(post.content.substring(0, 500)) + '... <span style="color: #FF6600; cursor: pointer;">Read more</span>' :
                     post.content;
 
                 return `
@@ -2032,11 +2037,11 @@ function switchProfileTab(tab) {
                     
                     <h3 style="color: #FF6600; margin-bottom: 16px;">Details</h3>
                     <div style="color: #ccc;">
-                        <p style="margin-bottom: 8px; word-break: break-all;"><strong>Public Key:</strong> ${State.publicKey}</p>
-                        ${userProfile.nip05 ? `<p style="margin-bottom: 8px;"><strong>NIP-05:</strong> ${userProfile.nip05}</p>` : ''}
-                        ${userProfile.website ? `<p style="margin-bottom: 8px;"><strong>Website:</strong> <a href="${userProfile.website}" target="_blank" style="color: #FF6600;">${userProfile.website}</a></p>` : ''}
-                        ${userProfile.lud06 ? `<p style="margin-bottom: 8px;"><strong>Lightning:</strong> ${userProfile.lud06}</p>` : ''}
-                        ${userProfile.lud16 ? `<p style="margin-bottom: 8px;"><strong>Lightning Address:</strong> ${userProfile.lud16}</p>` : ''}
+                        <p style="margin-bottom: 8px; word-break: break-all;"><strong>Public Key:</strong> ${Utils.escapeHtml(State.publicKey)}</p>
+                        ${userProfile.nip05 ? `<p style="margin-bottom: 8px;"><strong>NIP-05:</strong> ${Utils.escapeHtml(userProfile.nip05)}</p>` : ''}
+                        ${Utils.httpUrl(userProfile.website) ? `<p style="margin-bottom: 8px;"><strong>Website:</strong> <a href="${Utils.urlAttr(userProfile.website)}" target="_blank" style="color: #FF6600;">${Utils.escapeHtml(userProfile.website)}</a></p>` : ''}
+                        ${userProfile.lud06 ? `<p style="margin-bottom: 8px;"><strong>Lightning:</strong> ${Utils.escapeHtml(userProfile.lud06)}</p>` : ''}
+                        ${userProfile.lud16 ? `<p style="margin-bottom: 8px;"><strong>Lightning Address:</strong> ${Utils.escapeHtml(userProfile.lud16)}</p>` : ''}
                     </div>
                 </div>
             `;
@@ -2475,9 +2480,6 @@ function displayCurrentRelays() {
                     if (relay.read) permissions.push('📖 Read');
                     if (relay.write) permissions.push('✍️ Write');
 
-                    // Escape for JavaScript string context (single quotes and backslashes)
-                    const jsEscapedUrl = relay.url.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-
                     return `
                         <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 6px;">
                             <div>
@@ -2487,15 +2489,15 @@ function displayCurrentRelays() {
                                 </div>
                             </div>
                             <div style="display: flex; gap: 8px;">
-                                <button onclick="toggleRelayPermission('${jsEscapedUrl}', 'read', ${relay.read})"
+                                <button onclick="toggleRelayPermission('${Utils.jsArg(relay.url)}', 'read', ${relay.read})"
                                         style="padding: 4px 8px; background: ${relay.read ? '#4CAF50' : '#666'}; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px;">
                                     R
                                 </button>
-                                <button onclick="toggleRelayPermission('${jsEscapedUrl}', 'write', ${relay.write})"
+                                <button onclick="toggleRelayPermission('${Utils.jsArg(relay.url)}', 'write', ${relay.write})"
                                         style="padding: 4px 8px; background: ${relay.write ? '#4CAF50' : '#666'}; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px;">
                                     W
                                 </button>
-                                <button onclick="removeRelay('${jsEscapedUrl}')"
+                                <button onclick="removeRelay('${Utils.jsArg(relay.url)}')"
                                         style="padding: 4px 8px; background: #ff4444; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px;">
                                     ✕
                                 </button>
@@ -2710,7 +2712,7 @@ function exportPrivateKey() {
                 <div style="background: #1a1a1a; padding: 30px; border-radius: 12px; max-width: 500px; text-align: center;">
                     <h3 style="color: #FF6600; margin-bottom: 16px;">🔑 Your Private Key</h3>
                     <div style="background: #333; padding: 15px; border-radius: 8px; word-break: break-all; font-family: monospace; margin-bottom: 16px; color: #fff; font-size: 13px;">
-                        ${nsec}
+                        ${Utils.escapeHtml(nsec)}
                     </div>
                     <div style="margin-bottom: 20px; padding: 10px 12px; background: rgba(255, 102, 0, 0.08); border-radius: 8px; border-left: 3px solid #FF6600; text-align: left;">
                         <div style="color: #FFB070; font-size: 13px; line-height: 1.5;">
@@ -2718,11 +2720,11 @@ function exportPrivateKey() {
                         </div>
                     </div>
                     <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
-                        <button onclick="navigator.clipboard.writeText('${nsec}'); this.textContent='Copied!'"
+                        <button onclick="navigator.clipboard.writeText('${Utils.jsArg(nsec)}'); this.textContent='Copied!'"
                                 style="padding: 10px 16px; background: #FF6600; border: none; color: #000; border-radius: 6px; cursor: pointer; font-weight: bold;">
                             📋 Copy
                         </button>
-                        <button onclick="window.authUI?.downloadNsecBackup('${nsec}', '${accountLabel}')"
+                        <button onclick="window.authUI?.downloadNsecBackup('${Utils.jsArg(nsec)}', '${accountLabel}')"
                                 style="padding: 10px 16px; background: #8B5CF6; border: none; color: #fff; border-radius: 6px; cursor: pointer; font-weight: bold;">
                             💾 Download Backup
                         </button>
@@ -3504,7 +3506,7 @@ async function loadFollowersPage(type, pubkey) {
                     <div style="text-align: center; color: #666; padding: 40px;">
                         <div style="font-size: 32px; margin-bottom: 12px;">❌</div>
                         <div>Error loading ${type}</div>
-                        <button onclick="loadFollowersPage('${type}', '${pubkey}')" style="background: #FF6600; border: none; border-radius: 8px; padding: 8px 16px; color: white; margin-top: 12px; cursor: pointer;">Retry</button>
+                        <button onclick="loadFollowersPage('${type}', '${Utils.jsArg(pubkey)}')" style="background: #FF6600; border: none; border-radius: 8px; padding: 8px 16px; color: white; margin-top: 12px; cursor: pointer;">Retry</button>
                     </div>
                 </div>
             </div>
@@ -3546,15 +3548,15 @@ function renderFollowersPage(type, users) {
             const name = profile.name || profile.display_name || `User ${pubkey.substring(0, 8)}`;
 
             html += `
-                <div onclick="viewUserProfile('${pubkey}')" style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.borderColor='#FF6600'" onmouseout="this.style.borderColor='transparent'">
-                    ${profile.picture ?
-                        `<img src="${profile.picture}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">` :
-                        `<div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">${name.charAt(0).toUpperCase()}</div>`
+                <div onclick="viewUserProfile('${Utils.jsArg(pubkey)}')" style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.borderColor='#FF6600'" onmouseout="this.style.borderColor='transparent'">
+                    ${Utils.imageUrl(profile.picture) ?
+                        `<img src="${Utils.imageUrlAttr(profile.picture)}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">` :
+                        `<div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">${Utils.escapeHtml(name.charAt(0).toUpperCase())}</div>`
                     }
                     <div style="flex: 1;">
-                        <div class="username" data-pubkey="${pubkey}" style="color: #fff; font-weight: bold;">${name}</div>
-                        <div style="color: #888; font-size: 12px;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</div>
-                        ${profile.about ? `<div style="color: #ccc; font-size: 12px; margin-top: 2px;">${profile.about.substring(0, 80)}${profile.about.length > 80 ? '...' : ''}</div>` : ''}
+                        <div class="username" data-pubkey="${Utils.escapeHtml(pubkey)}" style="color: #fff; font-weight: bold;">${Utils.escapeHtml(name)}</div>
+                        <div style="color: #888; font-size: 12px;">${Utils.escapeHtml(pubkey.substring(0, 8))}...${Utils.escapeHtml(pubkey.substring(56))}</div>
+                        ${profile.about ? `<div style="color: #ccc; font-size: 12px; margin-top: 2px;">${Utils.escapeHtml(profile.about.substring(0, 80))}${profile.about.length > 80 ? '...' : ''}</div>` : ''}
                     </div>
                 </div>
             `;
@@ -3721,29 +3723,29 @@ async function showFollowModal(title, userPubkeys, currentUserPubkey) {
         <div id="followModal" class="modal show" style="z-index: 10000;">
             <div class="modal-content" style="max-width: 500px; max-height: 80vh; overflow-y: auto;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h3 style="color: #fff; margin: 0;">${title} (${userPubkeys.length})</h3>
+                    <h3 style="color: #fff; margin: 0;">${Utils.escapeHtml(title)} (${userPubkeys.length})</h3>
                     <button onclick="closeFollowModal()" style="background: none; border: none; color: #999; font-size: 24px; cursor: pointer;">×</button>
                 </div>
                 <div id="followList">
                     ${userPubkeys.length === 0 ?
                         `<div style="text-align: center; color: #666; padding: 40px;">
                             <div style="font-size: 48px; margin-bottom: 16px;">👤</div>
-                            <div style="font-size: 18px; margin-bottom: 8px;">No ${title.toLowerCase()} found</div>
+                            <div style="font-size: 18px; margin-bottom: 8px;">No ${Utils.escapeHtml(title.toLowerCase())} found</div>
                             <div style="font-size: 14px; opacity: 0.8;">This user hasn't ${title === 'Following' ? 'followed anyone yet' : 'been followed by anyone yet'}</div>
                         </div>` :
                         userPubkeys.map(pubkey => {
                             const profile = State.profileCache[pubkey] || {};
                             const name = profile.name || profile.display_name || `User ${pubkey.substring(0, 8)}`;
                             return `
-                                <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; margin-bottom: 8px; cursor: pointer;" onclick="viewUserProfileFromModal('${pubkey}')">
-                                    ${profile.picture ?
-                                        `<img src="${profile.picture}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">` :
-                                        `<div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">${name.charAt(0).toUpperCase()}</div>`
+                                <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; margin-bottom: 8px; cursor: pointer;" onclick="viewUserProfileFromModal('${Utils.jsArg(pubkey)}')">
+                                    ${Utils.imageUrl(profile.picture) ?
+                                        `<img src="${Utils.imageUrlAttr(profile.picture)}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">` :
+                                        `<div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">${Utils.escapeHtml(name.charAt(0).toUpperCase())}</div>`
                                     }
                                     <div style="flex: 1;">
-                                        <div style="color: #fff; font-weight: bold;">${name}</div>
-                                        <div style="color: #888; font-size: 12px;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</div>
-                                        ${profile.about ? `<div style="color: #ccc; font-size: 12px; margin-top: 2px;">${profile.about.substring(0, 60)}${profile.about.length > 60 ? '...' : ''}</div>` : ''}
+                                        <div style="color: #fff; font-weight: bold;">${Utils.escapeHtml(name)}</div>
+                                        <div style="color: #888; font-size: 12px;">${Utils.escapeHtml(pubkey.substring(0, 8))}...${Utils.escapeHtml(pubkey.substring(56))}</div>
+                                        ${profile.about ? `<div style="color: #ccc; font-size: 12px; margin-top: 2px;">${Utils.escapeHtml(profile.about.substring(0, 60))}${profile.about.length > 60 ? '...' : ''}</div>` : ''}
                                     </div>
                                 </div>
                             `;
@@ -5050,21 +5052,20 @@ async function populateRelayLists() {
     const writeRelays = Relays.getWriteRelays();
 
     const renderRow = (relay, accentBg, removeFn, withAnnounce) => {
-        const safeRelay = String(relay).replace(/"/g, '&quot;').replace(/'/g, "\\'");
         const announceControl = withAnnounce
             ? `<label title="Include this relay in your published NIP-65 announcement. Untick to keep it local-only (won't appear in nevent relay hints other clients generate)."
                       style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: #ccc; cursor: pointer; white-space: nowrap;">
                    <input type="checkbox" ${Relays.isRelayAdvertised(relay) ? 'checked' : ''}
-                          onchange="toggleRelayAdvertise('${safeRelay}', this.checked)"
+                          onchange="toggleRelayAdvertise('${Utils.jsArg(relay)}', this.checked)"
                           style="cursor: pointer;">
                    Announce
                </label>`
             : '';
         return `
             <div style="display: flex; align-items: center; padding: 8px; background: ${accentBg}; border-radius: 6px; margin-bottom: 6px; gap: 8px;">
-                <span style="color: var(--text-primary); font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${safeRelay}</span>
+                <span style="color: var(--text-primary); font-family: monospace; font-size: 12px; flex: 1; word-break: break-all;">${Utils.escapeHtml(relay)}</span>
                 ${announceControl}
-                <button onclick="${removeFn}('${safeRelay}')"
+                <button onclick="${removeFn}('${Utils.jsArg(relay)}')"
                         style="background: #ff4444; border: none; border-radius: 4px; color: white; padding: 4px 8px; font-size: 12px; cursor: pointer;">
                     Remove
                 </button>
@@ -5143,10 +5144,10 @@ async function populateMutedUsersList() {
         return `
             <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: rgba(255, 68, 68, 0.1); border-radius: 6px; margin-bottom: 8px;">
                 <div style="flex: 1;">
-                    <div style="color: #fff; font-weight: bold;">${displayName}</div>
-                    <div style="color: #666; font-family: monospace; font-size: 11px;">${pubkey.substring(0, 16)}...</div>
+                    <div style="color: #fff; font-weight: bold;">${Utils.escapeHtml(displayName)}</div>
+                    <div style="color: #666; font-family: monospace; font-size: 11px;">${Utils.escapeHtml(pubkey.substring(0, 16))}...</div>
                 </div>
-                <button onclick="unmutePubkey('${pubkey}')"
+                <button onclick="unmutePubkey('${Utils.jsArg(pubkey)}')"
                         style="background: #4CAF50; border: none; border-radius: 4px; color: white; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: bold;">
                     Unmute
                 </button>
@@ -5175,8 +5176,6 @@ window.unmutePubkey = async function(pubkey) {
 
 // ==================== MUTED HASHTAGS / WORDS (NIP-51 kind 10000) ====================
 
-function escTag(s) { return String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
-
 async function populateMutedHashtagsList() {
     const el = document.getElementById('mutedHashtagsList');
     if (!el) return;
@@ -5189,8 +5188,8 @@ async function populateMutedHashtagsList() {
         }
         el.innerHTML = tags.map(t => `
             <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: rgba(255, 102, 0, 0.08); border-radius: 6px; margin-bottom: 6px;">
-                <div style="color: #fff;">#${escTag(t)}</div>
-                <button onclick="removeMutedHashtag('${escTag(t)}', event)"
+                <div style="color: #fff;">#${Utils.escapeHtml(t)}</div>
+                <button onclick="removeMutedHashtag('${Utils.jsArg(t)}', event)"
                         style="background: #4CAF50; border: none; border-radius: 4px; color: white; padding: 5px 10px; font-size: 12px; cursor: pointer; font-weight: bold;">Unmute</button>
             </div>
         `).join('');
@@ -5211,8 +5210,8 @@ async function populateMutedWordsList() {
         }
         el.innerHTML = words.map(w => `
             <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: rgba(255, 68, 68, 0.08); border-radius: 6px; margin-bottom: 6px;">
-                <div style="color: #fff;">${escTag(w)}</div>
-                <button onclick="removeMutedWord('${escTag(w)}', event)"
+                <div style="color: #fff;">${Utils.escapeHtml(w)}</div>
+                <button onclick="removeMutedWord('${Utils.jsArg(w)}', event)"
                         style="background: #4CAF50; border: none; border-radius: 4px; color: white; padding: 5px 10px; font-size: 12px; cursor: pointer; font-weight: bold;">Unmute</button>
             </div>
         `).join('');
@@ -5443,7 +5442,7 @@ async function showPrimaryAddress() {
                     <li>Donation pages</li>
                     <li>Any place you want a stable address</li>
                 </ul>
-                <div style="background: #000; padding: 12px; border-radius: 8px; word-break: break-all; font-family: monospace; font-size: 12px; color: #fff; margin-bottom: 16px;">${address}</div>
+                <div style="background: #000; padding: 12px; border-radius: 8px; word-break: break-all; font-family: monospace; font-size: 12px; color: #fff; margin-bottom: 16px;">${Utils.escapeHtml(address)}</div>
                 <div style="display: flex; gap: 12px;">
                     <button data-action="copy-primary" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #FF6600, #8B5CF6); border: none; border-radius: 8px; color: #fff; font-weight: bold; cursor: pointer;">Copy Address</button>
                     <button data-action="close-primary" style="padding: 12px 24px; background: #333; border: none; border-radius: 8px; color: #fff; cursor: pointer;">Close</button>

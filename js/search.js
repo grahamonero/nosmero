@@ -3,6 +3,7 @@
 // Functions for user search, hashtag search, content discovery, and search results
 
 import { showNotification, escapeHtml, parseContent as utilsParseContent } from './utils.js';
+import { jsArg, imageUrl, imageUrlAttr } from './html-safe.js';
 import { SEARCH_RELAYS } from './relays.js';
 import { showSkeletonLoader, hideSkeletonLoader } from './ui/index.js';
 import {
@@ -231,16 +232,8 @@ export function loadRecentSearches() {
     }
     
     recentSearchList.innerHTML = recentSearches.map(query => {
-        // Escape for JavaScript string context (backslashes, quotes, and angle brackets)
-        const jsEscape = (str) => str
-            .replace(/\\/g, '\\\\')
-            .replace(/'/g, "\\'")
-            .replace(/"/g, '\\"')
-            .replace(/</g, '\\x3C')
-            .replace(/>/g, '\\x3E');
-
         return `
-        <button onclick="searchFromRecent('${jsEscape(query)}')"
+        <button onclick="searchFromRecent('${jsArg(query)}')"
                 style="background: #333; border: none; color: #fff; padding: 6px 12px; border-radius: 16px; cursor: pointer; font-size: 14px;">
             ${escapeHtml(query)}
         </button>
@@ -475,18 +468,10 @@ export async function showSearchSuggestions(query) {
 
     // Build suggestion items HTML
     const html = suggestions.map((item, index) => {
-        // Escape for JavaScript string context (backslashes, quotes, and angle brackets)
-        const jsEscape = (str) => str
-            .replace(/\\/g, '\\\\')
-            .replace(/'/g, "\\'")
-            .replace(/"/g, '\\"')
-            .replace(/</g, '\\x3C')
-            .replace(/>/g, '\\x3E');
-
         return `
         <div class="search-suggestion-item"
              style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 10px;"
-             onmousedown="selectSearchSuggestion('${jsEscape(item.text)}')"
+             onmousedown="selectSearchSuggestion('${jsArg(item.text)}')"
              onmouseover="this.style.background='#2a2a2a'"
              onmouseout="this.style.background='transparent'">
             <span style="color: #666; font-size: 14px;">${item.icon}</span>
@@ -1953,17 +1938,9 @@ export function initializeSearchResults(query) {
     const suggestion = getSpellingSuggestion(query);
     let suggestionHtml = '';
     if (suggestion) {
-        // Escape for JavaScript string context (backslashes, quotes, and angle brackets)
-        const jsEscape = (str) => str
-            .replace(/\\/g, '\\\\')
-            .replace(/'/g, "\\'")
-            .replace(/"/g, '\\"')
-            .replace(/</g, '\\x3C')
-            .replace(/>/g, '\\x3E');
-
         suggestionHtml = `<div id="spellingSuggestion" style="margin-bottom: 12px; padding: 10px; background: #1a1a2e; border: 1px solid #333; border-radius: 6px;">
                <span style="color: #888;">Did you mean: </span>
-               <a href="#" onclick="searchWithSuggestion('${jsEscape(suggestion.suggested)}'); return false;"
+               <a href="#" onclick="searchWithSuggestion('${jsArg(suggestion.suggested)}'); return false;"
                   style="color: #FF6600; font-weight: bold; text-decoration: underline; cursor: pointer;">
                    ${escapeHtml(suggestion.suggested)}
                </a>
@@ -2339,20 +2316,11 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
     const moneroAddress = getMoneroAddress(post);
     const lightningAddress = getLightningAddress(post);
 
-    // JavaScript string escaping for onclick attributes
-    // Escapes backslashes, single quotes, double quotes, and angle brackets to prevent XSS
-    const jsEscape = (str) => str
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'")
-        .replace(/"/g, '\\"')
-        .replace(/</g, '\\x3C')
-        .replace(/>/g, '\\x3E');
-
-    const jsEscapePubkey = jsEscape(post.pubkey);
-    const jsEscapeId = jsEscape(post.id);
-    const jsEscapeName = jsEscape(author.name);
-    const jsEscapeLightning = lightningAddress ? jsEscape(lightningAddress) : '';
-    const jsEscapeMonero = moneroAddress ? jsEscape(moneroAddress) : '';
+    const jsEscapePubkey = jsArg(post.pubkey);
+    const jsEscapeId = jsArg(post.id);
+    const jsEscapeName = jsArg(author.name);
+    const jsEscapeLightning = lightningAddress ? jsArg(lightningAddress) : '';
+    const jsEscapeMonero = moneroAddress ? jsArg(moneroAddress) : '';
 
     // Highlight search term in content
     let highlightedContent = parseContent(post.content);
@@ -2364,11 +2332,11 @@ function renderSingleResult(post, engagement = { reactions: 0, reposts: 0, repli
         <div class="post" data-note-id="${escapeHtml(post.id)}" style="background: #1a1a1a; border-bottom: 1px solid #333; padding: 16px; margin-bottom: 1px;">
             <div class="post-header" style="display: flex; align-items: center; margin-bottom: 12px;">
                 ${author.picture ?
-                    `<img class="avatar" src="${escapeHtml(author.picture)}" alt="${escapeHtml(author.name)}" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` :
+                    `<img class="avatar" src="${imageUrlAttr(author.picture)}" alt="${escapeHtml(author.name)}" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; cursor: pointer;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"/>` :
                     `<div class="avatar" style="width: 40px; height: 40px; border-radius: 20px; margin-right: 12px; background: #333; display: flex; align-items: center; justify-content: center; cursor: pointer;" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();">${author.name ? escapeHtml(author.name.charAt(0).toUpperCase()) : '?'}</div>`
                 }
                 <div class="post-info">
-                    <span class="username" data-pubkey="${post.pubkey}" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="cursor: pointer; color: #fff; font-weight: bold; margin-right: 8px;">${escapeHtml(author.name)}</span>
+                    <span class="username" data-pubkey="${escapeHtml(post.pubkey)}" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="cursor: pointer; color: #fff; font-weight: bold; margin-right: 8px;">${escapeHtml(author.name)}</span>
                     <span class="handle" onclick="viewUserProfilePage('${jsEscapePubkey}'); event.stopPropagation();" style="cursor: pointer; color: #999; margin-right: 8px;">@${escapeHtml(author.handle)}</span>
                     <span class="timestamp" style="color: #666;">${formatTime(post.created_at)}</span>
                 </div>
@@ -2505,7 +2473,7 @@ function getAuthorInfo(post) {
     const result = {
         name: profile.name || profile.display_name || 'Anonymous',
         handle: profile.nip05 || profile.name || 'anon',
-        picture: profile.picture || null
+        picture: imageUrl(profile.picture) || null
     };
     
     // Debug logging
@@ -2592,16 +2560,8 @@ export function loadSavedSearches() {
     }
     
     savedSearchList.innerHTML = savedSearches.map((search, index) => {
-        // Escape for JavaScript string context (backslashes, quotes, and angle brackets)
-        const jsEscape = (str) => str
-            .replace(/\\/g, '\\\\')
-            .replace(/'/g, "\\'")
-            .replace(/"/g, '\\"')
-            .replace(/</g, '\\x3C')
-            .replace(/>/g, '\\x3E');
-
-        const jsEscapedQuery = jsEscape(search.query);
-        const jsEscapedType = jsEscape(search.type);
+        const jsEscapedQuery = jsArg(search.query);
+        const jsEscapedType = jsArg(search.type);
         return `
             <div style="display: flex; align-items: center; gap: 4px; background: #333; border-radius: 16px; padding: 6px 12px;">
                 <button onclick="searchFromSaved('${jsEscapedQuery}', '${jsEscapedType}')"

@@ -5,6 +5,7 @@ import { showSkeletonLoader } from './skeleton.js';
 import { setPreviousPage, getPreviousPage } from './profile.js';
 import * as PaywallUI from '../paywall-ui.js';
 import { escapeHtml } from '../utils.js';
+import { isEventRef } from '../html-safe.js';
 
 // ==================== THREAD TREE BUILDING ====================
 
@@ -67,6 +68,11 @@ function buildThreadTree(posts, mainEventId) {
 // ==================== THREAD VIEW ====================
 
 export async function openThreadView(eventId, skipHistory = false) {
+    // Reached from links (#note:…, /thread/…) as well as clicks: a hex id or note1/nevent1 only
+    if (!isEventRef(eventId)) {
+        console.warn('openThreadView: ignoring an invalid note reference');
+        return;
+    }
     try {
         // Check if user is selecting text - if so, don't navigate to thread
         const selection = window.getSelection();

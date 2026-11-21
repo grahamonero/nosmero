@@ -4,6 +4,8 @@
  * (threads, profiles, settings, wallet, compose, zap flow)
  */
 
+import { escapeHtml, initialOfEscaped, imageUrlAttr, jsArg, httpUrl, imageUrl, isHex64, isEventRef } from './html-safe.js';
+
 // Debug flag for console logging
 const DEBUG = false;
 
@@ -642,7 +644,7 @@ const RightPanel = {
      */
     renderPostsBasic(posts) {
         this.defaultFeed.innerHTML = posts.map(post => `
-            <div class="post" data-id="${post.id}" onclick="openThreadView('${post.id}')" style="cursor: pointer;">
+            <div class="post" data-id="${escapeHtml(post.id)}" onclick="openThreadView('${jsArg(post.id)}')" style="cursor: pointer;">
                 <div class="post-content" style="padding: 12px;">
                     ${this.escapeHtml(post.content.substring(0, 200))}${post.content.length > 200 ? '...' : ''}
                 </div>
@@ -879,7 +881,7 @@ const RightPanel = {
                 return `
                     <div class="dashboard-relay-row">
                         <span class="relay-status ${statusClass}">${statusIcon}</span>
-                        <span class="relay-url">${displayUrl}</span>
+                        <span class="relay-url">${escapeHtml(displayUrl)}</span>
                         <span class="relay-latency">${latencyText}</span>
                     </div>
                 `;
@@ -1091,6 +1093,13 @@ const RightPanel = {
      * Open a specific view in the right panel
      */
     openView(view, data = null, updateUrl = true) {
+        // A profile or thread can be asked for by a link (?profile=, ?thread=, #profile:,
+        // #note:) as well as by a click, so the reference is checked here, not trusted.
+        if ((view === 'profile' && !isHex64(data)) || (view === 'thread' && !isEventRef(data))) {
+            console.warn('RightPanel: ignoring', view, 'request with an invalid reference');
+            return;
+        }
+
         if (!this.isVisible()) {
             // On mobile, fall back to modal/page behavior
             return this.fallbackToModal(view, data);
@@ -1398,7 +1407,8 @@ const RightPanel = {
      * `arg` is `{ url, filename? }`.
      */
     async renderPdf(arg) {
-        if (!arg || !arg.url) return;
+        // The URL can come from a data attribute on anything clickable in a note
+        if (!arg || !httpUrl(arg.url)) return;
         if (!this.content) {
             console.error('renderPdf: content element not found');
             return;
@@ -1428,7 +1438,7 @@ const RightPanel = {
             await PdfReader.mountPdfReader(section);
         } catch (e) {
             console.error('renderPdf failed:', e);
-            section.innerHTML = `<div style="padding: 20px; color: var(--danger);">Failed to load PDF: ${e?.message || e}</div>`;
+            section.innerHTML = `<div style="padding: 20px; color: var(--danger);">Failed to load PDF: ${escapeHtml(e?.message || e)}</div>`;
         }
     },
 
@@ -1712,7 +1722,7 @@ const RightPanel = {
                     const parentName = parentProfile?.name || parentProfile?.display_name || parentNode.post.pubkey.slice(0, 8) + '...';
                     nodeHtml += `<div style="margin-left: ${indent}px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
                         <div style="width: 2px; height: 12px; background: #444; margin-left: 12px;"></div>
-                        <span style="color: #666; font-size: 11px;">↑ Replying to <span style="color: #888;">@${parentName}</span></span>
+                        <span style="color: #666; font-size: 11px;">↑ Replying to <span style="color: #888;">@${escapeHtml(parentName)}</span></span>
                     </div>`;
                 }
 
@@ -1777,7 +1787,7 @@ const RightPanel = {
      * Render profile in panel
      */
     async renderProfile(pubkey) {
-        if (!pubkey) return;
+        if (!isHex64(pubkey)) return;
 
         // Ensure content element exists
         if (!this.content) {
@@ -1871,15 +1881,15 @@ const RightPanel = {
             section.innerHTML = `
                 <div style="padding: 16px;">
                     <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
-                        ${userProfile.picture ?
-                            `<img src="${avatarPlaceholder || userProfile.picture}" data-thumbhash-src="${userProfile.picture}" style="width: 64px; height: 64px; border-radius: 50%; object-fit: cover;${avatarPlaceholder ? ' filter: blur(4px); transition: filter 0.3s;' : ''}"
+                        ${imageUrl(userProfile.picture) ?
+                            `<img src="${imageUrlAttr(avatarPlaceholder || userProfile.picture)}" data-thumbhash-src="${imageUrlAttr(userProfile.picture)}" style="width: 64px; height: 64px; border-radius: 50%; object-fit: cover;${avatarPlaceholder ? ' filter: blur(4px); transition: filter 0.3s;' : ''}"
                                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)">
-                             <div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${safeName.charAt(0).toUpperCase()}</div>` :
-                            `<div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${safeName.charAt(0).toUpperCase()}</div>`
+                             <div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${initialOfEscaped(safeName)}</div>` :
+                            `<div style="width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #FF6600, #8B5CF6); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;">${initialOfEscaped(safeName)}</div>`
                         }
                         <div style="flex: 1; min-width: 0;">
-                            <h2 class="profile-name" data-pubkey="${pubkey}" style="color: var(--text-primary); font-size: 18px; margin: 0 0 4px 0; word-wrap: break-word;">${safeName}</h2>
-                            <p style="margin: 0; color: var(--text-muted); font-family: monospace; font-size: 12px; word-break: break-all;">${pubkey.substring(0, 8)}...${pubkey.substring(56)}</p>
+                            <h2 class="profile-name" data-pubkey="${escapeHtml(pubkey)}" style="color: var(--text-primary); font-size: 18px; margin: 0 0 4px 0; word-wrap: break-word;">${safeName}</h2>
+                            <p style="margin: 0; color: var(--text-muted); font-family: monospace; font-size: 12px; word-break: break-all;">${escapeHtml(pubkey.substring(0, 8))}...${escapeHtml(pubkey.substring(56))}</p>
                             ${safeNip05 ? `<div style="color: #10B981; font-size: 12px; margin-top: 4px;">✅ ${safeNip05}</div>` : ''}
                         </div>
                     </div>
@@ -1887,17 +1897,17 @@ const RightPanel = {
                     ${safeWebsiteHref ? `<div style="margin-bottom: 8px;"><a href="${safeWebsiteHref}" target="_blank" rel="noopener noreferrer" style="color: #FF6600; text-decoration: none; font-size: 13px;">🔗 ${safeWebsiteDisplay}</a></div>` : ''}
                     <div id="panelProfileMoneroAddress"></div>
                     <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
-                        <button id="panelFollowBtn_${pubkey}" onclick="toggleFollow('${pubkey}')" style="background: #6B73FF; border: none; border-radius: 6px; color: #fff; padding: 6px 12px; cursor: pointer; font-size: 13px; font-weight: bold;">
+                        <button id="panelFollowBtn_${escapeHtml(pubkey)}" onclick="toggleFollow('${jsArg(pubkey)}')" style="background: #6B73FF; border: none; border-radius: 6px; color: #fff; padding: 6px 12px; cursor: pointer; font-size: 13px; font-weight: bold;">
                             Follow
                         </button>
-                        <button onclick="copyUserNpub('${pubkey}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 6px; color: #8B5CF6; padding: 6px 12px; cursor: pointer; font-size: 13px;">📋 Copy npub</button>
-                        <button onclick="viewUserProfilePage('${pubkey}')" style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; border-radius: 6px; color: #FF6600; padding: 6px 12px; cursor: pointer; font-size: 13px;">View Full Profile</button>
+                        <button onclick="copyUserNpub('${jsArg(pubkey)}')" style="background: rgba(139, 92, 246, 0.2); border: 1px solid #8B5CF6; border-radius: 6px; color: #8B5CF6; padding: 6px 12px; cursor: pointer; font-size: 13px;">📋 Copy npub</button>
+                        <button onclick="viewUserProfilePage('${jsArg(pubkey)}')" style="background: rgba(255, 102, 0, 0.2); border: 1px solid #FF6600; border-radius: 6px; color: #FF6600; padding: 6px 12px; cursor: pointer; font-size: 13px;">View Full Profile</button>
                     </div>
                 </div>
                 <div class="panel-profile-tabs" style="border-top: 1px solid var(--border-color); padding: 0; background: rgba(0,0,0,0.2); display: flex; gap: 0;">
-                    <button class="panel-profile-tab active" data-profile-tab="notes" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid var(--accent-color, #f60); color: #ddd; font-size: 13px; cursor: pointer;">Notes</button>
-                    <button class="panel-profile-tab" data-profile-tab="articles" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #888; font-size: 13px; cursor: pointer;">Articles</button>
-                    <button class="panel-profile-tab" data-profile-tab="highlights" data-profile-pubkey="${pubkey}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #888; font-size: 13px; cursor: pointer;">Highlights</button>
+                    <button class="panel-profile-tab active" data-profile-tab="notes" data-profile-pubkey="${escapeHtml(pubkey)}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid var(--accent-color, #f60); color: #ddd; font-size: 13px; cursor: pointer;">Notes</button>
+                    <button class="panel-profile-tab" data-profile-tab="articles" data-profile-pubkey="${escapeHtml(pubkey)}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #888; font-size: 13px; cursor: pointer;">Articles</button>
+                    <button class="panel-profile-tab" data-profile-tab="highlights" data-profile-pubkey="${escapeHtml(pubkey)}" style="flex: 1; padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #888; font-size: 13px; cursor: pointer;">Highlights</button>
                 </div>
                 <div id="panelProfilePosts" style="padding: 0;">
                     <div class="loading" style="padding: 20px; text-align: center;">Loading notes...</div>
@@ -1984,7 +1994,7 @@ const RightPanel = {
                                 Copy
                             </button>
                         </div>
-                        <div style="color: #fff; font-family: monospace; font-size: 12px;">${shortAddress}</div>
+                        <div style="color: #fff; font-family: monospace; font-size: 12px;">${escapeHtml(shortAddress)}</div>
                     </div>
                 `;
 
@@ -2435,7 +2445,7 @@ const RightPanel = {
                 </div>
                 <div style="display: flex; gap: 8px;">
                     <button class="cancel-btn" onclick="RightPanel.close()">Cancel</button>
-                    <button class="send-btn" onclick="RightPanel.submitCompose(${replyTo ? `'${replyTo}'` : 'null'})">${replyTo ? 'Reply' : 'Publish'}</button>
+                    <button class="send-btn" onclick="RightPanel.submitCompose(${replyTo ? `'${jsArg(replyTo)}'` : 'null'})">${replyTo ? 'Reply' : 'Publish'}</button>
                 </div>
             </div>
         `;
@@ -2503,7 +2513,7 @@ const RightPanel = {
 
         preview.innerHTML = `
             <div class="media-info" style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: var(--card-bg); border-radius: 6px; margin-bottom: 8px;">
-                <span style="font-size: 13px;">${fileType} ${file.name} (${fileSize})</span>
+                <span style="font-size: 13px;">${fileType} ${escapeHtml(file.name)} (${fileSize})</span>
                 <button class="remove-media" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px;" title="Remove media">✕</button>
             </div>
             <div id="panelMediaContent" style="max-height: 200px; overflow: hidden; border-radius: 8px;"></div>
@@ -2521,9 +2531,9 @@ const RightPanel = {
             if (!content) return;
 
             if (file.type.startsWith('image/')) {
-                content.innerHTML = `<img src="${e.target.result}" alt="Preview" style="width: 100%; height: auto; display: block;">`;
+                content.innerHTML = `<img src="${escapeHtml(e.target.result)}" alt="Preview" style="width: 100%; height: auto; display: block;">`;
             } else if (file.type.startsWith('video/')) {
-                content.innerHTML = `<video controls style="width: 100%; max-height: 200px;"><source src="${e.target.result}" type="${file.type}"></video>`;
+                content.innerHTML = `<video controls style="width: 100%; max-height: 200px;"><source src="${escapeHtml(e.target.result)}" type="${escapeHtml(file.type)}"></video>`;
             }
         };
         reader.readAsDataURL(file);
@@ -2959,7 +2969,7 @@ const RightPanel = {
                     Tipping ${safeAuthorName}
                 </div>
                 <div style="font-family: monospace; font-size: 12px; word-break: break-all; padding: 12px; background: var(--card-bg); border-radius: 8px; color: var(--text-primary);">
-                    ${address}
+                    ${escapeHtml(address)}
                 </div>
             </div>
             <div class="qr-container" id="panelQrCode" style="margin: 20px auto;"></div>
@@ -3053,9 +3063,7 @@ const RightPanel = {
      * TODO: This duplicates escapeHtml from utils.js - consider importing shared utility
      */
     escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return escapeHtml(text);
     }
 };
 
@@ -3076,7 +3084,7 @@ window.openPdfReader = (arg) => RightPanel.openPdf(arg);
 // NIP-23 article composer entry. Wired to the hamburger menu "Write Article"
 // item and any future header / floating-action entry points.
 window.openArticleEditor = async ({ draftEvent = null } = {}) => {
-    const Editor = await import('./articles-editor.js?v=11');
+    const Editor = await import('./articles-editor.js?v=12');
     Editor.openComposer({ draftEvent });
 };
 

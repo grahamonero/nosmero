@@ -2,6 +2,12 @@
 import { profileCache, setProfileCache } from './state.js';
 import * as State from './state.js';
 import { stashMagnets, restoreMagnets, restoreMagnetsAsText } from './magnet.js';
+import { escapeHtml, unescapeHtml } from './html-safe.js';
+
+// Escaping lives in html-safe.js. Re-exported here because most modules reach it as
+// Utils.escapeHtml(), Utils.jsArg() and so on. Which helper goes where is explained there.
+export { escapeHtml, unescapeHtml, initialOfEscaped, jsArg, httpUrl, imageUrl, urlAttr, imageUrlAttr,
+         isHex64, hex64, isEventRef, decimalAmount } from './html-safe.js';
 
 // Show notification toast message
 export function showNotification(message, type = 'success') {
@@ -176,13 +182,6 @@ export function formatTime(timestamp) {
     return `${Math.floor(diff / 86400)}d`;
 }
 
-// Escape HTML to prevent XSS attacks in user-generated content
-export function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 // Validate URL scheme to only allow http:// and https://
 function isValidUrlScheme(url) {
     try {
@@ -191,6 +190,40 @@ function isValidUrlScheme(url) {
     } catch (e) {
         return false;
     }
+}
+
+// Clicks are wired up across the app by data-action attributes, and DOMPurify has to let
+// that attribute through because the parser's own mention, PDF and magnet markup uses it.
+// Left open, a note could carry a button for ANY action in the app: copy text to the
+// clipboard, open the wallet's transaction view, discard an article draft. So a note may
+// carry only the actions the parser itself produces, and each of those handlers checks
+// the value it is handed (a hex key, an http(s) address, a magnet: link).
+const NOTE_ACTIONS = new Set(['view-profile', 'open-pdf', 'copy-magnet', 'open-magnet']);
+
+function sanitizeNoteHtml(html, config) {
+    DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+        if (data.attrName === 'data-action' && !NOTE_ACTIONS.has(data.attrValue)) {
+            data.keepAttr = false;
+        }
+    });
+    try {
+        return DOMPurify.sanitize(html, config);
+    } finally {
+        DOMPurify.removeHook('uponSanitizeAttribute');
+    }
+}
+
+// Where a URL picked out of note text really ends. A double quote is never part of a URL
+// (it has to be written %22), so the link stops at the first one: "https://example.com"
+// and {"url":"https://example.com"} both link to https://example.com. An apostrophe can
+// be part of one (…/Schrodinger's_cat), so only trailing apostrophes are dropped.
+// Returns [url, rest]; `rest` is plain text that follows the link.
+function splitUrlTail(raw) {
+    const quote = raw.indexOf('"');
+    let url = quote === -1 ? raw : raw.slice(0, quote);
+    const trailing = /'+$/.exec(url);
+    if (trailing) url = url.slice(0, trailing.index);
+    return [url, raw.slice(url.length)];
 }
 
 // Parse content with markdown support
@@ -220,7 +253,7 @@ function parseMarkdownContent(content, skipEmbeddedNotes = false, magnets = []) 
 
     // Sanitize with DOMPurify - allow markdown tags
     if (typeof DOMPurify !== 'undefined') {
-        parsed = DOMPurify.sanitize(parsed, {
+        parsed = sanitizeNoteHtml(parsed, {
             ALLOWED_TAGS: ['a', 'img', 'video', 'source', 'span', 'div', 'br', 'p',
                 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'u',
                 'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'hr', 'table', 'thead',
@@ -275,7 +308,7 @@ function processNostrMention(mention, skipEmbeddedNotes = false) {
             const { nip19 } = window.NostrTools;
             const decoded = nip19.decode(content);
             const eventId = decoded.data;
-            return `<div class="embedded-note" data-noteid="${eventId}">Loading note...</div>`;
+            return `<div class="embedded-note" data-noteid="${escapeHtml(eventId)}">Loading note...</div>`;
         } catch (e) {
             return `<span class="mention">note:${escapeHtml(content.slice(0, 12))}...</span>`;
         }
@@ -322,10 +355,16 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     // First escape HTML to prevent XSS
     let parsed = escapeHtml(cleanContent);
 
+    // From here on `parsed` is escaped text: no raw < > " ' anywhere in it. The patterns
+    // below pick URLs and mentions out of that escaped text, so a match is escaped too;
+    // unescapeHtml() gives back the original for checks and lookups, and it is escaped
+    // exactly once again on the way out.
+
     // Clean up any remaining escaped img tag fragments
-    // e.g., '&lt;img src="' or '" alt="Image" /&gt;'
-    parsed = parsed.replace(/&lt;img[^&]*?src=["']?/gi, '');
-    parsed = parsed.replace(/["']?\s*alt=["'][^"']*["']\s*\/?&gt;/gi, '');
+    // e.g., '&lt;img src=&quot;' or '&quot; alt=&quot;Image&quot; /&gt;'
+    const Q = '(?:&quot;|&#39;)';
+    parsed = parsed.replace(new RegExp(`&lt;img(?:(?!&lt;|&gt;).)*?src=${Q}?`, 'gi'), '');
+    parsed = parsed.replace(new RegExp(`${Q}?\\s*alt=${Q}(?:(?!${Q}).)*${Q}\\s*\\/?&gt;`, 'gi'), '');
 
     // Handle line breaks and paragraphs
     // Convert double line breaks (or more) into paragraph breaks
@@ -346,26 +385,28 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     // Uses ThumbHash for progressive loading if available
     const imageRegex = /(https?:\/\/[^\s<]+\.(jpg|jpeg|png|gif|webp|svg)(\?[^\s<]*)?)/gi;
     parsed = parsed.replace(imageRegex, (match, url) => {
+        const [rawUrl, trail] = splitUrlTail(unescapeHtml(url));
         // Validate URL scheme
-        if (!isValidUrlScheme(url)) {
-            return escapeHtml(match);
+        if (!isValidUrlScheme(rawUrl)) {
+            return match;
         }
-        const escapedUrl = escapeHtml(url);
-        const placeholder = window.ThumbHashLoader?.getPlaceholder(url);
+        const escapedUrl = escapeHtml(rawUrl);
+        const placeholder = window.ThumbHashLoader?.getPlaceholder(rawUrl);
         if (placeholder) {
-            return stashMedia(`<img src="${escapeHtml(placeholder)}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`);
+            return stashMedia(`<img src="${escapeHtml(placeholder)}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`) + escapeHtml(trail);
         }
-        return stashMedia(`<img src="${escapedUrl}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`);
+        return stashMedia(`<img src="${escapedUrl}" data-thumbhash-src="${escapedUrl}" alt="Image" onload="window.ThumbHashLoader?.onImageLoad(this)" />`) + escapeHtml(trail);
     });
 
     // Parse video URLs (stop at whitespace or < to avoid grabbing <br> tags)
     const videoRegex = /(https?:\/\/[^\s<]+\.(mp4|webm|ogg)(\?[^\s<]*)?)/gi;
     parsed = parsed.replace(videoRegex, (match, url) => {
+        const [rawUrl, trail] = splitUrlTail(unescapeHtml(url));
         // Validate URL scheme
-        if (!isValidUrlScheme(url)) {
-            return escapeHtml(match);
+        if (!isValidUrlScheme(rawUrl)) {
+            return match;
         }
-        return stashMedia(`<video controls><source src="${escapeHtml(url)}" /></video>`);
+        return stashMedia(`<video controls><source src="${escapeHtml(rawUrl)}" /></video>`) + escapeHtml(trail);
     });
 
     // Parse PDF URLs hosted on the Nosmero IPFS gateway — these get the
@@ -376,9 +417,9 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     // `https://ipfs.nosmero.com/ipfs/<CID>#document.pdf`.
     const pdfRegex = /(https?:\/\/ipfs\.nosmero\.com\/[^\s<]+?\.pdf)(\?[^\s<]*)?/gi;
     parsed = parsed.replace(pdfRegex, (match, base, query) => {
-        const url = base + (query || '');
+        const [url, trail] = splitUrlTail(unescapeHtml(base + (query || '')));
         if (!isValidUrlScheme(url)) {
-            return escapeHtml(match);
+            return match;
         }
         // Filename preference: fragment ends in .pdf (e.g. `#mybook.pdf` from
         // the IPFS upload flow) → use the fragment. Otherwise last path seg.
@@ -401,7 +442,7 @@ export function parseContent(content, skipEmbeddedNotes = false) {
                 `</div>` +
                 `<span class="pdf-card-open" data-action="open-pdf" data-pdf-url="${escUrl}" data-pdf-filename="${escName}" role="button" tabindex="0">Open</span>` +
             `</div>`
-        );
+        ) + escapeHtml(trail);
     });
 
     // Parse nostr npub mentions - show as user names
@@ -432,23 +473,23 @@ export function parseContent(content, skipEmbeddedNotes = false) {
                 const { nip19 } = window.NostrTools;
                 const decoded = nip19.decode(noteId);
                 const eventId = decoded.data;
-                return `<div class="embedded-note" data-noteid="${eventId}">Loading note...</div>`;
+                return `<div class="embedded-note" data-noteid="${escapeHtml(eventId)}">Loading note...</div>`;
             } catch (e) {
-                return `<span class="mention">note:${noteId.slice(0, 12)}...</span>`;
+                return `<span class="mention">note:${escapeHtml(noteId.slice(0, 12))}...</span>`;
             }
         });
 
         // Parse nostr nevent mentions - embed them
         const neventRegex = /(nostr:)?(nevent1[a-z0-9]+)/gi;
         parsed = parsed.replace(neventRegex, (match, prefix, nevent) => {
-            return `<div class="embedded-note" data-nevent="${nevent}">Loading event...</div>`;
+            return `<div class="embedded-note" data-nevent="${escapeHtml(nevent)}">Loading event...</div>`;
         });
 
         // Parse nostr naddr mentions (NIP-19 addressable / parameterized
         // replaceable events: NIP-23 articles, livestreams, handlers, lists).
         const naddrRegex = /(nostr:)?(naddr1[a-z0-9]+)/gi;
         parsed = parsed.replace(naddrRegex, (match, prefix, naddr) => {
-            return `<div class="embedded-note" data-naddr="${naddr}">Loading event...</div>`;
+            return `<div class="embedded-note" data-naddr="${escapeHtml(naddr)}">Loading event...</div>`;
         });
     }
     
@@ -481,11 +522,12 @@ export function parseContent(content, skipEmbeddedNotes = false) {
     // links that open in the browser's native PDF viewer in a new tab.
     const urlRegex = /(?<!src=")(https?:\/\/[^\s<]+)(?!\.(jpg|jpeg|png|gif|webp|svg|mp4|webm|ogg))/gi;
     parsed = parsed.replace(urlRegex, (match, url) => {
+        const [rawUrl, trail] = splitUrlTail(unescapeHtml(match));
         // Validate URL scheme
-        if (!isValidUrlScheme(match)) {
-            return escapeHtml(match);
+        if (!isValidUrlScheme(rawUrl)) {
+            return match;
         }
-        return `<a href="${escapeHtml(match)}" target="_blank" rel="noopener">${escapeHtml(match)}</a>`;
+        return `<a href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener">${escapeHtml(rawUrl)}</a>${escapeHtml(trail)}`;
     });
 
     // Restore stashed media tags now that mention/URL processing is done
@@ -496,7 +538,7 @@ export function parseContent(content, skipEmbeddedNotes = false) {
 
     // Sanitize with DOMPurify to prevent XSS
     if (typeof DOMPurify !== 'undefined') {
-        parsed = DOMPurify.sanitize(parsed, {
+        parsed = sanitizeNoteHtml(parsed, {
             ALLOWED_TAGS: ['a', 'img', 'video', 'source', 'span', 'div', 'br', 'p'],
             ALLOWED_ATTR: ['href', 'src', 'target', 'rel', 'class', 'data-nevent', 'data-noteid', 'data-note1', 'data-naddr', 'alt', 'controls', 'data-pubkey', 'data-action', 'data-eventid'],
             ALLOW_DATA_ATTR: true,

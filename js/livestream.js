@@ -515,7 +515,7 @@ function isSafeImageUrl(url) {
  */
 export function renderStreamCard(stream, profile) {
     const isLive = stream.status === 'live';
-    const profilePic = profile?.picture || '/default-avatar.png';
+    const profilePic = Utils.imageUrl(profile?.picture) || '/default-avatar.png';
     const displayName = profile?.name || profile?.display_name || stream.pubkey.slice(0, 8) + '...';
     const viewerText = stream.viewerCount ? `${stream.viewerCount} viewers` : '';
 
@@ -756,7 +756,7 @@ function renderStreamInRightPanel(stream, profile) {
     rightPanel.classList.add('active');
 
     const displayName = profile?.name || profile?.display_name || stream.pubkey.slice(0, 8) + '...';
-    const profilePic = profile?.picture || '/default-avatar.png';
+    const profilePic = Utils.imageUrl(profile?.picture) || '/default-avatar.png';
     const isLive = stream.status === 'live';
 
     // Validate image URL before using it
@@ -850,7 +850,7 @@ function renderStreamInRightPanel(stream, profile) {
  */
 function renderStreamModal(stream, profile) {
     const displayName = profile?.name || profile?.display_name || stream.pubkey.slice(0, 8) + '...';
-    const profilePic = profile?.picture || '/default-avatar.png';
+    const profilePic = Utils.imageUrl(profile?.picture) || '/default-avatar.png';
     const isLive = stream.status === 'live';
 
     // Validate image URL before using it
@@ -959,7 +959,7 @@ function initializePlayer(streamUrl) {
         });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         // Native HLS support (Safari)
-        video.src = streamUrl;
+        video.src = Utils.httpUrl(streamUrl);
         video.play().catch(e => console.log('Autoplay prevented:', e));
     } else {
         video.parentElement.innerHTML = '<div class="stream-error">HLS playback not supported</div>';

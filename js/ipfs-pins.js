@@ -7,6 +7,7 @@
 // See /root/nosmero/docs/IPFS_PLAN.md for full design.
 
 import { signEvent } from './utils.js';
+import { escapeHtml, imageUrlAttr } from './html-safe.js';
 
 const QUOTA_CACHE_MS = 60_000;
 let _quotaCache = null;
@@ -286,11 +287,7 @@ export async function resolveOrThrow(content) {
 const _activeBlobUrls = new Set();
 
 function _escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return escapeHtml(s);
 }
 
 /**
@@ -311,12 +308,12 @@ export function previewizeRenderedHtml(html) {
     _activeBlobUrls.add(blobUrl);
     const filename = _escapeHtml(staged.filename);
     if (staged.kind === 'image') {
-      return `<figure class="ipfs-stage-preview"><img src="${blobUrl}" alt="${filename}"><figcaption>📦 will upload on post: ${filename}</figcaption></figure>`;
+      return `<figure class="ipfs-stage-preview"><img src="${escapeHtml(blobUrl)}" alt="${filename}"><figcaption>📦 will upload on post: ${filename}</figcaption></figure>`;
     }
     if (staged.kind === 'video') {
-      return `<figure class="ipfs-stage-preview"><video src="${blobUrl}" controls></video><figcaption>📦 will upload on post: ${filename}</figcaption></figure>`;
+      return `<figure class="ipfs-stage-preview"><video src="${escapeHtml(blobUrl)}" controls></video><figcaption>📦 will upload on post: ${filename}</figcaption></figure>`;
     }
-    return `<a href="${blobUrl}" download="${filename}" class="ipfs-stage-preview-file">📦 will upload on post: ${filename}</a>`;
+    return `<a href="${escapeHtml(blobUrl)}" download="${filename}" class="ipfs-stage-preview-file">📦 will upload on post: ${filename}</a>`;
   });
 }
 
@@ -420,19 +417,19 @@ function _renderPinRow(pin) {
   const isImage = (pin.mimeType || '').startsWith('image/');
   const icon = _pinIcon(pin.mimeType);
   const filename = pin.filename || pin.cid;
-  const safeFilename = String(filename).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const safeFilename = escapeHtml(filename);
   const safeCid = String(pin.cid).replace(/[^A-Za-z0-9]/g, '');
   const shortCid = pin.cid.length > 16 ? `${pin.cid.slice(0, 8)}…${pin.cid.slice(-6)}` : pin.cid;
   return `
     <div class="ipfs-pin-row" data-cid="${safeCid}" style="background: rgba(255,255,255,0.03); border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 12px; display: flex; gap: 12px; align-items: center;">
       ${isImage
-        ? `<img src="${pin.url}" alt="" loading="lazy" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px; flex: 0 0 auto; background: #222;">`
+        ? `<img src="${imageUrlAttr(pin.url)}" alt="" loading="lazy" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px; flex: 0 0 auto; background: #222;">`
         : `<div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex: 0 0 auto;">${icon}</div>`
       }
       <div style="flex: 1; min-width: 0;">
         <div style="color: #fff; font-size: 13px; font-weight: 500; word-break: break-all; line-height: 1.3;">${safeFilename}</div>
         <div style="color: #888; font-size: 11px; margin-top: 2px;">
-          ${_formatBytesShort(pin.bytes)} · ${_formatPinDate(pin.createdAt)} · ${shortCid}
+          ${_formatBytesShort(pin.bytes)} · ${_formatPinDate(pin.createdAt)} · ${escapeHtml(shortCid)}
         </div>
       </div>
       <div style="display: flex; gap: 6px; flex: 0 0 auto;">

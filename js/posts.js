@@ -200,7 +200,7 @@ export async function loadFeedWithSubscription() {
         console.error('Feed loading error:', error);
         feed.innerHTML = `
             <div class="error">
-                Failed to load feed: ${error.message}
+                Failed to load feed: ${Utils.escapeHtml(error.message)}
                 <button class="retry-btn" onclick="reloadHomeFeed()">Retry</button>
             </div>
         `;
@@ -361,7 +361,7 @@ export async function loadStreamingHomeFeed() {
         const homeFeedList = document.getElementById('homeFeedList');
         const errorHTML = `
             <div class="error" style="color: #ff6666; text-align: center; padding: 40px;">
-                Failed to load timeline: ${error.message}
+                Failed to load timeline: ${Utils.escapeHtml(error.message)}
                 <br><button onclick="reloadHomeFeed()" style="margin-top: 10px; background: #FF6600; border: none; color: #fff; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Retry</button>
             </div>
         `;
@@ -619,7 +619,7 @@ export async function loadTrendingFeed(forceRefresh = false) {
         if (homeFeedList) {
             homeFeedList.innerHTML = `
                 <div class="error">
-                    Failed to load trending feed: ${error.message}
+                    Failed to load trending feed: ${Utils.escapeHtml(error.message)}
                     <button class="retry-btn" onclick="NostrPosts.loadTrendingFeed()">Retry</button>
                 </div>
             `;
@@ -876,7 +876,7 @@ async function loadTrendingFeedForAnonymous(forceRefresh = false) {
         if (homeFeedList) {
             homeFeedList.innerHTML = `
                 <div class="error">
-                    Failed to load trending feed: ${error.message}
+                    Failed to load trending feed: ${Utils.escapeHtml(error.message)}
                     <button class="retry-btn" onclick="window.location.reload()">Retry</button>
                 </div>
             `;
@@ -977,7 +977,7 @@ async function renderCachedTrendingFeed(cache) {
                 📈 Viewing Trending Monero Notes
             </div>
             <div style="color: var(--text-secondary); font-size: 15px; margin-bottom: 8px;">
-                ${cache.notes_cached} notes from the past ${cache.time_window_days} days, ranked by interactions
+                ${Utils.escapeHtml(cache.notes_cached)} notes from the past ${Utils.escapeHtml(cache.time_window_days)} days, ranked by interactions
             </div>
             <div style="color: #888; font-size: 13px; margin-bottom: 12px;">
                 Last updated ${timeAgo} • <a href="#" onclick="refreshTrendingFeed(); return false;" style="color: #FF6600; text-decoration: underline; cursor: pointer;">Refresh now</a>
@@ -1101,7 +1101,7 @@ async function renderCachedTrendingFeedForLoggedIn(cache) {
     const infoHeader = `
         <div style="background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(255, 102, 0, 0.3); border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; text-align: center;">
             <div style="color: #FF6600; font-size: 16px; font-weight: bold; margin-bottom: 4px;">
-                ${cache.notes_cached} notes found over the past ${cache.time_window_days} days
+                ${Utils.escapeHtml(cache.notes_cached)} notes found over the past ${Utils.escapeHtml(cache.time_window_days)} days
             </div>
             <div style="color: #888; font-size: 14px; margin-bottom: 8px;">
                 Ranked by interactions (replies, reposts, and likes)
@@ -1408,7 +1408,7 @@ async function loadTrendingFeedForNewUser() {
         if (homeFeedList) {
             homeFeedList.innerHTML = `
                 <div class="error" style="text-align: center; padding: 40px; color: #ff6666;">
-                    Failed to load feed: ${error.message}
+                    Failed to load feed: ${Utils.escapeHtml(error.message)}
                     <br><button onclick="reloadHomeFeed()" style="margin-top: 10px; background: #FF6600; border: none; color: #fff; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Retry</button>
                 </div>
             `;
@@ -2223,7 +2223,7 @@ export async function loadWebOfTrustFeed() {
         feed.innerHTML = `
             <div style="text-align: center; color: #ff6666; padding: 40px;">
                 <p>Failed to load Web of Trust feed.</p>
-                <p style="font-size: 14px; margin-top: 10px;">${error.message}</p>
+                <p style="font-size: 14px; margin-top: 10px;">${Utils.escapeHtml(error.message)}</p>
             </div>
         `;
     }
@@ -2989,11 +2989,11 @@ async function updateParentPosts(parentPostsMap) {
         const parentAuthor = getAuthorInfo(parentPost);
 
         const parentHtml = `
-            <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px;">
+            <div class="parent-post" onclick="openThreadView('${Utils.jsArg(parentPost.id)}')" style="cursor: pointer; margin-bottom: 8px;">
                 <div class="post-header" style="font-size: 14px;">
                     ${parentAuthor.picture ?
-                        `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
-                        `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
+                        `<img class="avatar" src="${Utils.imageUrlAttr(parentAuthor.picture)}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
+                        `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 12px;">${Utils.initialOfEscaped(parentAuthor.name)}</div>`
                     }
                     <div class="post-info">
                         <span class="username" style="font-size: 14px;">${parentAuthor.name}</span>
@@ -3106,14 +3106,14 @@ export async function renderFeed(loadMore = false) {
             const parentAuthor = getAuthorInfo(parentPost);
 
             parentHtml = `
-                <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px;">
+                <div class="parent-post" onclick="openThreadView('${Utils.jsArg(parentPost.id)}')" style="cursor: pointer; margin-bottom: 8px;">
                     <div class="post-header" style="font-size: 14px;">
                         ${parentAuthor.picture ?
-                            `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
-                            `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
+                            `<img class="avatar" src="${Utils.imageUrlAttr(parentAuthor.picture)}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
+                            `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 12px;">${Utils.initialOfEscaped(parentAuthor.name)}</div>`
                         }
                         <div class="post-info">
-                            <span class="username" data-pubkey="${parentPost.pubkey}" style="font-size: 14px;">${parentAuthor.name}</span>
+                            <span class="username" data-pubkey="${Utils.escapeHtml(parentPost.pubkey)}" style="font-size: 14px;">${parentAuthor.name}</span>
                             <span class="timestamp" style="font-size: 12px;">${Utils.formatTime(parentPost.created_at)}</span>
                         </div>
                     </div>
@@ -3124,56 +3124,56 @@ export async function renderFeed(loadMore = false) {
         }
 
         return `
-            <div class="post" data-post-id="${post.id}" data-pubkey="${post.pubkey}">
+            <div class="post" data-post-id="${Utils.escapeHtml(post.id)}" data-pubkey="${Utils.escapeHtml(post.pubkey)}">
                 ${parentHtml}
                 <div ${parentHtml ? 'style="border-left: 2px solid var(--border-secondary); padding-left: 12px;"' : ''}>
                 <div class="post-header">
                     ${author.picture ?
-                        `<img class="avatar" src="${window.ThumbHashLoader?.getPlaceholder(author.picture) || author.picture}" data-thumbhash-src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;${window.ThumbHashLoader?.getPlaceholder(author.picture) ? ' filter: blur(4px); transition: filter 0.3s;' : ''}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)"/>` : ''
+                        `<img class="avatar" src="${Utils.imageUrlAttr(window.ThumbHashLoader?.getPlaceholder(author.picture) || author.picture)}" data-thumbhash-src="${Utils.escapeHtml(author.picture)}" alt="${author.name}" onclick="viewUserProfilePage('${Utils.jsArg(post.pubkey)}'); event.stopPropagation();" style="cursor: pointer;${window.ThumbHashLoader?.getPlaceholder(author.picture) ? ' filter: blur(4px); transition: filter 0.3s;' : ''}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)"/>` : ''
                     }
-                    <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
+                    <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${Utils.jsArg(post.pubkey)}'); event.stopPropagation();">${Utils.initialOfEscaped(author.name)}</div>
                     <div class="post-info">
-                        <span class="username" data-pubkey="${post.pubkey}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
-                        <span class="handle" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">@${author.handle}</span>
+                        <span class="username" data-pubkey="${Utils.escapeHtml(post.pubkey)}" onclick="viewUserProfilePage('${Utils.jsArg(post.pubkey)}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
+                        <span class="handle" onclick="viewUserProfilePage('${Utils.jsArg(post.pubkey)}'); event.stopPropagation();" style="cursor: pointer;">@${author.handle}</span>
                         <span class="timestamp">${Utils.formatTime(post.created_at)}</span>
                     </div>
                 </div>
                 ${isPaywalled ? `
-                <div class="paywall-locked" data-note-id="${post.id}">
+                <div class="paywall-locked" data-note-id="${Utils.escapeHtml(post.id)}">
                     <div class="paywall-preview">
                         <p>${Utils.escapeHtml(paywallMeta?.preview || 'Premium content')}</p>
                     </div>
                     <div class="paywall-overlay">
                         <div class="paywall-lock-icon">🔒</div>
-                        <div class="paywall-price">${paywallMeta?.priceXmr || '?'} XMR</div>
-                        <button class="paywall-unlock-btn" onclick="NostrPaywall.showUnlockModal('${post.id}'); event.stopPropagation();">
+                        <div class="paywall-price">${Utils.escapeHtml(paywallMeta?.priceXmr || '?')} XMR</div>
+                        <button class="paywall-unlock-btn" onclick="NostrPaywall.showUnlockModal('${Utils.jsArg(post.id)}'); event.stopPropagation();">
                             Unlock Content
                         </button>
                     </div>
                 </div>
                 ` : `
-                <div class="post-content" onclick="openThreadView('${post.id}')" style="cursor: pointer;">${Utils.parseContent(post.content)}</div>
+                <div class="post-content" onclick="openThreadView('${Utils.jsArg(post.id)}')" style="cursor: pointer;">${Utils.parseContent(post.content)}</div>
                 `}
                 <div class="post-actions" onclick="event.stopPropagation();">
-                    <button class="action-btn" onclick="NostrPosts.replyToPost('${post.id}')">
-                        💬 ${engagement.replies > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${engagement.replies}</span>` : ''}
+                    <button class="action-btn" onclick="NostrPosts.replyToPost('${Utils.jsArg(post.id)}')">
+                        💬 ${engagement.replies > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${Utils.escapeHtml(engagement.replies)}</span>` : ''}
                     </button>
-                    <button class="action-btn" onclick="NostrPosts.repostNote('${post.id}')">
-                        🔄 ${engagement.reposts > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${engagement.reposts}</span>` : ''}
+                    <button class="action-btn" onclick="NostrPosts.repostNote('${Utils.jsArg(post.id)}')">
+                        🔄 ${engagement.reposts > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${Utils.escapeHtml(engagement.reposts)}</span>` : ''}
                     </button>
-                    <button class="action-btn like-btn" id="like-${post.id}" onclick="NostrPosts.likePost('${post.id}')" data-post-id="${post.id}" title="Like this post">
-                        🤍 ${engagement.reactions > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${engagement.reactions}</span>` : ''}
+                    <button class="action-btn like-btn" id="like-${Utils.escapeHtml(post.id)}" onclick="NostrPosts.likePost('${Utils.jsArg(post.id)}')" data-post-id="${Utils.escapeHtml(post.id)}" title="Like this post">
+                        🤍 ${engagement.reactions > 0 ? `<span style="font-size: 12px; margin-left: 2px;">${Utils.escapeHtml(engagement.reactions)}</span>` : ''}
                     </button>
-                    <button class="action-btn" onclick="sharePost('${post.id}')">📤</button>
+                    <button class="action-btn" onclick="sharePost('${Utils.jsArg(post.id)}')">📤</button>
                     ${lightningAddress ?
-                        `<button class="action-btn btc-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-lightning-address="${lightningAddress.replace(/"/g, '&quot;')}" onclick="openLightningZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.lightningAddress)" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
+                        `<button class="action-btn btc-zap" data-post-id="${Utils.escapeHtml(post.id)}" data-author-name="${author.name}" data-lightning-address="${Utils.escapeHtml(lightningAddress)}" onclick="openLightningZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.lightningAddress)" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
                         '<button class="action-btn btc-zap" style="opacity: 0.3;" title="No Lightning address">⚡BTC</button>'
                     }
                     ${moneroAddress ?
-                        `<button class="action-btn xmr-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-monero-address="${moneroAddress.replace(/"/g, '&quot;')}" data-recipient-pubkey="${post.pubkey}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress, 'choose', null, this.dataset.recipientPubkey)" title="Tip with Monero">💰XMR</button>` :
+                        `<button class="action-btn xmr-zap" data-post-id="${Utils.escapeHtml(post.id)}" data-author-name="${author.name}" data-monero-address="${Utils.escapeHtml(moneroAddress)}" data-recipient-pubkey="${Utils.escapeHtml(post.pubkey)}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress, 'choose', null, this.dataset.recipientPubkey)" title="Tip with Monero">💰XMR</button>` :
                         '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">💰XMR</button>'
                     }
-                    <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>
+                    <button class="action-btn" onclick="showNoteMenu('${Utils.jsArg(post.id)}', event)">⋯</button>
                 </div>
                 ${(disclosedTips.disclosed.count > 0 || disclosedTips.verified.count > 0 || disclosedTips.mutedCount > 0) ? `
                 <div style="padding: 8px 12px; margin-top: 8px; background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border-radius: 8px; border: 1px solid rgba(255, 102, 0, 0.2);">
@@ -3198,7 +3198,7 @@ export async function renderFeed(loadMore = false) {
                     ` : ''}
                     ${(disclosedTips.disclosed.count > 0 || disclosedTips.verified.count > 0) ? `
                     <div style="margin-top: 6px;">
-                        <button onclick="showDisclosedTipDetails('${post.id}', event)" style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">View Details</button>
+                        <button onclick="showDisclosedTipDetails('${Utils.jsArg(post.id)}', event)" style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">View Details</button>
                     </div>
                     ` : ''}
                 </div>
@@ -3379,6 +3379,17 @@ export function isRepost(event) {
     return event.kind === 6;
 }
 
+// Shape of a signed Nostr event (NIP-01), before the signature itself is checked.
+function isWellFormedEvent(e) {
+    return !!e && typeof e === 'object'
+        && Utils.isHex64(e.id) && Utils.isHex64(e.pubkey)
+        && typeof e.sig === 'string' && /^[0-9a-f]{128}$/i.test(e.sig)
+        && Number.isSafeInteger(e.created_at) && Number.isSafeInteger(e.kind)
+        && typeof e.content === 'string'
+        && Array.isArray(e.tags)
+        && e.tags.every(t => Array.isArray(t) && t.every(v => typeof v === 'string'));
+}
+
 /**
  * Extract the original post from a kind 6 repost event
  * @param {Object} event - The kind 6 repost event
@@ -3392,10 +3403,14 @@ export function extractRepostOriginal(event) {
         if (event.content && event.content.trim().startsWith('{')) {
             const originalPost = JSON.parse(event.content);
 
-            // Validate required fields
-            if (originalPost.id && originalPost.pubkey && originalPost.content !== undefined) {
+            // The embedded note is whatever the reposter chose to put there, so it gets
+            // the checks a relay would have applied: the right shape, and a signature
+            // that proves the named author really wrote it. Without this a repost could
+            // put any text under anybody's name, or smuggle markup in through the id.
+            if (isWellFormedEvent(originalPost) && window.NostrTools.verifyEvent(originalPost)) {
                 return originalPost;
             }
+            console.warn('Ignoring repost with an invalid embedded note:', String(event.id).slice(0, 16));
         }
 
         // Fallback: empty content but has 'e' tag - can't display without fetching
@@ -3434,20 +3449,23 @@ export function normalizeEventForDisplay(event) {
 
 // Get author info from cache or fallback
 export function getAuthorInfo(post) {
+    // name and handle come back HTML-escaped (safe as text and inside a quoted attribute).
+    // picture comes back as a checked http(s) / data:image URL or null, NOT escaped, because
+    // it is also a lookup key for the ThumbHash cache: escape it where it is printed.
+    const pubkey = String(post.pubkey || '');
     const profile = State.profileCache[post.pubkey];
     if (profile) {
         return {
-            // Escape HTML to prevent XSS from malicious profile names
-            name: Utils.escapeHtml(profile.name || profile.display_name || post.pubkey.slice(0, 8)),
-            handle: Utils.escapeHtml(profile.nip05 || post.pubkey.slice(0, 16)),
-            picture: profile.picture || null
+            name: Utils.escapeHtml(profile.name || profile.display_name || pubkey.slice(0, 8)),
+            handle: Utils.escapeHtml(profile.nip05 || pubkey.slice(0, 16)),
+            picture: Utils.imageUrl(profile.picture) || null
         };
     }
 
     // Fallback if no profile cached
     return {
-        name: post.pubkey.slice(0, 8),
-        handle: post.pubkey.slice(0, 16),
+        name: Utils.escapeHtml(pubkey.slice(0, 8)),
+        handle: Utils.escapeHtml(pubkey.slice(0, 16)),
         picture: null
     };
 }
@@ -4280,7 +4298,7 @@ export async function fetchDisclosedTips(postsOrIds) {
 
                         // Extract tipper pubkey (P tag)
                         const tipperTag = event.tags.find(tag => tag[0] === 'P');
-                        const tipperPubkey = tipperTag ? tipperTag[1] : null;
+                        const tipperPubkey = tipperTag ? (Utils.hex64(tipperTag[1]) || null) : null;
 
                         // Check if tip is verified
                         const verifiedTag = event.tags.find(tag => tag[0] === 'verified');
@@ -4696,11 +4714,11 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                 const parentAuthor = getAuthorInfo(parentPost);
 
                 parentHtml = `
-                    <div class="parent-post" onclick="openThreadView('${parentPost.id}')" style="cursor: pointer; margin-bottom: 8px;">
+                    <div class="parent-post" onclick="openThreadView('${Utils.jsArg(parentPost.id)}')" style="cursor: pointer; margin-bottom: 8px;">
                         <div class="post-header" style="font-size: 14px;">
                             ${parentAuthor.picture ?
-                                `<img class="avatar" src="${parentAuthor.picture}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
-                                `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 12px;">${parentAuthor.name ? parentAuthor.name.charAt(0).toUpperCase() : '?'}</div>`
+                                `<img class="avatar" src="${Utils.imageUrlAttr(parentAuthor.picture)}" alt="${parentAuthor.name}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` :
+                                `<div class="avatar" style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 12px;">${Utils.initialOfEscaped(parentAuthor.name)}</div>`
                             }
                             <div class="post-info">
                                 <span class="username" style="font-size: 14px;">${parentAuthor.name}</span>
@@ -4721,7 +4739,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
         if (repostContext && repostContext.reposter) {
             const reposterInfo = getAuthorInfo({ pubkey: repostContext.reposter });
             repostHtml = `
-                <div class="repost-header" onclick="viewUserProfilePage('${repostContext.reposter}'); event.stopPropagation();">
+                <div class="repost-header" onclick="viewUserProfilePage('${Utils.jsArg(repostContext.reposter)}'); event.stopPropagation();">
                     <span class="repost-icon">🔄</span>
                     <span class="reposter-name">${reposterInfo.name}</span>
                     <span class="repost-label">reposted</span>
@@ -4731,56 +4749,56 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
 
         return `
             ${repostHtml}
-            <div class="post" data-post-id="${post.id}" data-pubkey="${post.pubkey}" ${repostContext ? `data-repost-id="${repostContext.repostId}"` : ''}>
+            <div class="post" data-post-id="${Utils.escapeHtml(post.id)}" data-pubkey="${Utils.escapeHtml(post.pubkey)}" ${repostContext ? `data-repost-id="${Utils.escapeHtml(repostContext.repostId)}"` : ''}>
                 <div class="reply-context">${parentHtml}</div>
                 <div ${parentHtml ? 'style="border-left: 2px solid #444; padding-left: 12px;"' : ''}>
                 <div class="post-header">
                     ${author.picture ?
-                        `<img class="avatar" src="${window.ThumbHashLoader?.getPlaceholder(author.picture) || author.picture}" data-thumbhash-src="${author.picture}" alt="${author.name}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;${window.ThumbHashLoader?.getPlaceholder(author.picture) ? ' filter: blur(4px); transition: filter 0.3s;' : ''}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)"/>` : ''
+                        `<img class="avatar" src="${Utils.imageUrlAttr(window.ThumbHashLoader?.getPlaceholder(author.picture) || author.picture)}" data-thumbhash-src="${Utils.escapeHtml(author.picture)}" alt="${author.name}" onclick="viewUserProfilePage('${Utils.jsArg(post.pubkey)}'); event.stopPropagation();" style="cursor: pointer;${window.ThumbHashLoader?.getPlaceholder(author.picture) ? ' filter: blur(4px); transition: filter 0.3s;' : ''}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" onload="window.ThumbHashLoader?.onImageLoad(this)"/>` : ''
                     }
-                    <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();">${author.name ? author.name.charAt(0).toUpperCase() : '?'}</div>
+                    <div class="avatar" ${author.picture ? 'style="display:none;"' : 'style="cursor: pointer;"'} onclick="viewUserProfilePage('${Utils.jsArg(post.pubkey)}'); event.stopPropagation();">${Utils.initialOfEscaped(author.name)}</div>
                     <div class="post-info">
-                        <span class="username" data-pubkey="${post.pubkey}" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
-                        <span class="handle" onclick="viewUserProfilePage('${post.pubkey}'); event.stopPropagation();" style="cursor: pointer;">@${author.handle}</span>
+                        <span class="username" data-pubkey="${Utils.escapeHtml(post.pubkey)}" onclick="viewUserProfilePage('${Utils.jsArg(post.pubkey)}'); event.stopPropagation();" style="cursor: pointer;">${author.name}</span>
+                        <span class="handle" onclick="viewUserProfilePage('${Utils.jsArg(post.pubkey)}'); event.stopPropagation();" style="cursor: pointer;">@${author.handle}</span>
                         <span class="timestamp">${Utils.formatTime(post.created_at)}</span>
                     </div>
                 </div>
                 ${isPaywalled ? `
-                <div class="paywall-locked" data-note-id="${post.id}">
+                <div class="paywall-locked" data-note-id="${Utils.escapeHtml(post.id)}">
                     <div class="paywall-preview">
                         <p>${Utils.escapeHtml(paywallMeta?.preview || 'Premium content')}</p>
                     </div>
                     <div class="paywall-overlay">
                         <div class="paywall-lock-icon">🔒</div>
-                        <div class="paywall-price">${paywallMeta?.priceXmr || '?'} XMR</div>
-                        <button class="paywall-unlock-btn" onclick="NostrPaywall.showUnlockModal('${post.id}'); event.stopPropagation();">
+                        <div class="paywall-price">${Utils.escapeHtml(paywallMeta?.priceXmr || '?')} XMR</div>
+                        <button class="paywall-unlock-btn" onclick="NostrPaywall.showUnlockModal('${Utils.jsArg(post.id)}'); event.stopPropagation();">
                             Unlock Content
                         </button>
                     </div>
                 </div>
                 ` : `
-                <div class="post-content" ${context !== 'thread' ? `onclick="openThreadView('${post.id}')" style="cursor: pointer;"` : ''}>${Utils.parseContent(post.content)}</div>
+                <div class="post-content" ${context !== 'thread' ? `onclick="openThreadView('${Utils.jsArg(post.id)}')" style="cursor: pointer;"` : ''}>${Utils.parseContent(post.content)}</div>
                 `}
                 <div class="post-actions" onclick="event.stopPropagation();">
-                    <button class="action-btn" onclick="NostrPosts.replyToPost('${post.id}')">
-                        💬 ${engagement.replies > 0 ? `<span class="reply-count" style="font-size: 12px; margin-left: 2px;">${engagement.replies}</span>` : '<span class="reply-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
+                    <button class="action-btn" onclick="NostrPosts.replyToPost('${Utils.jsArg(post.id)}')">
+                        💬 ${engagement.replies > 0 ? `<span class="reply-count" style="font-size: 12px; margin-left: 2px;">${Utils.escapeHtml(engagement.replies)}</span>` : '<span class="reply-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
                     </button>
-                    <button class="action-btn" onclick="NostrPosts.repostNote('${post.id}')">
-                        🔄 ${engagement.reposts > 0 ? `<span class="repost-count" style="font-size: 12px; margin-left: 2px;">${engagement.reposts}</span>` : '<span class="repost-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
+                    <button class="action-btn" onclick="NostrPosts.repostNote('${Utils.jsArg(post.id)}')">
+                        🔄 ${engagement.reposts > 0 ? `<span class="repost-count" style="font-size: 12px; margin-left: 2px;">${Utils.escapeHtml(engagement.reposts)}</span>` : '<span class="repost-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
                     </button>
-                    <button class="action-btn like-btn" id="like-${post.id}" onclick="NostrPosts.likePost('${post.id}')" data-post-id="${post.id}" title="Like this post">
-                        🤍 ${engagement.reactions > 0 ? `<span class="like-count" style="font-size: 12px; margin-left: 2px;">${engagement.reactions}</span>` : '<span class="like-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
+                    <button class="action-btn like-btn" id="like-${Utils.escapeHtml(post.id)}" onclick="NostrPosts.likePost('${Utils.jsArg(post.id)}')" data-post-id="${Utils.escapeHtml(post.id)}" title="Like this post">
+                        🤍 ${engagement.reactions > 0 ? `<span class="like-count" style="font-size: 12px; margin-left: 2px;">${Utils.escapeHtml(engagement.reactions)}</span>` : '<span class="like-count" style="font-size: 12px; margin-left: 2px; display: none;">0</span>'}
                     </button>
-                    <button class="action-btn" onclick="sharePost('${post.id}')">📤</button>
+                    <button class="action-btn" onclick="sharePost('${Utils.jsArg(post.id)}')">📤</button>
                     ${lightningAddress ?
-                        `<button class="action-btn btc-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-lightning-address="${lightningAddress.replace(/"/g, '&quot;')}" onclick="openLightningZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.lightningAddress)" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
+                        `<button class="action-btn btc-zap" data-post-id="${Utils.escapeHtml(post.id)}" data-author-name="${author.name}" data-lightning-address="${Utils.escapeHtml(lightningAddress)}" onclick="openLightningZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.lightningAddress)" title="Zap with Bitcoin Lightning">⚡BTC</button>` :
                         '<button class="action-btn btc-zap" style="opacity: 0.3;" title="No Lightning address">⚡BTC</button>'
                     }
                     ${moneroAddress ?
-                        `<button class="action-btn xmr-zap" data-post-id="${post.id}" data-author-name="${author.name.replace(/"/g, '&quot;')}" data-monero-address="${moneroAddress.replace(/"/g, '&quot;')}" data-recipient-pubkey="${post.pubkey}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress, 'choose', null, this.dataset.recipientPubkey)" title="Tip with Monero">💰XMR</button>` :
+                        `<button class="action-btn xmr-zap" data-post-id="${Utils.escapeHtml(post.id)}" data-author-name="${author.name}" data-monero-address="${Utils.escapeHtml(moneroAddress)}" data-recipient-pubkey="${Utils.escapeHtml(post.pubkey)}" onclick="openZapModal(this.dataset.postId, this.dataset.authorName, this.dataset.moneroAddress, 'choose', null, this.dataset.recipientPubkey)" title="Tip with Monero">💰XMR</button>` :
                         '<button class="action-btn xmr-zap" style="opacity: 0.3;" title="No Monero address">💰XMR</button>'
                     }
-                    <button class="action-btn" onclick="showNoteMenu('${post.id}', event)">⋯</button>
+                    <button class="action-btn" onclick="showNoteMenu('${Utils.jsArg(post.id)}', event)">⋯</button>
                 </div>
                 ${(disclosedTips.disclosed.count > 0 || disclosedTips.verified.count > 0 || disclosedTips.mutedCount > 0) ? `
                 <div style="padding: 8px 12px; margin-top: 8px; background: linear-gradient(135deg, rgba(255, 102, 0, 0.1), rgba(139, 92, 246, 0.1)); border-radius: 8px; border: 1px solid rgba(255, 102, 0, 0.2);">
@@ -4805,7 +4823,7 @@ export async function renderSinglePost(post, context = 'feed', engagementData = 
                     ` : ''}
                     ${(disclosedTips.disclosed.count > 0 || disclosedTips.verified.count > 0) ? `
                     <div style="margin-top: 6px;">
-                        <button onclick="showDisclosedTipDetails('${post.id}', event)" style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">View Details</button>
+                        <button onclick="showDisclosedTipDetails('${Utils.jsArg(post.id)}', event)" style="background: none; border: 1px solid #FF6600; color: #FF6600; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">View Details</button>
                     </div>
                     ` : ''}
                 </div>
@@ -5709,7 +5727,7 @@ export function initComposeToolbar() {
         if (!grid.dataset.wrapped) {
             grid.dataset.wrapped = 'true';
             const emojis = [...grid.textContent];
-            grid.innerHTML = emojis.map(e => `<span class="emoji">${e}</span>`).join('');
+            grid.innerHTML = emojis.map(e => `<span class="emoji">${Utils.escapeHtml(e)}</span>`).join('');
         }
     });
 
@@ -5751,7 +5769,7 @@ export function initComposeToolbar() {
                         if (!grid.dataset.wrapped) {
                             grid.dataset.wrapped = 'true';
                             const emojis = [...grid.textContent];
-                            grid.innerHTML = emojis.map(e => `<span class="emoji">${e}</span>`).join('');
+                            grid.innerHTML = emojis.map(e => `<span class="emoji">${Utils.escapeHtml(e)}</span>`).join('');
                         }
                     });
                 }
@@ -5983,10 +6001,10 @@ function showMediaPreview(file, context) {
     
     preview.innerHTML = `
         <div class="media-info">
-            <span>${fileType} ${file.name} (${fileSize})</span>
-            <button class="remove-media" onclick="removeMedia('${context}')">Remove</button>
+            <span>${fileType} ${Utils.escapeHtml(file.name)} (${fileSize})</span>
+            <button class="remove-media" onclick="removeMedia('${Utils.jsArg(context)}')">Remove</button>
         </div>
-        <div id="${context}MediaContent"></div>
+        <div id="${Utils.escapeHtml(context)}MediaContent"></div>
     `;
     
     // Create file preview
@@ -5994,9 +6012,9 @@ function showMediaPreview(file, context) {
     reader.onload = function(e) {
         const content = document.getElementById(`${context}MediaContent`);
         if (file.type.startsWith('image/')) {
-            content.innerHTML = `<img src="${e.target.result}" alt="Preview">`;
+            content.innerHTML = `<img src="${Utils.escapeHtml(e.target.result)}" alt="Preview">`;
         } else if (file.type.startsWith('video/')) {
-            content.innerHTML = `<video controls><source src="${e.target.result}" type="${file.type}"></video>`;
+            content.innerHTML = `<video controls><source src="${Utils.escapeHtml(e.target.result)}" type="${Utils.escapeHtml(file.type)}"></video>`;
         }
     };
     reader.readAsDataURL(file);
@@ -6275,7 +6293,7 @@ export async function showDisclosedTipDetails(postId, event) {
         let tipperHandle;
         if (tipperProfile.nip05) {
             tipperHandle = tipperProfile.nip05; // info@nosmero.com
-        } else if (tip.tipper) {
+        } else if (Utils.isHex64(tip.tipper)) {
             // Convert to npub and shorten: npub1abc...xyz
             const npub = window.NostrTools.nip19.npubEncode(tip.tipper);
             tipperHandle = npub.substring(0, 12) + '...' + npub.substring(npub.length - 4);
@@ -6296,8 +6314,8 @@ export async function showDisclosedTipDetails(postId, event) {
             <div style="padding: 12px; border-bottom: 1px solid var(--border-primary); background: ${bgColor}; ${isMuted ? 'opacity: 0.6;' : ''}">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap;">
-                        <div onclick="closeDisclosedTipsModal(); showUserProfile('${tip.tipper}');" style="font-weight: bold; color: ${textColor}; cursor: pointer; text-decoration: underline;">${tipperName}</div>
-                        <div style="font-size: 12px; color: #999;">${tipperHandle}</div>
+                        <div onclick="closeDisclosedTipsModal(); showUserProfile('${Utils.jsArg(tip.tipper)}');" style="font-weight: bold; color: ${textColor}; cursor: pointer; text-decoration: underline;">${Utils.escapeHtml(tipperName)}</div>
+                        <div style="font-size: 12px; color: #999;">${Utils.escapeHtml(tipperHandle)}</div>
                         ${tip.verified ? `
                             <span style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10B981; color: #10B981; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold;" title="Verified by Nosmero">
                                 ✓ VERIFIED
@@ -6308,15 +6326,15 @@ export async function showDisclosedTipDetails(postId, event) {
                                 MUTED BY AUTHOR
                             </span>
                         ` : (!isOwnTip ? `
-                            <button onclick="muteTipperFromDetails('${tip.tipper}', event)"
+                            <button onclick="muteTipperFromDetails('${Utils.jsArg(tip.tipper)}', event)"
                                     style="background: rgba(255, 68, 68, 0.2); border: 1px solid #ff4444; color: #ff4444; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold;">
                                 🔇 Mute
                             </button>
                         ` : '')}
                     </div>
-                    <div style="color: ${amountColor}; font-weight: bold; white-space: nowrap; margin-left: 12px;">${tip.amount} XMR</div>
+                    <div style="color: ${amountColor}; font-weight: bold; white-space: nowrap; margin-left: 12px;">${Utils.escapeHtml(tip.amount)} XMR</div>
                 </div>
-                ${tip.message ? `<div style="color: ${isMuted ? '#555' : '#ccc'}; font-size: 13px; margin-bottom: 4px;">${tip.message}</div>` : ''}
+                ${tip.message ? `<div style="color: ${isMuted ? '#555' : '#ccc'}; font-size: 13px; margin-bottom: 4px;">${Utils.escapeHtml(tip.message)}</div>` : ''}
                 ${tip.verified ? `
                     <div style="margin-top: 6px; font-size: 11px; color: #10B981; font-style: italic;">
                         🔐 Cryptographically verified
@@ -6572,7 +6590,7 @@ export async function fetchWidgetPersonalStats() {
                 const isVerified = verifiedTag && verifiedTag[1] === 'true';
 
                 const noteTag = event.tags.find(tag => tag[0] === 'e');
-                const noteId = noteTag ? noteTag[1] : null;
+                const noteId = noteTag ? (Utils.hex64(noteTag[1]) || null) : null;
 
                 const tipData = {
                     amount,
@@ -6642,10 +6660,10 @@ export async function fetchWidgetSentStats() {
                 count++;
 
                 const recipientTag = event.tags.find(tag => tag[0] === 'p');
-                const recipient = recipientTag ? recipientTag[1] : null;
+                const recipient = recipientTag ? (Utils.hex64(recipientTag[1]) || null) : null;
 
                 const noteTag = event.tags.find(tag => tag[0] === 'e');
-                const noteId = noteTag ? noteTag[1] : null;
+                const noteId = noteTag ? (Utils.hex64(noteTag[1]) || null) : null;
 
                 const verifiedTag = event.tags.find(tag => tag[0] === 'verified');
                 const isVerified = verifiedTag && verifiedTag[1] === 'true';
@@ -6755,14 +6773,14 @@ async function updateWidgetReceivedTips() {
         const badge = tip.verified ? '<span style="color: #10B981;">✓</span>' : '<span style="color: #FF6600;">💰</span>';
 
         // Make clickable if noteId exists
-        const clickHandler = tip.noteId ? `onclick="openThreadView('${tip.noteId}')"` : '';
+        const clickHandler = tip.noteId ? `onclick="openThreadView('${Utils.jsArg(tip.noteId)}')"` : '';
         const cursorStyle = tip.noteId ? 'cursor: pointer;' : '';
 
         return `
             <div ${clickHandler} style="padding: 6px 0; border-bottom: 1px solid rgba(255, 102, 0, 0.1); ${cursorStyle}">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div style="font-size: 11px; color: var(--text-secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                        ${badge} From: ${name}
+                        ${badge} From: ${Utils.escapeHtml(name)}
                     </div>
                     <div style="font-size: 11px; color: #FF6600; font-weight: bold; margin-left: 8px;">
                         ${tip.amount.toFixed(4)} XMR
@@ -6799,14 +6817,14 @@ async function updateWidgetSentTips() {
         const badge = tip.verified ? '<span style="color: #10B981;">✓</span>' : '<span style="color: #FF6600;">💰</span>';
 
         // Make clickable if noteId exists
-        const clickHandler = tip.noteId ? `onclick="openThreadView('${tip.noteId}')"` : '';
+        const clickHandler = tip.noteId ? `onclick="openThreadView('${Utils.jsArg(tip.noteId)}')"` : '';
         const cursorStyle = tip.noteId ? 'cursor: pointer;' : '';
 
         return `
             <div ${clickHandler} style="padding: 6px 0; border-bottom: 1px solid rgba(255, 102, 0, 0.1); ${cursorStyle}">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div style="font-size: 11px; color: var(--text-secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                        ${badge} To: ${name}
+                        ${badge} To: ${Utils.escapeHtml(name)}
                     </div>
                     <div style="font-size: 11px; color: #FF6600; font-weight: bold; margin-left: 8px;">
                         ${tip.amount.toFixed(4)} XMR
@@ -6879,9 +6897,9 @@ async function subscribeToDisclosedTipsWidget() {
                     // Update personal stats if logged in
                     if (State.publicKey) {
                         const recipientTag = event.tags.find(tag => tag[0] === 'p');
-                        const recipient = recipientTag ? recipientTag[1] : null;
+                        const recipient = recipientTag ? (Utils.hex64(recipientTag[1]) || null) : null;
                         const noteTag = event.tags.find(tag => tag[0] === 'e');
-                        const noteId = noteTag ? noteTag[1] : null;
+                        const noteId = noteTag ? (Utils.hex64(noteTag[1]) || null) : null;
 
                         // Update "You Received" if this tip is for the logged-in user
                         if (recipient === State.publicKey) {

@@ -7,6 +7,7 @@ import { encryptMessage, decryptMessage, wrapGiftMessage, wrapGiftMessageWithRec
 import * as State from './state.js';
 import * as Relays from './relays.js';
 import * as FollowerBaseline from './follower-baseline.js';
+import { imageUrlAttr, jsArg, hex64, decimalAmount, initialOfEscaped } from './html-safe.js';
 
 const {
     profileCache,
@@ -553,13 +554,13 @@ export function renderConversations() {
             `<div style="position: absolute; top: 12px; right: 12px; width: 10px; height: 10px; background: #FF6600; border-radius: 50%; box-shadow: 0 0 4px #FF6600;"></div>` : '';
 
         return `
-            <div class="conversation-item ${currentConversation === pubkey ? 'active' : ''}" onclick="selectConversation('${pubkey}', this)" style="position: relative;">
+            <div class="conversation-item ${currentConversation === pubkey ? 'active' : ''}" onclick="selectConversation('${jsArg(pubkey)}', this)" style="position: relative;">
                 ${unreadBadge}
                 <div class="conversation-time">${time}</div>
                 ${profile.picture ?
-                    `<img src="${profile.picture}" class="conversation-avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                     <div class="conversation-avatar-placeholder" style="display: none;">${displayName.charAt(0).toUpperCase()}</div>` :
-                    `<div class="conversation-avatar-placeholder">${displayName.charAt(0).toUpperCase()}</div>`
+                    `<img src="${imageUrlAttr(profile.picture)}" class="conversation-avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                     <div class="conversation-avatar-placeholder" style="display: none;">${initialOfEscaped(displayName)}</div>` :
+                    `<div class="conversation-avatar-placeholder">${initialOfEscaped(displayName)}</div>`
                 }
                 <div class="conversation-info">
                     <div class="conversation-name">${displayName}</div>
@@ -1289,8 +1290,10 @@ async function processNotifications(events) {
                 case 9736: // Monero Tip
                     const amountTag = event.tags?.find(tag => tag[0] === 'amount');
                     const senderTag = event.tags?.find(tag => tag[0] === 'P');
-                    const amount = amountTag ? amountTag[1] : '?';
-                    const senderPubkey = senderTag ? senderTag[1] : event.pubkey;
+                    // Tag values are free text chosen by whoever published the event:
+                    // keep the amount only if it is a number, the sender only if it is a pubkey.
+                    const amount = (amountTag && decimalAmount(amountTag[1])) || '?';
+                    const senderPubkey = (senderTag && hex64(senderTag[1])) || event.pubkey;
 
                     if (event.originalNoteId) {
                         originalNoteIds.add(event.originalNoteId);
@@ -1582,7 +1585,7 @@ export function renderNotifications(notificationItems = []) {
     if (sortedNotifications.length === 0) {
         notificationsList.innerHTML = `
             <div style="text-align: center; color: #666; padding: 40px;">
-                <p>No ${notificationType} notifications</p>
+                <p>No ${escapeHtml(notificationType)} notifications</p>
             </div>
         `;
         return;
@@ -1630,7 +1633,7 @@ export function renderNotifications(notificationItems = []) {
                 break;
             case 'tip':
                 actionIcon = '💰';
-                actionText = `sent you ${notification.content}`;
+                actionText = `sent you ${escapeHtml(notification.content)}`;
                 actionColor = '#FF6600';
                 break;
             case 'follow':
@@ -1653,13 +1656,13 @@ export function renderNotifications(notificationItems = []) {
         // Click handler - follows go to profile, others go to thread
         let onclickHandler = '';
         if (isFollow) {
-            onclickHandler = `viewUserProfilePage('${notification.pubkey}')`;
+            onclickHandler = `viewUserProfilePage('${jsArg(notification.pubkey)}')`;
         } else if (hasOriginalNote) {
-            onclickHandler = `openThreadView('${originalNote.id}')`;
+            onclickHandler = `openThreadView('${jsArg(originalNote.id)}')`;
         }
 
         return `
-            <div class="notification-item" data-type="${notification.type}" data-has-note="${hasOriginalNote}" style="background: var(--card-bg); border: 1px solid var(--border-primary); border-radius: 12px; padding: 16px; margin-bottom: 12px; ${onclickHandler ? 'cursor: pointer;' : ''}"
+            <div class="notification-item" data-type="${escapeHtml(notification.type)}" data-has-note="${hasOriginalNote}" style="background: var(--card-bg); border: 1px solid var(--border-primary); border-radius: 12px; padding: 16px; margin-bottom: 12px; ${onclickHandler ? 'cursor: pointer;' : ''}"
                  ${onclickHandler ? `onclick="${onclickHandler}"` : ''}
                  onmouseover="this.style.background='var(--card-hover)'"
                  onmouseout="this.style.background='var(--card-bg)'">
@@ -1667,9 +1670,9 @@ export function renderNotifications(notificationItems = []) {
                 <!-- User info row -->
                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: ${isFollow ? '0' : '12px'};">
                     <!-- Profile picture -->
-                    <img src="${profilePicture}" alt="${displayName}"
+                    <img src="${imageUrlAttr(profilePicture)}" alt="${displayName}"
                          style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; cursor: pointer; border: 2px solid ${actionColor};"
-                         onclick="event.stopPropagation(); viewUserProfilePage('${notification.pubkey}')"
+                         onclick="event.stopPropagation(); viewUserProfilePage('${jsArg(notification.pubkey)}')"
                          onerror="this.src='${defaultPicture}'">
 
                     <!-- Name and action -->
@@ -1677,7 +1680,7 @@ export function renderNotifications(notificationItems = []) {
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                             <span style="font-size: 18px;">${actionIcon}</span>
                             <span style="color: #FF6600; font-weight: bold; cursor: pointer;"
-                                  onclick="event.stopPropagation(); viewUserProfilePage('${notification.pubkey}')">${displayName}</span>
+                                  onclick="event.stopPropagation(); viewUserProfilePage('${jsArg(notification.pubkey)}')">${displayName}</span>
                             <span style="color: var(--text-secondary); font-size: 14px;">${actionText}</span>
                         </div>
                     </div>

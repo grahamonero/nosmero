@@ -698,14 +698,14 @@ export function renderLockedPreview(event, paywall) {
     const price = formatPrice(paywall.priceXmr);
 
     return `
-        <div class="paywall-locked" data-note-id="${event.id}">
+        <div class="paywall-locked" data-note-id="${Utils.escapeHtml(event.id)}">
             <div class="paywall-preview">
                 <p>${Utils.escapeHtml(preview)}</p>
             </div>
             <div class="paywall-overlay">
                 <div class="paywall-lock-icon">🔒</div>
                 <div class="paywall-price">${price}</div>
-                <button class="paywall-unlock-btn" onclick="NostrPaywall.showUnlockModal('${event.id}')">
+                <button class="paywall-unlock-btn" onclick="NostrPaywall.showUnlockModal('${Utils.jsArg(event.id)}')">
                     Unlock with XMR
                 </button>
             </div>

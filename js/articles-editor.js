@@ -116,7 +116,7 @@ function syncFormFromState() {
     if (bodyEl) bodyEl.value = editorState.body;
     if (coverPreview) {
         if (editorState.image) {
-            coverPreview.innerHTML = `<img src="${escapeAttr(editorState.image)}" alt="" />`;
+            coverPreview.innerHTML = `<img src="${Utils.imageUrlAttr(editorState.image)}" alt="" />`;
             coverPreview.classList.add('has-cover');
         } else {
             coverPreview.innerHTML = '<span class="article-cover-placeholder">Cover image</span>';
@@ -924,7 +924,7 @@ function renderPreview() {
     }
 
     const cover = editorState.image
-        ? `<div class="article-hero"><img src="${escapeAttr(editorState.image)}" alt="" /></div>`
+        ? `<div class="article-hero"><img src="${Utils.imageUrlAttr(editorState.image)}" alt="" /></div>`
         : '';
     const topicsHtml = editorState.topics.length
         ? `<div class="article-topics">${editorState.topics.map(t => `<span class="article-topic">#${escapeAttr(t)}</span>`).join('')}</div>`
