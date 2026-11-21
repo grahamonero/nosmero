@@ -16,6 +16,7 @@ import * as State from './state.js';
 import * as Utils from './utils.js';
 import * as Relays from './relays.js';
 import { fetchLatest, isNewerVersion, nextCreatedAt, preserveUnmanagedTags } from './replaceable.js';
+import * as ClientTag from './client-tag.js';
 
 // Event kinds Nosmero can render meaningfully when opened by id.
 // Keep this list conservative — only kinds with a real view in the app.
@@ -82,6 +83,17 @@ export async function publishHandlerAnnouncement() {
     // that was correctly skipped indistinguishable from one that is broken.
     if (!State.publicKey || !State.pool) {
         console.log('📣 NIP-89: not announcing — no logged-in account or no relay pool');
+        return;
+    }
+
+    // This record sits under the user's own key and says "this account uses Nosmero" just as
+    // the client tag on a note does, so the same choice governs both: an opt-out that removed
+    // the tag and kept publishing this would be an opt-out in name only. An unknown choice
+    // (settings not loaded on this device yet) counts as "no" here as well. The debounce
+    // marker stays unset, so an account that turns the setting back on announces at its next
+    // sign-in rather than a week later.
+    if (!ClientTag.isEnabled(State.publicKey)) {
+        console.log('📣 NIP-89: not announcing — the client label is off for this account (or its setting has not loaded yet)');
         return;
     }
 

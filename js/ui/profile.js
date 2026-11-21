@@ -180,7 +180,7 @@ async function fetchUserHighlights(pubkey) {
     if (!box) return;
     box.innerHTML = '<div style="padding: 24px; text-align: center; color: #888;">Loading highlights…</div>';
     try {
-        const Highlights = await import('../highlights.js?v=2');
+        const Highlights = await import('../highlights.js?v=3');
         const events = await Highlights.fetchHighlightsByAuthor(pubkey, { limit: 50 });
         if (!events.length) {
             box.innerHTML = '<div style="padding: 24px; color: #888; text-align: center;">No highlights yet.</div>';

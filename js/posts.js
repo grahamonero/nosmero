@@ -9,6 +9,7 @@ import * as PaywallUI from './paywall-ui.js';
 import * as FeedCache from './feed-cache.js';
 import * as IpfsPins from './ipfs-pins.js';
 import { isNewerVersion } from './replaceable.js';
+import { clientTags } from './client-tag.js';
 import { authorsNeedingLookup, filterPostsWithTips } from './monero-tips.js';
 
 // Constants for feed management
@@ -3556,7 +3557,7 @@ export async function likePost(postId) {
                     ['e', postId],
                     ['p', post.pubkey],
                     ['k', '1'],
-                    ['client', 'nosmero']
+                    ...clientTags(State.publicKey)
                 ],
                 content: '🤍'
             };
@@ -3738,7 +3739,7 @@ async function doQuickRepost() {
         tags: [
             ['e', currentRepostPost.id, relayHint, 'mention'],
             ['p', currentRepostPost.pubkey, relayHint],
-            ['client', 'nosmero']
+            ...clientTags(State.publicKey)
         ],
         content: JSON.stringify(currentRepostPost) // Include original event
     };
@@ -3785,7 +3786,7 @@ async function doQuoteRepost() {
             ['e', currentRepostPost.id, relayHint, 'mention'],
             ['p', currentRepostPost.pubkey, relayHint],
             ['q', currentRepostPost.id], // Quote tag
-            ['client', 'nosmero']
+            ...clientTags(State.publicKey)
         ],
         content: noteContent
     };
@@ -3916,7 +3917,7 @@ export async function sendReply(replyToId) {
             tags: [
                 ['e', replyToId, relayHint, 'reply'],
                 ['p', originalPost.pubkey, relayHint],
-                ['client', 'nosmero']
+                ...clientTags(State.publicKey)
             ],
             content: replyContent
         };
@@ -5176,7 +5177,7 @@ export async function sendPost() {
             kind: 1,
             created_at: Math.floor(Date.now() / 1000),
             tags: [
-                ['client', 'nosmero']
+                ...clientTags(State.publicKey)
             ],
             content: paywallData ? paywallData.publicContent : content
         };
@@ -6221,7 +6222,7 @@ export async function publishNewPost() {
             kind: 1,
             created_at: Math.floor(Date.now() / 1000),
             tags: [
-                ['client', 'nosmero']
+                ...clientTags(State.publicKey)
             ],
             content: postContent
         };
@@ -7027,7 +7028,7 @@ export async function sendReplyDirect(replyToId, content) {
             tags: [
                 ['e', replyToId, relayHint, 'reply'],
                 ['p', originalPost.pubkey, relayHint],
-                ['client', 'nosmero']
+                ...clientTags(State.publicKey)
             ],
             content: resolvedContent
         };
@@ -7105,7 +7106,7 @@ export async function sendPostDirect(content) {
         const eventTemplate = {
             kind: 1,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [['client', 'nosmero']],
+            tags: [...clientTags(State.publicKey)],
             content: resolvedContent
         };
 

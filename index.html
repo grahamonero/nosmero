@@ -9,7 +9,7 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.14"
             integrity="sha384-pOfkGbK3mm4nyDNvreNZgI7TJ8PQJT3CuFmi0HMrTVDE8KHeVlHS3AyJT4ucszCo"
             crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="/styles.css?v=1.9.4-compose-color">
+    <link rel="stylesheet" href="/styles.css?v=1.9.5-toggle-width">
     <link rel="stylesheet" href="/css/livestream.css?v=1.0.4">
 
 </head>
@@ -724,6 +724,23 @@
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="showOwnNotesInFollowing" checked onchange="toggleShowOwnNotesInFollowing(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>🏷️ Client Label</h3>
+
+                    <div class="trust-badges-toggle" style="margin-bottom: 16px;">
+                        <div>
+                            <div class="trust-badges-label">Label what I publish as written with Nosmero</div>
+                            <div class="trust-badges-description" style="color: #666; font-size: 11px; margin-top: 2px;">
+                                Adds a public "client" tag (NIP-89) to what you publish and lists Nosmero under your account as an app you use. Turn off to publish without it; notes you have already published keep theirs.
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="clientTagEnabled" onchange="toggleClientTag(this.checked)">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -1539,7 +1556,7 @@
     </dialog>
 
     <!-- Load the modular v2 application (UI modules consolidated into /js/ui/) -->
-    <script type="module" src="/js/app.js?v=3.2.0-html-safe"></script>
+    <script type="module" src="/js/app.js?v=3.2.1-client-tag"></script>
 
     <!-- XMR Wallet Modal (replaces wallet.html) -->
     <script type="module" src="/js/wallet-modal.js?v=1.0.4-html-safe"></script>

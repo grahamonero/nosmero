@@ -7,6 +7,7 @@ import * as Utils from './utils.js';
 import { fetchLatest, applyUpdates, nextCreatedAt, preserveUnmanagedTags, unreadNotice, isNewerVersion } from './replaceable.js';
 import { shouldReplaceCachedProfile } from './profile-cache-rules.js';
 import { findMoneroAddress, isMoneroAddress } from './monero-tips.js';
+import * as ClientTag from './client-tag.js';
 import * as Crypto from './crypto.js';
 import * as Relays from './relays.js';
 import * as Nip05 from './nip05.js';
@@ -134,6 +135,30 @@ async function saveAppData(dTag, updates, typeTag) {
     }
     console.log(`✅ NIP-78 ${dTag} saved (${Object.keys(updates).join(', ')})`);
     return signedEvent;
+}
+
+// Send the client-label choice made on this device to the account's settings record.
+//
+// One at a time, each run sending whatever is the latest choice when it starts: two saves in
+// flight would both read the same live record and publish competing versions of it, and the
+// older choice could be the one left standing. markSynced() only clears the "not synced yet"
+// mark for the choice that was actually sent, so a flip made mid-save stays queued.
+let clientTagSyncQueue = Promise.resolve();
+function syncClientTagChoice(account) {
+    const run = clientTagSyncQueue.catch(() => {}).then(async () => {
+        // saveAppData signs as whoever is signed in NOW; never write one account's choice
+        // into another's record.
+        if (State.publicKey !== account) return;
+        const pending = ClientTag.pendingSync(account);
+        if (!pending) return;
+        await saveFeedPrefsToRelays({
+            [ClientTag.PREF_FIELD]: pending.enabled,
+            [ClientTag.PREF_AT_FIELD]: pending.at,
+        });
+        ClientTag.markSynced(account, pending.at);
+    });
+    clientTagSyncQueue = run;
+    return run;
 }
 
 // ==================== APPLICATION INITIALIZATION ====================
@@ -628,12 +653,36 @@ async function startApplication() {
         // Load feed preferences from NIP-78 relay (cross-device sync of toggles
         // like "show own notes in Following"). Falls back to localStorage default.
         try {
-            const feedPrefs = await loadFeedPrefsFromRelays();
+            // Held across the await: the choice read below belongs to the account that
+            // asked for it, even if another one is signed in by the time it arrives.
+            const prefsOwner = State.publicKey;
+            const { data: feedPrefs, answered } = await loadFeedPrefsFromRelays();
             if (feedPrefs && typeof feedPrefs.show_own_notes_in_following === 'boolean') {
                 localStorage.setItem('show-own-notes-in-following', feedPrefs.show_own_notes_in_following.toString());
                 const chipBox = document.getElementById('followingChipShowOwn');
                 if (chipBox) chipBox.checked = feedPrefs.show_own_notes_in_following;
                 console.log('📰 Loaded feed prefs from relay:', feedPrefs);
+            }
+
+            // NIP-89 client label. Until this has run for an account on this device its
+            // choice is unknown and nothing it publishes is labelled — see client-tag.js.
+            const clientTag = ClientTag.reconcilePref(prefsOwner, {
+                answered,
+                value: feedPrefs ? feedPrefs[ClientTag.PREF_FIELD] : undefined,
+                at: feedPrefs ? feedPrefs[ClientTag.PREF_AT_FIELD] : undefined,
+            });
+            if (prefsOwner === State.publicKey) {
+                const clientTagBox = document.getElementById('clientTagEnabled');
+                if (clientTagBox) clientTagBox.checked = clientTag.enabled === true;
+            }
+            console.log('🏷️ Client label for this account:',
+                clientTag.enabled === null ? 'not known yet (settings relay did not answer) — publishing without it' : (clientTag.enabled ? 'on' : 'off'));
+            // A choice made on this device that never reached the settings record: send it
+            // again now that the relay is answering.
+            if (clientTag.resync) {
+                syncClientTagChoice(prefsOwner).catch(err => {
+                    console.warn('⚠️ Client label setting still not synced to NIP-78:', err?.message || err);
+                });
             }
         } catch (error) {
             console.error('❌ Error loading feed prefs from relay:', error);
@@ -1531,7 +1580,7 @@ async function loadOwnProfileHighlights() {
     if (!profileContent || !State.publicKey) return;
     profileContent.innerHTML = '<div style="text-align: center; color: #888; padding: 40px;">Loading highlights…</div>';
     try {
-        const Highlights = await import('./highlights.js?v=2');
+        const Highlights = await import('./highlights.js?v=3');
         const events = await Highlights.fetchHighlightsByAuthor(State.publicKey, { limit: 50 });
         if (!events.length) {
             profileContent.innerHTML = '<div style="text-align: center; color: #888; padding: 40px;">No highlights yet. Select text inside any article and click 📌 to highlight.</div>';
@@ -3176,34 +3225,42 @@ async function saveFeedPrefsToRelays(prefs) {
     await saveAppData('nosmero:feed-prefs', { ...prefs }, 'feed_preferences');
 }
 
+/**
+ * Read the account's feed preferences, and say whether the relay actually answered.
+ *
+ * @returns {Promise<{data: object|null, answered: boolean}>}
+ *   data      the saved preferences, or null when there are none to use
+ *   answered  true when the relay told us what it holds — including "nothing". False when
+ *             it stayed silent or returned something unreadable.
+ *
+ * The two used to come back as the same `null`, which was harmless while every preference
+ * here defaulted to "on" and nothing more. The client label cannot share that: "this
+ * account never chose" turns the label on, "we could not find out" must not (client-tag.js).
+ * A plain subscribe cannot tell them apart — nostr-tools reports end-of-stored-events on a
+ * timer whether or not the relay spoke — so this goes through fetchLatest, which can.
+ */
 async function loadFeedPrefsFromRelays() {
-    if (!State.publicKey) return null;
+    if (!State.publicKey) return { data: null, answered: false };
 
     try {
-        const filter = {
-            kinds: [30078],
-            authors: [State.publicKey],
-            "#d": ["nosmero:feed-prefs"],
-            limit: 1
-        };
-
-        const events = await new Promise((resolve) => {
-            const found = [];
-            const sub = State.pool.subscribeMany(NIP78_STORAGE_RELAYS, [filter], {
-                onevent(event) { found.push(event); },
-                oneose() { sub.close(); resolve(found); }
-            });
-            setTimeout(() => { sub.close(); resolve(found); }, 1500);
+        const live = await fetchLatest({
+            pool: State.pool,
+            relays: NIP78_STORAGE_RELAYS,
+            filter: { kinds: [30078], authors: [State.publicKey], '#d': ['nosmero:feed-prefs'], limit: 1 },
+            timeoutMs: 4000,
         });
 
-        if (events.length === 0) return null;
+        if (!live.event) return { data: null, answered: live.confirmed };
 
-        const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
-        const data = JSON.parse(latest.content);
-        return data;
+        const data = JSON.parse(live.event.content);
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            console.warn('⚠️ NIP-78 feed-prefs record has an unexpected shape, ignoring it');
+            return { data: null, answered: false };
+        }
+        return { data, answered: true };
     } catch (error) {
         console.error('❌ Error loading feed prefs from NIP-78 relay:', error);
-        return null;
+        return { data: null, answered: false };
     }
 }
 
@@ -4639,6 +4696,11 @@ async function populateSettingsForm() {
             console.log('📰 Show own notes in Following:', showOwnNotes);
         }
 
+        // Client label toggle: shows what is in effect right now, which is "off" while the
+        // account's choice is still unknown on this device.
+        const clientTagToggle = document.getElementById('clientTagEnabled');
+        if (clientTagToggle) clientTagToggle.checked = ClientTag.isEnabled(State.publicKey);
+
         // Populate relay lists
         await populateRelayLists();
 
@@ -4951,6 +5013,10 @@ async function saveSettings() {
                 console.error('❌ Error publishing feed prefs to relay:', error);
             }
         }
+        // The client label is deliberately NOT saved here. Its checkbox shows "off" while
+        // the account's choice is still unknown on this device, so writing the checkbox on
+        // every Save would publish that guess over a real choice made elsewhere. Only the
+        // toggle itself writes it (toggleClientTag) — a change the user actually made.
 
         // Publish NIP-65 relay list to network (kind 10002 — announced subset),
         // and sync the full relay state (incl. local-only relays + announced
@@ -5681,6 +5747,35 @@ window.toggleShowOwnNotesInFollowing = function(enabled, fromChip) {
     }
 };
 
+// Toggle the NIP-89 client label ("written with Nosmero") on what this account publishes.
+// Takes effect on this device at once; the settings record carries it to the others.
+window.toggleClientTag = function(enabled) {
+    const box = document.getElementById('clientTagEnabled');
+    const account = State.publicKey;
+    if (!account || !State.getPrivateKeyForSigning()) {
+        if (box) box.checked = false;
+        Utils.showNotification('Sign in to change this setting', 'error');
+        return;
+    }
+
+    if (!ClientTag.recordChoice(account, enabled)) {
+        // Nothing was stored, so nothing changed: put the switch back where it was.
+        if (box) box.checked = ClientTag.isEnabled(account);
+        Utils.showNotification('This browser would not store the setting, so it was not changed', 'error');
+        return;
+    }
+    console.log('🏷️ Client label:', enabled ? 'on' : 'off');
+
+    syncClientTagChoice(account).then(() => {
+        Utils.showNotification(enabled
+            ? 'Client label on — what you publish from now on says it was written with Nosmero'
+            : 'Client label off — what you publish from now on carries no client label', 'success');
+    }).catch(err => {
+        console.warn('⚠️ Failed to sync the client label setting to NIP-78:', err);
+        Utils.showNotification(`Client label turned ${enabled ? 'on' : 'off'} on this device. The settings relay could not be reached, so your other devices have not picked it up yet — Nosmero will try again the next time you sign in here.`, 'error');
+    });
+};
+
 // Legacy function - kept for backward compatibility
 window.toggleTrustBadges = function(enabled) {
     toggleWebOfTrust(enabled);
@@ -5720,6 +5815,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (showOwnNotesToggle) {
                     showOwnNotesToggle.checked = localStorage.getItem('show-own-notes-in-following') !== 'false';
                 }
+
+                // Sync the client label toggle to what is in effect for this account
+                const clientTagToggle = document.getElementById('clientTagEnabled');
+                if (clientTagToggle) clientTagToggle.checked = ClientTag.isEnabled(State.publicKey);
             }
         });
         observer.observe(settingsPage, { attributes: true, attributeFilter: ['style'] });

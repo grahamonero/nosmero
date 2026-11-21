@@ -28,6 +28,7 @@ import * as State from './state.js';
 import * as Utils from './utils.js';
 import * as Relays from './relays.js';
 import * as Lists from './lists.js';
+import { clientTags } from './client-tag.js';
 
 export const ARTICLE_KIND = 30023;
 export const DRAFT_KIND = 30024;
@@ -767,7 +768,7 @@ function buildArticleTags({ identifier, title, summary, image, topics, published
             if (clean) tags.push(['t', clean]);
         }
     }
-    tags.push(['client', 'nosmero']);
+    tags.push(...clientTags(State.publicKey));
     return tags;
 }
 

@@ -5,6 +5,7 @@
  */
 
 import { escapeHtml, initialOfEscaped, imageUrlAttr, jsArg, httpUrl, imageUrl, isHex64, isEventRef } from './html-safe.js';
+import { clientTags } from './client-tag.js';
 
 // Debug flag for console logging
 const DEBUG = false;
@@ -1363,7 +1364,7 @@ const RightPanel = {
             // decrypted body (otherwise we'd only mark the public preview).
             (async () => {
                 try {
-                    const Highlights = await import('./highlights.js?v=2');
+                    const Highlights = await import('./highlights.js?v=3');
                     Highlights.installSelectionToolbar(section, event);
                     setTimeout(() => {
                         Highlights.applyHeatmap(section, event).catch(e =>
@@ -2074,7 +2075,7 @@ const RightPanel = {
         if (!box) return;
         box.innerHTML = '<div class="loading" style="padding: 20px; text-align: center;">Loading highlights…</div>';
         try {
-            const Highlights = await import('./highlights.js?v=2');
+            const Highlights = await import('./highlights.js?v=3');
             const events = await Highlights.fetchHighlightsByAuthor(pubkey, { limit: 50 });
             if (!events.length) {
                 box.innerHTML = '<div style="padding: 20px; color: #888; text-align: center;">No highlights yet.</div>';
@@ -2884,7 +2885,7 @@ const RightPanel = {
             kind: 1,
             created_at: Math.floor(Date.now() / 1000),
             tags: [
-                ['client', 'nosmero'],
+                ...clientTags(window.NostrState?.publicKey),
                 ['monero_address', paymentAddress]
             ],
             content: paywallData.publicContent
@@ -3084,7 +3085,7 @@ window.openPdfReader = (arg) => RightPanel.openPdf(arg);
 // NIP-23 article composer entry. Wired to the hamburger menu "Write Article"
 // item and any future header / floating-action entry points.
 window.openArticleEditor = async ({ draftEvent = null } = {}) => {
-    const Editor = await import('./articles-editor.js?v=12');
+    const Editor = await import('./articles-editor.js?v=13');
     Editor.openComposer({ draftEvent });
 };
 

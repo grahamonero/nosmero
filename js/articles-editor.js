@@ -17,6 +17,7 @@ import * as Utils from './utils.js';
 import * as Articles from './articles.js';
 import * as Paywall from './paywall.js';
 import { signedFetch } from './signed-fetch.js';
+import { clientTags } from './client-tag.js';
 
 const AUTOSAVE_INTERVAL_MS = 30_000;
 const LOCALSTORAGE_KEY = 'nosmero:article-editor:scratch';
@@ -529,7 +530,7 @@ async function publishWithPaywall() {
     for (const t of editorState.topics) {
         if (t) articleTags.push(['t', t]);
     }
-    articleTags.push(['client', 'nosmero']);
+    articleTags.push(...clientTags(State.publicKey));
 
     const paywallTags = Paywall.createPaywallTags({
         priceXmr: paywallPayload.priceXmr,

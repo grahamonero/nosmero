@@ -12,6 +12,7 @@
 import * as State from './state.js';
 import * as Utils from './utils.js';
 import * as Relays from './relays.js';
+import { clientTags } from './client-tag.js';
 
 export const HIGHLIGHT_KIND = 9802;
 const ARTICLE_KIND = 30023;
@@ -57,7 +58,7 @@ export async function publishArticleHighlight({ articleEvent, selectedText, cont
     if (comment && comment.trim()) {
         tags.push(['comment', comment.trim()]);
     }
-    tags.push(['client', 'nosmero']);
+    tags.push(...clientTags(State.publicKey));
 
     const template = {
         kind: HIGHLIGHT_KIND,

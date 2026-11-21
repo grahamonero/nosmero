@@ -2932,6 +2932,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 16px;
     padding: 12px;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
@@ -2960,6 +2961,9 @@
     position: relative;
     width: 48px;
     height: 24px;
+    /* Never squeezed by the text beside it: at less than 48px the track becomes a circle
+       and the knob slides out of it. */
+    flex-shrink: 0;
 }
 
 .toggle-switch input {
