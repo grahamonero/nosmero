@@ -60,3 +60,7 @@ test-client-tags.html
 # Dev-only test harnesses — never deployed (deploy-to-production.sh excludes smoke-*.mjs)
 # and never committed: /var/www/html is both the public web root and the public repo.
 smoke-*.mjs
+
+# nginx-common's postinst recreates this welcome page in /var/www/html whenever it is
+# missing, so a package upgrade can bring it back. Never part of the app.
+index.nginx-debian.html
