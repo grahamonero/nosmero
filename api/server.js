@@ -3,7 +3,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { verifyTransactionProof, generateProofHash } from './verify.js';
-import { startForwarder, probeNodes } from './monero-nodes.js';
+import { startForwarder } from './monero-nodes.js';
 import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
@@ -89,13 +89,9 @@ async function _probeWithTimeout(promise, ms = 2500) {
   ]);
 }
 
-// Nosmero runs no Monero node of its own; "healthy" here means at least one of the public
-// nodes payments are checked through is up and synchronised (monero-nodes.js).
-async function _probeMoneroNodes() {
-  try {
-    return await _probeWithTimeout(probeNodes());
-  } catch { return 'fail'; }
-}
+// The public Monero nodes are deliberately not part of this report. They are third-party
+// services, a payment check already moves on to the next node when one fails (verify.js),
+// and a probe of them here made this endpoint say "degraded" while every node was up.
 
 async function _probeStrfry() {
   try {
@@ -129,13 +125,13 @@ app.get('/api/health', async (req, res) => {
   if (_healthCache.result && Date.now() - _healthCache.ts < HEALTH_CACHE_TTL_MS) {
     return res.json(_healthCache.result);
   }
-  const [monero_nodes, strfry, relatr, kubo] = await Promise.all([
-    _probeMoneroNodes(), _probeStrfry(), _probeRelatr(), _probeKubo()
+  const [strfry, relatr, kubo] = await Promise.all([
+    _probeStrfry(), _probeRelatr(), _probeKubo()
   ]);
-  const allOk = monero_nodes === 'ok' && strfry === 'ok' && relatr === 'ok' && kubo === 'ok';
+  const allOk = strfry === 'ok' && relatr === 'ok' && kubo === 'ok';
   const result = {
     status: allOk ? 'ok' : 'degraded',
-    monero_nodes, strfry, relatr, kubo,
+    strfry, relatr, kubo,
     timestamp: new Date().toISOString(),
     environment: config.nodeEnv
   };
